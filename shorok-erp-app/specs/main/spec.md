@@ -20,6 +20,15 @@ Replace branch and factory Excel sheets with a production-grade smart ERP system
 - Do not expose internal status keys such as `review.approved` or `prescription.broadcast`.
 - Do not use healthcare terms like `Patient` / `مريض`.
 
+## Clarifications
+
+### Session 2026-05-02
+- Q: When a user confirms a customer order but the branch's on-hand stock is insufficient, what should happen? → A: Hard-block: confirmation fails with a clear error; the user must adjust quantity or wait for a stock receipt before the order can be confirmed. Inventory must never go negative.
+- Q: Should the per-order sale price be editable, fixed by product variant, or controlled? → A: Editable per order within a configured % tolerance of the variant's default sale price; outside that tolerance the order requires Owner/Admin approval before it can be confirmed.
+- Q: Is the factory ledger tied to one supplier or multiple? → A: Multiple suppliers from day one; introduce a `Supplier` entity, reference `supplier_id` on each factory order/payment row, and compute the running balance per supplier.
+- Q: Should inventory support transfers between branches in MVP? → A: No. Inter-branch transfers are out of MVP scope; the `transfer_in` / `transfer_out` movement types are removed from the MVP enum.
+- Q: Will users sign in by email, phone, or both? → A: Phone number (with country code) is the primary login identifier; email is an optional profile field on the user record.
+
 ## Current Spreadsheet-Derived Scope
 Uploaded sheets indicate the MVP should cover:
 
@@ -68,7 +77,8 @@ Read-only access to assigned branches and reports.
 ### User
 - id
 - name
-- email/phone
+- phone (with country code; primary login identifier; unique)
+- email (optional profile field)
 - role
 - allowed_branches
 - status
@@ -87,6 +97,7 @@ Read-only access to assigned branches and reports.
 - size_meters_per_board, e.g. 4 or 5.25
 - default_sale_price_per_meter
 - default_purchase_price_per_meter
+- price_override_tolerance_percent (nullable; falls back to a system-wide default setting)
 - active
 
 ### Branch Inventory Balance
@@ -100,7 +111,7 @@ Read-only access to assigned branches and reports.
 - id
 - branch_id
 - product_variant_id
-- movement_type: receipt | sale | transfer_out | transfer_in | adjustment | count_correction
+- movement_type: receipt | sale | adjustment | count_correction
 - boards_quantity
 - meters_quantity
 - reference_type
@@ -118,11 +129,14 @@ Read-only access to assigned branches and reports.
 - boards_quantity
 - meters_quantity
 - sale_price_per_meter
+- price_override_status: within_tolerance | pending_approval | approved
+- price_approved_by_user_id (nullable)
+- price_approved_at (nullable)
 - required_amount
 - collected_amount
 - remaining_amount
 - receiver_name
-- status: draft | confirmed | partially_collected | paid | cancelled
+- status: draft | pending_price_approval | confirmed | partially_collected | paid | cancelled
 - created_by
 - created_at
 
@@ -136,8 +150,15 @@ Read-only access to assigned branches and reports.
 - created_by
 - created_at
 
+### Supplier
+- id
+- name_ar
+- name_en
+- active
+
 ### Factory Order / Supplier Ledger Entry
 - id
+- supplier_id
 - order_date
 - product_variant_id nullable for payment-only rows
 - boards_quantity
@@ -145,7 +166,7 @@ Read-only access to assigned branches and reports.
 - purchase_price_per_meter
 - total_amount
 - paid_amount
-- running_balance
+- running_balance (computed per supplier)
 - notes
 - created_by
 - created_at
@@ -166,7 +187,7 @@ Read-only access to assigned branches and reports.
 
 ### Sign in
 1. User opens app.
-2. User enters credentials.
+2. User enters phone number (with country code) and password.
 3. System signs user in and redirects to dashboard.
 4. UI uses neutral copy: `Sign in`, `تسجيل الدخول`.
 
@@ -177,9 +198,11 @@ Read-only access to assigned branches and reports.
 4. User selects product color/code and size.
 5. User enters boards quantity and price per meter.
 6. System calculates meters, required amount, remaining amount.
-7. User records collected amount and receiver.
-8. On confirmation, system records inventory outgoing movement.
-9. System writes audit log.
+7. System compares the entered price per meter against the product variant's default sale price; if the deviation is within the configured tolerance, `price_override_status` is set to `within_tolerance` and the order can proceed to confirmation. If the deviation exceeds tolerance, `price_override_status` is set to `pending_approval`, the order's `status` becomes `pending_price_approval`, and an Owner/Admin must approve the override before confirmation is allowed.
+8. User records collected amount and receiver.
+9. On confirmation, system validates that on-hand stock for the selected branch and product variant is greater than or equal to the requested boards quantity; if insufficient, confirmation is rejected with a clear error and no movement is recorded.
+10. On successful confirmation, system records inventory outgoing movement.
+11. System writes audit log, including any price-override approval action.
 
 ### Record collection
 1. User opens existing order.
@@ -212,10 +235,11 @@ Read-only access to assigned branches and reports.
 
 ### Record factory order or payment
 1. Accountant opens Factory Orders.
-2. User records purchase rows with product, quantity, price.
-3. User records payment-only rows where applicable.
-4. System calculates total and running balance.
-5. Audit log records changes.
+2. User selects the supplier.
+3. User records purchase rows with product, quantity, price.
+4. User records payment-only rows where applicable.
+5. System calculates total and the running balance for the selected supplier.
+6. Audit log records changes.
 
 ## Dashboard Requirements
 
@@ -225,7 +249,7 @@ Dashboard must show:
 - Remaining amount.
 - Current stock value/quantity summary.
 - Expenses by branch.
-- Factory/supplier balance.
+- Factory/supplier balance, broken out per supplier.
 - Low-stock alerts.
 
 ## Constraints
@@ -241,6 +265,7 @@ Dashboard must show:
 ### Data Integrity
 - Order financial totals must be derived from quantity, meters, and price.
 - Inventory balances must be derived or reconciled from movements.
+- Branch on-hand stock for any product variant must never be allowed to go negative; the system must reject any movement or order confirmation that would produce a negative balance.
 - Deleting confirmed financial/stock records is not allowed; use cancellation/reversal entries.
 - Audit logs must be append-only.
 
@@ -269,13 +294,10 @@ Dashboard must show:
 - Barcode scanning.
 - Offline-first mode.
 - Multi-company tenancy.
+- Inter-branch stock transfers.
 
 ## Non-Blocking Clarifications Needed
-1. Preferred stack: Next.js/NestJS/PostgreSQL, or another stack?
-2. Will users sign in by email, phone, or both?
-3. Should inventory support transfers between branches in MVP?
-4. Should prices be editable per order, or fixed by product variant?
-5. Is factory ledger tied to one supplier or multiple suppliers?
+1. Preferred stack: Next.js/NestJS/PostgreSQL, or another stack? *(deferred to `/speckit-plan`)*
 
 ## Acceptance Criteria
 - A branch user can create orders and see correct balances.
