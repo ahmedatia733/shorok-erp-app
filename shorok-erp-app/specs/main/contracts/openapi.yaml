@@ -1,0 +1,600 @@
+openapi: 3.1.0
+info:
+  title: Shorok ERP API
+  version: 0.1.0
+  description: |
+    REST API for Shorok ERP MVP. Authoritative contract; the human-readable
+    summary lives in `endpoints.md`. Every error body uses the shape:
+    `{ code, message_ar, message_en, details? }`.
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    BranchIdQuery:
+      name: branchId
+      in: query
+      schema: { type: string, format: uuid }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string, nullable: true }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+  schemas:
+    Decimal:
+      type: string
+      pattern: '^-?\d+(\.\d+)?$'
+      description: Decimal as string to preserve precision; e.g. "12.34"
+    Locale:
+      type: string
+      enum: [ar, en]
+    Role:
+      type: string
+      enum: [OWNER, BRANCH_MANAGER, WAREHOUSE, ACCOUNTANT, VIEWER]
+    OrderStatus:
+      type: string
+      enum: [DRAFT, PENDING_PRICE_APPROVAL, CONFIRMED, PARTIALLY_COLLECTED, PAID, CANCELLED]
+    PriceOverrideStatus:
+      type: string
+      enum: [WITHIN_TOLERANCE, PENDING_APPROVAL, APPROVED]
+    MovementType:
+      type: string
+      enum: [RECEIPT, SALE, ADJUSTMENT, COUNT_CORRECTION]
+    Error:
+      type: object
+      required: [code, message_ar, message_en]
+      properties:
+        code: { type: string }
+        message_ar: { type: string }
+        message_en: { type: string }
+        details: { type: object, additionalProperties: true }
+    Page:
+      type: object
+      required: [data, nextCursor]
+      properties:
+        data: { type: array, items: { type: object } }
+        nextCursor: { type: string, nullable: true }
+
+    User:
+      type: object
+      required: [id, name, phone, role, status, allowedBranches]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: string, description: "E.164" }
+        email: { type: string, nullable: true }
+        role: { $ref: '#/components/schemas/Role' }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        allowedBranches:
+          type: array
+          items: { type: string, format: uuid }
+
+    Branch:
+      type: object
+      required: [id, nameAr, nameEn, active]
+      properties:
+        id: { type: string, format: uuid }
+        nameAr: { type: string }
+        nameEn: { type: string }
+        location: { type: string, nullable: true }
+        active: { type: boolean }
+
+    ProductSku:
+      type: object
+      required: [id, code, colorNameAr, colorNameEn, category, active]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        colorNameAr: { type: string }
+        colorNameEn: { type: string }
+        category: { type: string, enum: [NORMAL, SPECIAL] }
+        active: { type: boolean }
+
+    ProductVariant:
+      type: object
+      required:
+        [id, skuId, sizeMetersPerBoard, defaultSalePricePerMeter,
+         defaultPurchasePricePerMeter, active]
+      properties:
+        id: { type: string, format: uuid }
+        skuId: { type: string, format: uuid }
+        sizeMetersPerBoard: { $ref: '#/components/schemas/Decimal' }
+        defaultSalePricePerMeter: { $ref: '#/components/schemas/Decimal' }
+        defaultPurchasePricePerMeter: { $ref: '#/components/schemas/Decimal' }
+        priceOverrideTolerancePercent:
+          oneOf:
+            - { $ref: '#/components/schemas/Decimal' }
+            - { type: 'null' }
+        active: { type: boolean }
+
+    Supplier:
+      type: object
+      required: [id, nameAr, nameEn, active]
+      properties:
+        id: { type: string, format: uuid }
+        nameAr: { type: string }
+        nameEn: { type: string }
+        active: { type: boolean }
+
+    BranchInventoryBalance:
+      type: object
+      required: [branchId, productVariantId, boardsOnHand, metersOnHand, lowStock]
+      properties:
+        branchId: { type: string, format: uuid }
+        productVariantId: { type: string, format: uuid }
+        boardsOnHand: { $ref: '#/components/schemas/Decimal' }
+        metersOnHand: { $ref: '#/components/schemas/Decimal' }
+        lastCountedAt: { type: string, format: date-time, nullable: true }
+        lowStock: { type: boolean }
+
+    InventoryMovement:
+      type: object
+      required:
+        [id, branchId, productVariantId, movementType,
+         boardsQuantity, metersQuantity, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        branchId: { type: string, format: uuid }
+        productVariantId: { type: string, format: uuid }
+        movementType: { $ref: '#/components/schemas/MovementType' }
+        boardsQuantity: { $ref: '#/components/schemas/Decimal' }
+        metersQuantity: { $ref: '#/components/schemas/Decimal' }
+        referenceType: { type: string, nullable: true }
+        referenceId: { type: string, format: uuid, nullable: true }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        humanReadableNote: { type: string, nullable: true }
+
+    CustomerOrder:
+      type: object
+      required:
+        [id, branchId, orderDate, customerName, productVariantId,
+         boardsQuantity, metersQuantity, salePricePerMeter,
+         priceOverrideStatus, requiredAmount, collectedAmount,
+         remainingAmount, status, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        branchId: { type: string, format: uuid }
+        orderDate: { type: string, format: date }
+        customerName: { type: string }
+        productVariantId: { type: string, format: uuid }
+        boardsQuantity: { $ref: '#/components/schemas/Decimal' }
+        metersQuantity: { $ref: '#/components/schemas/Decimal' }
+        salePricePerMeter: { $ref: '#/components/schemas/Decimal' }
+        priceOverrideStatus: { $ref: '#/components/schemas/PriceOverrideStatus' }
+        priceApprovedByUserId: { type: string, format: uuid, nullable: true }
+        priceApprovedAt: { type: string, format: date-time, nullable: true }
+        requiredAmount: { $ref: '#/components/schemas/Decimal' }
+        collectedAmount: { $ref: '#/components/schemas/Decimal' }
+        remainingAmount: { $ref: '#/components/schemas/Decimal' }
+        receiverName: { type: string, nullable: true }
+        status: { $ref: '#/components/schemas/OrderStatus' }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    OrderCollection:
+      type: object
+      required: [id, orderId, collectedAt, amount, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        orderId: { type: string, format: uuid }
+        collectedAt: { type: string, format: date-time }
+        amount: { $ref: '#/components/schemas/Decimal' }
+        paidToAccount: { type: string, nullable: true }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+
+    Expense:
+      type: object
+      required:
+        [id, branchId, expenseDate, description, amount,
+         paidFromAccount, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        branchId: { type: string, format: uuid }
+        expenseDate: { type: string, format: date }
+        description: { type: string }
+        amount: { $ref: '#/components/schemas/Decimal' }
+        paidFromAccount: { type: string }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+
+    FactoryLedgerEntry:
+      type: object
+      required:
+        [id, supplierId, orderDate, totalAmount, paidAmount,
+         runningBalance, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        supplierId: { type: string, format: uuid }
+        orderDate: { type: string, format: date }
+        productVariantId: { type: string, format: uuid, nullable: true }
+        boardsQuantity:
+          oneOf: [{ $ref: '#/components/schemas/Decimal' }, { type: 'null' }]
+        metersQuantity:
+          oneOf: [{ $ref: '#/components/schemas/Decimal' }, { type: 'null' }]
+        purchasePricePerMeter:
+          oneOf: [{ $ref: '#/components/schemas/Decimal' }, { type: 'null' }]
+        totalAmount: { $ref: '#/components/schemas/Decimal' }
+        paidAmount: { $ref: '#/components/schemas/Decimal' }
+        runningBalance: { $ref: '#/components/schemas/Decimal' }
+        notes: { type: string, nullable: true }
+        createdBy: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+
+    AuditLog:
+      type: object
+      required:
+        [id, action, entityType, humanReadableSummaryAr,
+         humanReadableSummaryEn, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        actorId: { type: string, format: uuid, nullable: true }
+        action:
+          type: string
+          enum: [CREATE, UPDATE, CONFIRM, CANCEL, APPROVE, COLLECT, IMPORT, LOGIN, LOGOUT]
+        entityType: { type: string }
+        entityId: { type: string, format: uuid, nullable: true }
+        beforeSnapshot: { type: object, additionalProperties: true, nullable: true }
+        afterSnapshot: { type: object, additionalProperties: true, nullable: true }
+        humanReadableSummaryAr: { type: string }
+        humanReadableSummaryEn: { type: string }
+        createdAt: { type: string, format: date-time }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials/token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but not authorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Business rule conflict (e.g. insufficient_stock)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Phone + password login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, password]
+              properties:
+                phone: { type: string, description: "E.164 or local EG; server normalizes" }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: OK; refresh token set as httpOnly cookie
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken, user]
+                properties:
+                  accessToken: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/refresh:
+    post:
+      security: []
+      summary: Rotate refresh token; return new access token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accessToken]
+                properties:
+                  accessToken: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      summary: Revoke the current refresh token
+      responses:
+        '204': { description: Logged out }
+
+  /auth/me:
+    get:
+      summary: Current user
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /inventory/balances:
+    get:
+      summary: List branch inventory balances
+      parameters:
+        - $ref: '#/components/parameters/BranchIdQuery'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Page'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/BranchInventoryBalance' }
+
+  /inventory/receipts:
+    post:
+      summary: Record a stock receipt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [branchId, productVariantId, boardsQuantity]
+              properties:
+                branchId: { type: string, format: uuid }
+                productVariantId: { type: string, format: uuid }
+                boardsQuantity: { $ref: '#/components/schemas/Decimal' }
+                note: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventoryMovement' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /orders:
+    post:
+      summary: Create a customer order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                [branchId, orderDate, customerName, productVariantId,
+                 boardsQuantity, salePricePerMeter]
+              properties:
+                branchId: { type: string, format: uuid }
+                orderDate: { type: string, format: date }
+                customerName: { type: string }
+                productVariantId: { type: string, format: uuid }
+                boardsQuantity: { $ref: '#/components/schemas/Decimal' }
+                salePricePerMeter: { $ref: '#/components/schemas/Decimal' }
+                receiverName: { type: string }
+                initialCollectionAmount: { $ref: '#/components/schemas/Decimal' }
+      responses:
+        '201':
+          description: Created (status DRAFT or PENDING_PRICE_APPROVAL)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerOrder' }
+
+  /orders/{id}/confirm:
+    post:
+      summary: Confirm an order (validates stock + price approval)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerOrder' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /orders/{id}/price-approval:
+    post:
+      summary: Owner/Admin approves an order's out-of-tolerance price
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerOrder' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /orders/{id}/collections:
+    post:
+      summary: Record a collection on an order
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount]
+              properties:
+                amount: { $ref: '#/components/schemas/Decimal' }
+                paidToAccount: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderCollection' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /factory-ledger/entries:
+    post:
+      summary: Record a factory purchase row (per supplier)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [supplierId, orderDate]
+              properties:
+                supplierId: { type: string, format: uuid }
+                orderDate: { type: string, format: date }
+                productVariantId: { type: string, format: uuid }
+                boardsQuantity: { $ref: '#/components/schemas/Decimal' }
+                purchasePricePerMeter: { $ref: '#/components/schemas/Decimal' }
+                paidAmount: { $ref: '#/components/schemas/Decimal' }
+                notes: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FactoryLedgerEntry' }
+
+  /factory-ledger/payments:
+    post:
+      summary: Record a payment-only row against a supplier
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [supplierId, orderDate, paidAmount]
+              properties:
+                supplierId: { type: string, format: uuid }
+                orderDate: { type: string, format: date }
+                paidAmount: { $ref: '#/components/schemas/Decimal' }
+                notes: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FactoryLedgerEntry' }
+
+  /reports/dashboard:
+    get:
+      summary: Dashboard aggregates
+      parameters:
+        - $ref: '#/components/parameters/BranchIdQuery'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalSales: { $ref: '#/components/schemas/Decimal' }
+                  collected: { $ref: '#/components/schemas/Decimal' }
+                  remaining: { $ref: '#/components/schemas/Decimal' }
+                  expenses: { $ref: '#/components/schemas/Decimal' }
+                  stockSummary:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        productVariantId: { type: string, format: uuid }
+                        boardsOnHand: { $ref: '#/components/schemas/Decimal' }
+                        metersOnHand: { $ref: '#/components/schemas/Decimal' }
+                  factoryBalances:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        supplierId: { type: string, format: uuid }
+                        balance: { $ref: '#/components/schemas/Decimal' }
+                  lowStock:
+                    type: array
+                    items: { $ref: '#/components/schemas/BranchInventoryBalance' }
+
+  /import/dry-run:
+    post:
+      summary: Parse and validate a workbook without writing
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, kind]
+              properties:
+                file: { type: string, format: binary }
+                kind:
+                  type: string
+                  enum: [orders, inventory, expenses, factory_ledger]
+                branchId: { type: string, format: uuid }
+                supplierId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Dry-run report
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessionId, rowsParsed, rowsValid, validationErrors]
+                properties:
+                  sessionId: { type: string, format: uuid }
+                  rowsParsed: { type: integer }
+                  rowsValid: { type: integer }
+                  validationErrors:
+                    type: array
+                    items: { $ref: '#/components/schemas/Error' }
+
+  /import/commit:
+    post:
+      summary: Commit a previously dry-run import
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [importSessionId]
+              properties:
+                importSessionId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Imported
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rowsWritten: { type: integer }
+        '409': { $ref: '#/components/responses/Conflict' }
