@@ -12,6 +12,11 @@ import { IdempotencyMiddleware } from "./common/middleware/idempotency.middlewar
 import { RequestIdMiddleware } from "./common/middleware/request-id.middleware";
 import { AuditModule } from "./modules/audit/audit.module";
 import { AuthModule } from "./modules/auth/auth.module";
+import { BranchesModule } from "./modules/branches/branches.module";
+import { ProductsModule } from "./modules/products/products.module";
+import { SuppliersModule } from "./modules/suppliers/suppliers.module";
+import { SystemSettingsModule } from "./modules/system-settings/system-settings.module";
+import { UsersModule } from "./modules/users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
@@ -45,6 +50,11 @@ import { PrismaModule } from "./prisma/prisma.module";
     PrismaModule,
     AuditModule,
     AuthModule,
+    BranchesModule,
+    UsersModule,
+    ProductsModule,
+    SuppliersModule,
+    SystemSettingsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ApiErrorFilter },
