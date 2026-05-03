@@ -15,6 +15,11 @@ import { BranchPicker } from "../../../../../../components/features/inventory/br
 import { ApiClientError } from "../../../../../../lib/api-client";
 import { listBalances, postCount, type BalanceRow } from "../../../../../../lib/inventory-client";
 import { formatNumber } from "../../../../../../lib/format";
+import {
+  decimalSub,
+  isNegativeDecimalString,
+  isZeroDecimalString,
+} from "../../../../../../lib/decimal-string";
 
 interface CountedRow extends BalanceRow {
   countedBoards: string;
@@ -57,22 +62,30 @@ export default function CountsNewPage() {
     };
   }, [branchId, locale]);
 
-  function variance(row: CountedRow): number {
-    const counted = Number(row.countedBoards || "0");
-    const expected = Number(row.boardsOnHand);
-    return counted - expected;
+  /**
+   * counted − expected as a decimal string. Returns null for malformed
+   * input so the cell can show "—" instead of NaN. Done in decimal-string
+   * land (no float) so the previewed variance always matches what the
+   * server engine will compute.
+   */
+  function varianceString(row: CountedRow): string | null {
+    if (!row.countedBoards || row.countedBoards.trim() === "") return null;
+    return decimalSub(row.countedBoards, row.boardsOnHand);
   }
 
   function setCounted(idx: number, value: string) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, countedBoards: value } : r)));
   }
 
-  const totalVariance = rows.reduce((sum, r) => sum + Math.abs(variance(r)), 0);
+  const hasAnyVariance = rows.some((r) => {
+    const v = varianceString(r);
+    return v !== null && !isZeroDecimalString(v);
+  });
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!branchId || rows.length === 0) return;
-    if (totalVariance > 0 && !window.confirm(t("varianceWarning"))) return;
+    if (hasAnyVariance && !window.confirm(t("varianceWarning"))) return;
     setSubmitting(true);
     setError(null);
     setSuccess(false);
@@ -146,8 +159,12 @@ export default function CountsNewPage() {
                 </THead>
                 <TBody>
                   {rows.map((row, idx) => {
-                    const v = variance(row);
-                    const colorClass = v === 0 ? "" : v > 0 ? "text-success" : "text-danger";
+                    const v = varianceString(row);
+                    const isZero = v !== null && isZeroDecimalString(v);
+                    const isNeg = v !== null && isNegativeDecimalString(v);
+                    const colorClass = v === null || isZero ? "" : isNeg ? "text-danger" : "text-success";
+                    const display =
+                      v === null ? "—" : isZero || isNeg ? v : `+${v}`;
                     return (
                       <TR key={row.productVariantId}>
                         <TD>{locale === "ar" ? row.sku.colorNameAr : row.sku.colorNameEn}</TD>
@@ -170,7 +187,7 @@ export default function CountsNewPage() {
                           />
                         </TD>
                         <TD dir="ltr" className={`text-end font-medium ${colorClass}`}>
-                          {v > 0 ? `+${v}` : v}
+                          {display}
                         </TD>
                       </TR>
                     );

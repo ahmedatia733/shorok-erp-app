@@ -12,6 +12,6 @@
     "COUNT_CORRECTION_POSITIVE": "تصحيح جرد للمنتج {product} في فرع {branch}: زيادة {boards} لوح ({meters} م) بواسطة {actor}.",
     "COUNT_CORRECTION_NEGATIVE": "تصحيح جرد للمنتج {product} في فرع {branch}: نقص {boards} لوح ({meters} م) بواسطة {actor}.",
     "COUNT_CORRECTION_NO_VARIANCE": "أكّد {actor} الجرد للمنتج {product} في فرع {branch} بدون فروقات.",
-    "SALE": "خصم بيع {boards} لوح ({meters} م) للمنتج {product} في فرع {branch}."
+    "SALE": "{actor} سجّل بيع {boards} لوح ({meters} م) من المنتج {product} في فرع {branch}."
   }
 }

@@ -100,7 +100,7 @@ export default function AdjustmentsNewPage() {
                 value={delta}
                 onChange={(e) => setDelta(e.target.value)}
                 disabled={submitting}
-                placeholder="e.g. -3 or +5"
+                placeholder={t("boardsDeltaPlaceholder")}
               />
             </div>
 

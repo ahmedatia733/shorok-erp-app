@@ -6,7 +6,8 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { NotFoundError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
-import { PrismaService } from "../../prisma/prisma.service";
+import { Prisma, PrismaService } from "../../prisma/prisma.service";
+import { AuditService } from "../audit/audit.service";
 import { InventoryEngine } from "./inventory.engine";
 import { InventorySummaryBuilder } from "./inventory.summary";
 
@@ -25,13 +26,23 @@ export class CountsController {
     private readonly prisma: PrismaService,
     private readonly engine: InventoryEngine,
     private readonly summary: InventorySummaryBuilder,
+    private readonly audit: AuditService,
   ) {}
 
   /**
    * Records a daily stock count. The whole batch runs in ONE transaction:
    * either all per-line COUNT_CORRECTION movements + audit rows commit,
-   * or the entire count is rolled back. Lines with zero variance still
-   * produce an audit row (so we always have a record of who counted what).
+   * or the entire count is rolled back.
+   *
+   * For each line we MUST take the FOR UPDATE row lock BEFORE reading the
+   * current balance — otherwise a concurrent receipt/sale between the read
+   * and the engine's locked write would leave the post-condition
+   * `boards_on_hand == countedBoards` violated. With the lock taken first,
+   * the delta is computed against the same balance the engine then writes
+   * to, so the count's absolute target is honored under contention.
+   *
+   * Lines with zero variance still produce an audit row (so we always have
+   * a record of who counted what and when).
    */
   @Post()
   async count(
@@ -53,8 +64,9 @@ export class CountsController {
           throw new NotFoundError({ productVariantId: line.productVariantId });
         }
 
-        // Make sure a balance row exists; engine.apply also handles this,
-        // but for COUNT we need the CURRENT on-hand to compute the delta.
+        // 1. Make sure the balance row exists. ON CONFLICT DO NOTHING is
+        //    idempotent and safe under concurrency (the loser waits on the
+        //    winner's tuple lock and then reads the committed row).
         await tx.$executeRaw`
           INSERT INTO branch_inventory_balances
             (branch_id, product_variant_id, boards_on_hand, meters_on_hand, updated_at)
@@ -63,21 +75,37 @@ export class CountsController {
           ON CONFLICT (branch_id, product_variant_id) DO NOTHING
         `;
 
-        const balance = await tx.branchInventoryBalance.findUniqueOrThrow({
-          where: {
-            branchId_productVariantId: {
-              branchId: body.branchId,
-              productVariantId: line.productVariantId,
-            },
-          },
-        });
+        // 2. Take the row-level lock BEFORE reading current. This closes
+        //    the TOCTOU window between read and engine-apply.
+        const locked = await tx.$queryRaw<
+          Array<{ boards_on_hand: Prisma.Decimal; meters_on_hand: Prisma.Decimal }>
+        >`
+          SELECT boards_on_hand, meters_on_hand
+          FROM branch_inventory_balances
+          WHERE branch_id = ${body.branchId}::uuid
+            AND product_variant_id = ${line.productVariantId}::uuid
+          FOR UPDATE
+        `;
+        if (locked.length === 0) {
+          throw new NotFoundError({
+            branchId: body.branchId,
+            productVariantId: line.productVariantId,
+          });
+        }
 
+        const currentBoards = new Decimal(locked[0]!.boards_on_hand.toString());
+        const currentMeters = new Decimal(locked[0]!.meters_on_hand.toString());
         const counted = new Decimal(line.countedBoards);
-        const current = new Decimal(balance.boardsOnHand.toString());
-        const delta = counted.minus(current);
+        const delta = counted.minus(currentBoards);
+        const sizePerBoard = new Decimal(variant.sizeMetersPerBoard.toString());
+
+        const productLabelAr = `${variant.sku.colorNameAr} (${variant.sku.code} · ${variant.sizeMetersPerBoard.toString()} م)`;
+        const productLabelEn = `${variant.sku.colorNameEn} (${variant.sku.code} · ${variant.sizeMetersPerBoard.toString()} m)`;
 
         if (delta.isZero()) {
-          // No-variance line: stamp last_counted_at and audit "no variance".
+          // No-variance line: stamp last_counted_at on the LOCKED row and
+          // audit "no variance" via AuditService (Constitution III: every
+          // audit write goes through the same service).
           await tx.branchInventoryBalance.update({
             where: {
               branchId_productVariantId: {
@@ -88,8 +116,6 @@ export class CountsController {
             data: { lastCountedAt: new Date() },
           });
 
-          const productLabelAr = `${variant.sku.colorNameAr} (${variant.sku.code} · ${variant.sizeMetersPerBoard.toString()} م)`;
-          const productLabelEn = `${variant.sku.colorNameEn} (${variant.sku.code} · ${variant.sizeMetersPerBoard.toString()} m)`;
           const summaries = await this.summary.build({
             movementType: "COUNT_CORRECTION",
             boardsDelta: "0",
@@ -100,41 +126,41 @@ export class CountsController {
             branchNameAr: branch.nameAr,
             branchNameEn: branch.nameEn,
           });
-          await tx.auditLog.create({
-            data: {
-              actorId: user.id,
-              action: "CREATE",
-              entityType: "inventory_count",
-              entityId: null,
-              humanReadableSummaryAr: summaries.ar,
-              humanReadableSummaryEn: summaries.en,
-              afterSnapshot: {
-                branchId: body.branchId,
-                productVariantId: line.productVariantId,
-                countedBoards: counted.toFixed(4),
-                variance: "0",
-              },
+
+          await this.audit.write({
+            tx,
+            actorId: user.id,
+            action: "CREATE",
+            entityType: "inventory_count",
+            entityId: null,
+            afterSnapshot: {
+              branchId: body.branchId,
+              productVariantId: line.productVariantId,
+              countedBoards: counted.toFixed(4),
+              variance: "0",
             },
+            summaryAr: summaries.ar,
+            summaryEn: summaries.en,
           });
 
           results.push({
             productVariantId: line.productVariantId,
             delta: "0.0000",
-            boardsOnHand: balance.boardsOnHand.toString(),
-            metersOnHand: balance.metersOnHand.toString(),
+            boardsOnHand: currentBoards.toFixed(4),
+            metersOnHand: currentMeters.toFixed(4),
             movementId: null,
           });
           continue;
         }
 
-        // Real variance: post a COUNT_CORRECTION movement via the engine.
-        const productLabelAr = `${variant.sku.colorNameAr} (${variant.sku.code} · ${variant.sizeMetersPerBoard.toString()} م)`;
-        const productLabelEn = `${variant.sku.colorNameEn} (${variant.sku.code} · ${variant.sizeMetersPerBoard.toString()} m)`;
-        const meters = delta.times(new Decimal(variant.sizeMetersPerBoard.toString()));
+        // Real variance: hand off to the engine. Because the lock is
+        // already held by THIS transaction, the engine's own SELECT FOR
+        // UPDATE is a no-op (re-acquiring a held lock returns immediately).
+        const metersDelta = delta.times(sizePerBoard);
         const summaries = await this.summary.build({
           movementType: "COUNT_CORRECTION",
           boardsDelta: delta.toFixed(4),
-          metersDelta: meters.toFixed(4),
+          metersDelta: metersDelta.toFixed(4),
           actorName: user.name,
           productLabelAr,
           productLabelEn,

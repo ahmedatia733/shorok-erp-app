@@ -13,8 +13,13 @@ import { Skeleton } from "../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../components/ui/table";
 import { BranchPicker } from "../../../../components/features/inventory/branch-picker";
 import { ApiClientError } from "../../../../lib/api-client";
-import { listBalances, type BalanceRow } from "../../../../lib/inventory-client";
-import { formatDate, formatNumber } from "../../../../lib/format";
+import {
+  listBalances,
+  listMovements,
+  type BalanceRow,
+  type MovementRow,
+} from "../../../../lib/inventory-client";
+import { formatDate, formatDateTime, formatNumber } from "../../../../lib/format";
 import { useCurrentUser } from "../../../../lib/auth";
 
 export default function InventoryPage() {
@@ -23,6 +28,7 @@ export default function InventoryPage() {
   const user = useCurrentUser();
   const [branchId, setBranchId] = useState<string | null>(null);
   const [rows, setRows] = useState<BalanceRow[]>([]);
+  const [recentMovements, setRecentMovements] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,11 +36,16 @@ export default function InventoryPage() {
     setLoading(true);
     setError(null);
     try {
-      const page = await listBalances(b);
-      setRows(page.data);
+      const [balances, movements] = await Promise.all([
+        listBalances(b),
+        listMovements({ branchId: b, limit: 5 }),
+      ]);
+      setRows(balances.data);
+      setRecentMovements(movements.data);
     } catch (err) {
       setError(err instanceof ApiClientError ? err.localizedMessage(locale) : null);
       setRows([]);
+      setRecentMovements([]);
     } finally {
       setLoading(false);
     }
@@ -131,6 +142,55 @@ export default function InventoryPage() {
           )}
         </CardBody>
       </Card>
+
+      {branchId && !loading && recentMovements.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("movements")}</CardTitle>
+            <Link href={`/${locale}/inventory/movements?branchId=${branchId}`}>
+              <Button variant="ghost" size="sm">
+                {t("actions.viewMovements")}
+              </Button>
+            </Link>
+          </CardHeader>
+          <CardBody>
+            <Table>
+              <THead>
+                <TR>
+                  <TH dir="ltr">{t("movementsPage.columns.date")}</TH>
+                  <TH>{t("movementsPage.columns.type")}</TH>
+                  <TH>{t("color")}</TH>
+                  <TH dir="ltr">{t("code")}</TH>
+                  <TH dir="ltr" className="text-end">
+                    {t("movementsPage.columns.boards")}
+                  </TH>
+                  <TH>{t("movementsPage.columns.actor")}</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {recentMovements.map((m) => (
+                  <TR key={m.id}>
+                    <TD dir="ltr">{formatDateTime(m.createdAt, locale)}</TD>
+                    <TD>
+                      <Badge variant="neutral">{m.movementType}</Badge>
+                    </TD>
+                    <TD>
+                      {locale === "ar"
+                        ? m.productVariant.sku.colorNameAr
+                        : m.productVariant.sku.colorNameEn}
+                    </TD>
+                    <TD dir="ltr">{m.productVariant.sku.code}</TD>
+                    <TD dir="ltr" className="text-end font-medium">
+                      {formatNumber(m.boardsQuantity, locale)}
+                    </TD>
+                    <TD>{m.creator.name}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+          </CardBody>
+        </Card>
+      ) : null}
     </div>
   );
 }

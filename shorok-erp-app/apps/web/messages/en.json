@@ -78,6 +78,7 @@
       "subtitle": "Positive to add, negative to remove. A note is required.",
       "variant": "Product",
       "boardsDelta": "Boards delta",
+      "boardsDeltaPlaceholder": "e.g. 5 or -3",
       "note": "Reason",
       "submit": "Record adjustment",
       "submitting": "Recording…",

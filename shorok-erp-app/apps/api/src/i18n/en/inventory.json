@@ -12,6 +12,6 @@
     "COUNT_CORRECTION_POSITIVE": "Count correction for {product} at {branch}: +{boards} boards ({meters} m) by {actor}.",
     "COUNT_CORRECTION_NEGATIVE": "Count correction for {product} at {branch}: -{boards} boards ({meters} m) by {actor}.",
     "COUNT_CORRECTION_NO_VARIANCE": "{actor} confirmed count for {product} at {branch} with no variance.",
-    "SALE": "Sale draw of {boards} boards ({meters} m) for {product} at {branch}."
+    "SALE": "{actor} recorded a sale of {boards} boards ({meters} m) of {product} at {branch}."
   }
 }
