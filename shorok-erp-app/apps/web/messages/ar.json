@@ -1,0 +1,43 @@
+{
+  "app": {
+    "name": "شروق",
+    "tagline": "نظام إدارة المؤسسة"
+  },
+  "common": {
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "back": "رجوع",
+    "loading": "جاري التحميل…",
+    "language": "اللغة",
+    "logout": "تسجيل الخروج"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "orders": "الطلبات",
+    "inventory": "المخزون",
+    "expenses": "المصروفات",
+    "suppliers": "الموردون",
+    "factoryOrders": "طلبيات المصنع",
+    "reports": "التقارير",
+    "audit": "سجل الأنشطة",
+    "settings": "الإعدادات"
+  },
+  "auth": {
+    "title": "تسجيل الدخول",
+    "subtitle": "أدخل رقم هاتفك وكلمة المرور للمتابعة.",
+    "phoneLabel": "رقم الهاتف",
+    "phonePlaceholder": "+201XXXXXXXXX",
+    "passwordLabel": "كلمة المرور",
+    "submit": "دخول",
+    "submitting": "جارٍ تسجيل الدخول…",
+    "rememberWelcome": "أهلاً بك في شروق."
+  },
+  "errors": {
+    "invalid_credentials": "بيانات الدخول غير صحيحة.",
+    "token_expired": "انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى.",
+    "user_disabled": "هذا الحساب موقوف. يرجى التواصل مع المسؤول.",
+    "validation_failed": "البيانات المدخلة غير صحيحة.",
+    "network_error": "تعذّر الاتصال بالخادم.",
+    "unknown": "حدث خطأ غير متوقع."
+  }
+}

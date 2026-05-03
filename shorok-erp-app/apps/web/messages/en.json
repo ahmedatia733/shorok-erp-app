@@ -1,0 +1,43 @@
+{
+  "app": {
+    "name": "Shorok",
+    "tagline": "ERP for Shorok"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "back": "Back",
+    "loading": "Loading…",
+    "language": "Language",
+    "logout": "Sign out"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "orders": "Orders",
+    "inventory": "Inventory",
+    "expenses": "Expenses",
+    "suppliers": "Suppliers",
+    "factoryOrders": "Factory Orders",
+    "reports": "Reports",
+    "audit": "Audit Log",
+    "settings": "Settings"
+  },
+  "auth": {
+    "title": "Sign in",
+    "subtitle": "Enter your phone number and password to continue.",
+    "phoneLabel": "Phone number",
+    "phonePlaceholder": "+201XXXXXXXXX",
+    "passwordLabel": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "rememberWelcome": "Welcome to Shorok."
+  },
+  "errors": {
+    "invalid_credentials": "Invalid sign-in details.",
+    "token_expired": "Your session has expired. Please sign in again.",
+    "user_disabled": "This account is disabled. Please contact the administrator.",
+    "validation_failed": "The submitted data is invalid.",
+    "network_error": "Could not reach the server.",
+    "unknown": "An unexpected error occurred."
+  }
+}
