@@ -1,0 +1,11 @@
+{
+  "summary": {
+    "created": "{actor} created an order for {customer} at {branch} for {required} EGP.",
+    "updated": "{actor} updated the order for {customer} at {branch}.",
+    "confirmed": "{actor} confirmed the order for {customer} at {branch} for {required} EGP.",
+    "price_approved": "{actor} approved the order price for {customer} (deviation {deviation}%).",
+    "cancelled": "{actor} cancelled the order for {customer} at {branch}.",
+    "collection_recorded": "{actor} recorded a collection of {amount} EGP on the order for {customer}.",
+    "collection_refunded": "{actor} refunded {amount} EGP on the order for {customer} after cancellation."
+  }
+}

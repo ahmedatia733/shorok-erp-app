@@ -115,6 +115,81 @@
       "empty": "لا توجد حركات."
     }
   },
+  "orders": {
+    "title": "الطلبات",
+    "create": "إنشاء طلب",
+    "back": "رجوع للطلبات",
+    "branchPicker": "اختر الفرع",
+    "filters": {
+      "status": "الحالة",
+      "all": "الكل"
+    },
+    "columns": {
+      "date": "التاريخ",
+      "customer": "اسم العميل",
+      "product": "المنتج",
+      "boards": "الألواح",
+      "required": "المبلغ المطلوب",
+      "collected": "المبلغ المحصل",
+      "remaining": "المبلغ المتبقي",
+      "status": "الحالة",
+      "priceFlag": "حالة السعر"
+    },
+    "status": {
+      "DRAFT": "مسودة",
+      "PENDING_PRICE_APPROVAL": "بانتظار اعتماد السعر",
+      "CONFIRMED": "مؤكد",
+      "PARTIALLY_COLLECTED": "تحصيل جزئي",
+      "PAID": "مدفوع بالكامل",
+      "CANCELLED": "ملغي"
+    },
+    "priceOverride": {
+      "WITHIN_TOLERANCE": "ضمن الهامش",
+      "PENDING_APPROVAL": "بانتظار الاعتماد",
+      "APPROVED": "معتمد"
+    },
+    "empty": "لا توجد طلبات بعد",
+    "loadFailed": "تعذر تحميل الطلبات",
+    "form": {
+      "customer": "اسم العميل",
+      "product": "المنتج",
+      "boardsQuantity": "عدد الألواح",
+      "salePricePerMeter": "سعر المتر (ج.م)",
+      "receiver": "المستلم (اختياري)",
+      "initialCollection": "تحصيل مبدئي (اختياري)",
+      "defaultPrice": "السعر الافتراضي للمتر",
+      "deviation": "الانحراف",
+      "tolerance": "الهامش المسموح",
+      "withinTolerance": "ضمن الهامش — يمكن التأكيد مباشرة",
+      "outsideTolerance": "خارج الهامش — يحتاج اعتماد قبل التأكيد",
+      "submit": "حفظ كمسودة",
+      "submitting": "جارٍ الحفظ…",
+      "successCreated": "تم إنشاء الطلب."
+    },
+    "detail": {
+      "summary": "ملخص الطلب",
+      "amounts": "المبالغ",
+      "actions": "الإجراءات",
+      "confirm": "تأكيد الطلب",
+      "approvePrice": "اعتماد السعر",
+      "cancel": "إلغاء الطلب",
+      "addCollection": "إضافة تحصيل",
+      "collections": "سجل التحصيلات",
+      "noCollections": "لا توجد تحصيلات بعد.",
+      "approvedBy": "اعتُمد بواسطة",
+      "approvedAt": "تاريخ الاعتماد",
+      "deviationPercent": "الانحراف عن السعر الافتراضي",
+      "cancelReason": "سبب الإلغاء (اختياري)",
+      "confirmCancel": "تأكيد الإلغاء"
+    },
+    "collection": {
+      "title": "إضافة تحصيل",
+      "amount": "المبلغ (ج.م)",
+      "paidToAccount": "الحساب المستلم (اختياري)",
+      "submit": "تسجيل التحصيل",
+      "submitting": "جارٍ التسجيل…"
+    }
+  },
   "audit": {
     "tailTitle": "سجل الأنشطة",
     "emptyTitle": "لا توجد أنشطة بعد",

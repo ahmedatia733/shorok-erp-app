@@ -15,6 +15,7 @@ import { AuditModule } from "./modules/audit/audit.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { BranchesModule } from "./modules/branches/branches.module";
 import { InventoryModule } from "./modules/inventory/inventory.module";
+import { OrdersModule } from "./modules/orders/orders.module";
 import { ProductsModule } from "./modules/products/products.module";
 import { SuppliersModule } from "./modules/suppliers/suppliers.module";
 import { SystemSettingsModule } from "./modules/system-settings/system-settings.module";
@@ -58,6 +59,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     SuppliersModule,
     SystemSettingsModule,
     InventoryModule,
+    OrdersModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ApiErrorFilter },

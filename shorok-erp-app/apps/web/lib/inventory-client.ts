@@ -16,6 +16,7 @@ export interface VariantOption {
   sizeMetersPerBoard: string;
   defaultSalePricePerMeter: string;
   defaultPurchasePricePerMeter: string;
+  priceOverrideTolerancePercent: string | null;
   active: boolean;
   sku: {
     id: string;

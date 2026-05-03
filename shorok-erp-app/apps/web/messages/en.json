@@ -115,6 +115,81 @@
       "empty": "No movements yet."
     }
   },
+  "orders": {
+    "title": "Orders",
+    "create": "Create order",
+    "back": "Back to orders",
+    "branchPicker": "Select branch",
+    "filters": {
+      "status": "Status",
+      "all": "All"
+    },
+    "columns": {
+      "date": "Date",
+      "customer": "Customer name",
+      "product": "Product",
+      "boards": "Boards",
+      "required": "Required amount",
+      "collected": "Collected amount",
+      "remaining": "Remaining amount",
+      "status": "Status",
+      "priceFlag": "Price status"
+    },
+    "status": {
+      "DRAFT": "Draft",
+      "PENDING_PRICE_APPROVAL": "Pending price approval",
+      "CONFIRMED": "Confirmed",
+      "PARTIALLY_COLLECTED": "Partially collected",
+      "PAID": "Paid",
+      "CANCELLED": "Cancelled"
+    },
+    "priceOverride": {
+      "WITHIN_TOLERANCE": "Within tolerance",
+      "PENDING_APPROVAL": "Pending approval",
+      "APPROVED": "Approved"
+    },
+    "empty": "No orders yet",
+    "loadFailed": "Could not load orders",
+    "form": {
+      "customer": "Customer name",
+      "product": "Product",
+      "boardsQuantity": "Boards quantity",
+      "salePricePerMeter": "Price per meter (EGP)",
+      "receiver": "Receiver (optional)",
+      "initialCollection": "Initial collection (optional)",
+      "defaultPrice": "Default price per meter",
+      "deviation": "Deviation",
+      "tolerance": "Tolerance",
+      "withinTolerance": "Within tolerance — can be confirmed directly",
+      "outsideTolerance": "Outside tolerance — needs approval before confirmation",
+      "submit": "Save as draft",
+      "submitting": "Saving…",
+      "successCreated": "Order created."
+    },
+    "detail": {
+      "summary": "Order summary",
+      "amounts": "Amounts",
+      "actions": "Actions",
+      "confirm": "Confirm order",
+      "approvePrice": "Approve price",
+      "cancel": "Cancel order",
+      "addCollection": "Add collection",
+      "collections": "Collection history",
+      "noCollections": "No collections yet.",
+      "approvedBy": "Approved by",
+      "approvedAt": "Approved at",
+      "deviationPercent": "Deviation from default price",
+      "cancelReason": "Cancellation reason (optional)",
+      "confirmCancel": "Confirm cancellation"
+    },
+    "collection": {
+      "title": "Add collection",
+      "amount": "Amount (EGP)",
+      "paidToAccount": "Paid to account (optional)",
+      "submit": "Record collection",
+      "submitting": "Recording…"
+    }
+  },
   "audit": {
     "tailTitle": "Activity log",
     "emptyTitle": "No activity yet",

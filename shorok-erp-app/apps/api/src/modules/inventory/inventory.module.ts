@@ -16,6 +16,6 @@ import { ReceiptsController } from "./receipts.controller";
     CountsController,
   ],
   providers: [InventoryEngine, InventorySummaryBuilder],
-  exports: [InventoryEngine],
+  exports: [InventoryEngine, InventorySummaryBuilder],
 })
 export class InventoryModule {}

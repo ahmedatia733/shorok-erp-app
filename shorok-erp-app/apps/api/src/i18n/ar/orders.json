@@ -1,0 +1,11 @@
+{
+  "summary": {
+    "created": "{actor} أنشأ طلباً للعميل {customer} في فرع {branch} بقيمة {required} ج.م.",
+    "updated": "{actor} حدّث بيانات طلب العميل {customer} في فرع {branch}.",
+    "confirmed": "{actor} أكّد طلب العميل {customer} في فرع {branch} بقيمة {required} ج.م.",
+    "price_approved": "{actor} اعتمد سعر الطلب للعميل {customer} (انحراف {deviation}٪).",
+    "cancelled": "{actor} ألغى طلب العميل {customer} في فرع {branch}.",
+    "collection_recorded": "{actor} سجّل تحصيل {amount} ج.م على طلب العميل {customer}.",
+    "collection_refunded": "{actor} ردّ {amount} ج.م على طلب العميل {customer} بعد الإلغاء."
+  }
+}
