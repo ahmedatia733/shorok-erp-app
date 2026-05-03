@@ -10,6 +10,12 @@ out/
 .turbo/
 *.tsbuildinfo
 
+# Stray TS emit artifacts that should never sit next to source files
+packages/**/src/**/*.js
+packages/**/src/**/*.js.map
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts.map
+
 # Coverage / test artifacts
 coverage/
 *.lcov
