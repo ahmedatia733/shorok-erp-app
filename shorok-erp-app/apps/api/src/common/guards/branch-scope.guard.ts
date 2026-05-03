@@ -16,7 +16,9 @@ export class BranchScopeGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
     const user = request.user as AuthenticatedUser | undefined;
-    if (!user) return false;
+    // On public routes (no authenticated user) the JwtAuthGuard already
+    // decided to let the request through — branch scoping doesn't apply.
+    if (!user) return true;
     if (user.role === "OWNER") return true;
 
     const branchId = this.extractBranchId(request);

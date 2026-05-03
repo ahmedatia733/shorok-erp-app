@@ -8,7 +8,12 @@ async function bootstrap() {
   app.useLogger(app.get(Logger));
   app.use(cookieParser());
   app.setGlobalPrefix("api/v1");
-  app.enableCors({ credentials: true });
+  // CORS with credentials requires reflecting the exact request origin
+  // (wildcard "*" is rejected by the browser when credentials are sent).
+  app.enableCors({
+    credentials: true,
+    origin: (origin, callback) => callback(null, origin ?? false),
+  });
 
   const port = Number(process.env.API_PORT ?? 3001);
   await app.listen(port);

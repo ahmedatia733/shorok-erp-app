@@ -44,6 +44,12 @@ export class InvalidStateTransitionError extends ApiError {
   }
 }
 
+export class InvalidMovementError extends ApiError {
+  constructor(details?: Record<string, unknown>) {
+    super(ERROR_CODES.INVALID_MOVEMENT, 409, "errors.invalid_movement", details);
+  }
+}
+
 export class CollectionExceedsRequiredError extends ApiError {
   constructor(details?: Record<string, unknown>) {
     super(

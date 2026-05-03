@@ -8,6 +8,7 @@
     "save": "Save",
     "back": "Back",
     "loading": "Loading…",
+    "loadMore": "Load more",
     "language": "Language",
     "logout": "Sign out"
   },
@@ -38,7 +39,80 @@
     "user_disabled": "This account is disabled. Please contact the administrator.",
     "validation_failed": "The submitted data is invalid.",
     "network_error": "Could not reach the server.",
+    "insufficient_stock": "The requested quantity exceeds the available stock at this branch.",
+    "invalid_movement": "Invalid inventory movement.",
+    "branch_forbidden": "You do not have access to this branch.",
+    "forbidden": "You are not permitted to perform this action.",
     "unknown": "An unexpected error occurred."
+  },
+  "inventory": {
+    "title": "Inventory balance",
+    "movements": "Movement history",
+    "branchPicker": "Select branch",
+    "lowStock": "Low stock",
+    "boards": "Boards",
+    "meters": "Meters",
+    "size": "Size",
+    "code": "Code",
+    "color": "Color",
+    "lastCounted": "Last counted",
+    "noBalances": "No balances for this branch yet.",
+    "actions": {
+      "receive": "Receive stock",
+      "adjust": "Adjust stock",
+      "count": "Stock count",
+      "viewMovements": "View movements"
+    },
+    "receipt": {
+      "title": "Receive stock",
+      "subtitle": "Enter the received quantity and any notes.",
+      "variant": "Product",
+      "boardsQuantity": "Boards quantity",
+      "note": "Note (optional)",
+      "submit": "Record receipt",
+      "submitting": "Recording…",
+      "success": "Receipt recorded."
+    },
+    "adjustment": {
+      "title": "Adjust stock",
+      "subtitle": "Positive to add, negative to remove. A note is required.",
+      "variant": "Product",
+      "boardsDelta": "Boards delta",
+      "note": "Reason",
+      "submit": "Record adjustment",
+      "submitting": "Recording…",
+      "success": "Adjustment recorded."
+    },
+    "count": {
+      "title": "Daily stock count",
+      "subtitle": "Enter the actual count for each product. Variance shows automatically.",
+      "expected": "Expected",
+      "counted": "Counted",
+      "variance": "Variance",
+      "submit": "Confirm count",
+      "submitting": "Confirming…",
+      "success": "Count recorded.",
+      "varianceWarning": "There are variances. Confirm posting them as count corrections?"
+    },
+    "movementsPage": {
+      "title": "Inventory movements",
+      "filters": {
+        "type": "Type",
+        "variant": "Product",
+        "from": "From",
+        "to": "To",
+        "all": "All"
+      },
+      "columns": {
+        "date": "Date",
+        "type": "Type",
+        "boards": "Boards",
+        "meters": "Meters",
+        "actor": "User",
+        "note": "Note"
+      },
+      "empty": "No movements yet."
+    }
   },
   "audit": {
     "tailTitle": "Activity log",

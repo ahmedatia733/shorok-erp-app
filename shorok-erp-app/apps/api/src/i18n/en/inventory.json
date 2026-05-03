@@ -1,0 +1,17 @@
+{
+  "movement_types": {
+    "RECEIPT": "Receipt",
+    "SALE": "Sale",
+    "ADJUSTMENT": "Adjustment",
+    "COUNT_CORRECTION": "Count correction"
+  },
+  "summary": {
+    "RECEIPT": "{actor} received {boards} boards ({meters} m) of {product} at {branch}.",
+    "ADJUSTMENT_POSITIVE": "{actor} increased stock by {boards} boards ({meters} m) for {product} at {branch}.",
+    "ADJUSTMENT_NEGATIVE": "{actor} decreased stock by {boards} boards ({meters} m) for {product} at {branch}.",
+    "COUNT_CORRECTION_POSITIVE": "Count correction for {product} at {branch}: +{boards} boards ({meters} m) by {actor}.",
+    "COUNT_CORRECTION_NEGATIVE": "Count correction for {product} at {branch}: -{boards} boards ({meters} m) by {actor}.",
+    "COUNT_CORRECTION_NO_VARIANCE": "{actor} confirmed count for {product} at {branch} with no variance.",
+    "SALE": "Sale draw of {boards} boards ({meters} m) for {product} at {branch}."
+  }
+}

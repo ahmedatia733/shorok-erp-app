@@ -1,0 +1,17 @@
+{
+  "movement_types": {
+    "RECEIPT": "استلام",
+    "SALE": "بيع",
+    "ADJUSTMENT": "تسوية",
+    "COUNT_CORRECTION": "تصحيح جرد"
+  },
+  "summary": {
+    "RECEIPT": "{actor} استلم {boards} لوح ({meters} م) من المنتج {product} في فرع {branch}.",
+    "ADJUSTMENT_POSITIVE": "{actor} عدّل المخزون بزيادة {boards} لوح ({meters} م) للمنتج {product} في فرع {branch}.",
+    "ADJUSTMENT_NEGATIVE": "{actor} عدّل المخزون بنقص {boards} لوح ({meters} م) للمنتج {product} في فرع {branch}.",
+    "COUNT_CORRECTION_POSITIVE": "تصحيح جرد للمنتج {product} في فرع {branch}: زيادة {boards} لوح ({meters} م) بواسطة {actor}.",
+    "COUNT_CORRECTION_NEGATIVE": "تصحيح جرد للمنتج {product} في فرع {branch}: نقص {boards} لوح ({meters} م) بواسطة {actor}.",
+    "COUNT_CORRECTION_NO_VARIANCE": "أكّد {actor} الجرد للمنتج {product} في فرع {branch} بدون فروقات.",
+    "SALE": "خصم بيع {boards} لوح ({meters} م) للمنتج {product} في فرع {branch}."
+  }
+}
