@@ -1,0 +1,388 @@
+// Shorok ERP — Prisma schema
+// Authoritative reference: ../specs/main/data-model.md
+//
+// All money columns are NUMERIC(14,2). Quantities are NUMERIC(14,4).
+// Append-only tables (audit_logs, inventory_movements, order_collections,
+// factory_ledger_entries) are protected by REVOKE UPDATE/DELETE in a
+// follow-up migration. Non-negative inventory invariant is backed by a
+// CHECK constraint also added in a follow-up migration.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================== Enums ===============================
+
+enum Role {
+  OWNER
+  BRANCH_MANAGER
+  WAREHOUSE
+  ACCOUNTANT
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ProductCategory {
+  NORMAL
+  SPECIAL
+}
+
+enum MovementType {
+  RECEIPT
+  SALE
+  ADJUSTMENT
+  COUNT_CORRECTION
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PRICE_APPROVAL
+  CONFIRMED
+  PARTIALLY_COLLECTED
+  PAID
+  CANCELLED
+}
+
+enum PriceOverrideStatus {
+  WITHIN_TOLERANCE
+  PENDING_APPROVAL
+  APPROVED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  CONFIRM
+  CANCEL
+  APPROVE
+  COLLECT
+  IMPORT
+  LOGIN
+  LOGOUT
+}
+
+// =============================== Branch ==============================
+
+model Branch {
+  id        String   @id @default(uuid()) @db.Uuid
+  nameAr    String   @unique @db.VarChar(120) @map("name_ar")
+  nameEn    String   @unique @db.VarChar(120) @map("name_en")
+  location  String?  @db.VarChar(240)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  userAccesses          UserBranchAccess[]
+  inventoryBalances     BranchInventoryBalance[]
+  inventoryMovements    InventoryMovement[]
+  customerOrders        CustomerOrder[]
+  expenses              Expense[]
+
+  @@map("branches")
+}
+
+// ================================ User ===============================
+
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  name         String     @db.VarChar(120)
+  phone        String     @unique @db.VarChar(20)
+  email        String?    @unique @db.VarChar(160)
+  passwordHash String     @map("password_hash") @db.VarChar(120)
+  role         Role
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?  @map("last_login_at") @db.Timestamptz(6)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branchAccesses    UserBranchAccess[]
+  refreshTokens     RefreshToken[]
+  inventoryWrites   InventoryMovement[] @relation("InventoryMovementCreatedBy")
+  ordersCreated     CustomerOrder[]      @relation("CustomerOrderCreatedBy")
+  pricesApproved    CustomerOrder[]      @relation("CustomerOrderPriceApprovedBy")
+  collectionsCreated OrderCollection[]
+  expensesCreated   Expense[]
+  factoryEntries    FactoryLedgerEntry[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model UserBranchAccess {
+  userId    String   @map("user_id") @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@map("user_branch_access")
+}
+
+// ============================ RefreshToken ===========================
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(120)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  userAgent  String?   @map("user_agent") @db.VarChar(240)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ============================== ProductSku ===========================
+
+model ProductSku {
+  id           String          @id @default(uuid()) @db.Uuid
+  code         String          @unique @db.VarChar(60)
+  colorNameAr  String          @db.VarChar(120) @map("color_name_ar")
+  colorNameEn  String          @db.VarChar(120) @map("color_name_en")
+  category     ProductCategory @default(NORMAL)
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  variants ProductVariant[]
+
+  @@map("product_skus")
+}
+
+// =========================== ProductVariant ==========================
+
+model ProductVariant {
+  id                            String   @id @default(uuid()) @db.Uuid
+  skuId                         String   @map("sku_id") @db.Uuid
+  sizeMetersPerBoard            Decimal  @map("size_meters_per_board") @db.Decimal(10, 4)
+  defaultSalePricePerMeter      Decimal  @map("default_sale_price_per_meter") @db.Decimal(14, 2)
+  defaultPurchasePricePerMeter  Decimal  @map("default_purchase_price_per_meter") @db.Decimal(14, 2)
+  priceOverrideTolerancePercent Decimal? @map("price_override_tolerance_percent") @db.Decimal(5, 2)
+  active                        Boolean  @default(true)
+  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  sku                  ProductSku               @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  inventoryBalances    BranchInventoryBalance[]
+  inventoryMovements   InventoryMovement[]
+  customerOrders       CustomerOrder[]
+  factoryEntries       FactoryLedgerEntry[]
+
+  @@unique([skuId, sizeMetersPerBoard])
+  @@index([skuId])
+  @@map("product_variants")
+}
+
+// ============================== Supplier =============================
+
+model Supplier {
+  id        String   @id @default(uuid()) @db.Uuid
+  nameAr    String   @unique @db.VarChar(160) @map("name_ar")
+  nameEn    String   @unique @db.VarChar(160) @map("name_en")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  factoryEntries FactoryLedgerEntry[]
+
+  @@map("suppliers")
+}
+
+// ====================== BranchInventoryBalance =======================
+
+model BranchInventoryBalance {
+  branchId         String    @map("branch_id") @db.Uuid
+  productVariantId String    @map("product_variant_id") @db.Uuid
+  boardsOnHand     Decimal   @default(0) @map("boards_on_hand") @db.Decimal(14, 4)
+  metersOnHand     Decimal   @default(0) @map("meters_on_hand") @db.Decimal(14, 4)
+  lastCountedAt    DateTime? @map("last_counted_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@id([branchId, productVariantId])
+  @@map("branch_inventory_balances")
+}
+
+// ========================== InventoryMovement ========================
+
+model InventoryMovement {
+  id                String       @id @default(uuid()) @db.Uuid
+  branchId          String       @map("branch_id") @db.Uuid
+  productVariantId  String       @map("product_variant_id") @db.Uuid
+  movementType      MovementType @map("movement_type")
+  boardsQuantity    Decimal      @map("boards_quantity") @db.Decimal(14, 4)
+  metersQuantity    Decimal      @map("meters_quantity") @db.Decimal(14, 4)
+  referenceType     String?      @map("reference_type") @db.VarChar(40)
+  referenceId       String?      @map("reference_id") @db.Uuid
+  createdBy         String       @map("created_by") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  humanReadableNote String?      @map("human_readable_note") @db.Text
+
+  branch         Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  creator        User           @relation("InventoryMovementCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([branchId, productVariantId, createdAt(sort: Desc)])
+  @@map("inventory_movements")
+}
+
+// ============================ CustomerOrder ==========================
+
+model CustomerOrder {
+  id                       String              @id @default(uuid()) @db.Uuid
+  branchId                 String              @map("branch_id") @db.Uuid
+  orderDate                DateTime            @default(now()) @map("order_date") @db.Date
+  customerName             String              @map("customer_name") @db.VarChar(160)
+  productVariantId         String              @map("product_variant_id") @db.Uuid
+  boardsQuantity           Decimal             @map("boards_quantity") @db.Decimal(14, 4)
+  metersQuantity           Decimal             @map("meters_quantity") @db.Decimal(14, 4)
+  salePricePerMeter        Decimal             @map("sale_price_per_meter") @db.Decimal(14, 2)
+  priceOverrideStatus      PriceOverrideStatus @default(WITHIN_TOLERANCE) @map("price_override_status")
+  priceApprovedByUserId    String?             @map("price_approved_by_user_id") @db.Uuid
+  priceApprovedAt          DateTime?           @map("price_approved_at") @db.Timestamptz(6)
+  requiredAmount           Decimal             @map("required_amount") @db.Decimal(14, 2)
+  collectedAmount          Decimal             @default(0) @map("collected_amount") @db.Decimal(14, 2)
+  remainingAmount          Decimal             @map("remaining_amount") @db.Decimal(14, 2)
+  receiverName             String?             @map("receiver_name") @db.VarChar(160)
+  status                   OrderStatus         @default(DRAFT)
+  createdBy                String              @map("created_by") @db.Uuid
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch          Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  productVariant  ProductVariant   @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  creator         User             @relation("CustomerOrderCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  priceApprover   User?            @relation("CustomerOrderPriceApprovedBy", fields: [priceApprovedByUserId], references: [id], onDelete: SetNull)
+  collections     OrderCollection[]
+
+  @@index([branchId, orderDate(sort: Desc)])
+  @@index([status])
+  @@map("customer_orders")
+}
+
+// ========================== OrderCollection ==========================
+
+model OrderCollection {
+  id            String   @id @default(uuid()) @db.Uuid
+  orderId       String   @map("order_id") @db.Uuid
+  collectedAt   DateTime @default(now()) @map("collected_at") @db.Timestamptz(6)
+  amount        Decimal  @db.Decimal(14, 2)
+  paidToAccount String?  @map("paid_to_account") @db.VarChar(120)
+  createdBy     String   @map("created_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  order   CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  creator User          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@map("order_collections")
+}
+
+// =============================== Expense =============================
+
+model Expense {
+  id              String   @id @default(uuid()) @db.Uuid
+  branchId        String   @map("branch_id") @db.Uuid
+  expenseDate     DateTime @map("expense_date") @db.Date
+  description     String   @db.VarChar(240)
+  amount          Decimal  @db.Decimal(14, 2)
+  paidFromAccount String   @map("paid_from_account") @db.VarChar(120)
+  createdBy       String   @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  branch  Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  creator User   @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([branchId, expenseDate(sort: Desc)])
+  @@map("expenses")
+}
+
+// ======================== FactoryLedgerEntry =========================
+
+model FactoryLedgerEntry {
+  id                     String    @id @default(uuid()) @db.Uuid
+  supplierId             String    @map("supplier_id") @db.Uuid
+  orderDate              DateTime  @map("order_date") @db.Date
+  productVariantId       String?   @map("product_variant_id") @db.Uuid
+  boardsQuantity         Decimal?  @map("boards_quantity") @db.Decimal(14, 4)
+  metersQuantity         Decimal?  @map("meters_quantity") @db.Decimal(14, 4)
+  purchasePricePerMeter  Decimal?  @map("purchase_price_per_meter") @db.Decimal(14, 2)
+  totalAmount            Decimal   @default(0) @map("total_amount") @db.Decimal(14, 2)
+  paidAmount             Decimal   @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  runningBalance         Decimal   @default(0) @map("running_balance") @db.Decimal(14, 2)
+  notes                  String?   @db.Text
+  createdBy              String    @map("created_by") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  supplier        Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  productVariant  ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  creator         User            @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([supplierId, orderDate])
+  @@map("factory_ledger_entries")
+}
+
+// =============================== AuditLog ============================
+
+model AuditLog {
+  id                       String      @id @default(uuid()) @db.Uuid
+  actorId                  String?     @map("actor_id") @db.Uuid
+  action                   AuditAction
+  entityType               String      @map("entity_type") @db.VarChar(60)
+  entityId                 String?     @map("entity_id") @db.Uuid
+  beforeSnapshot           Json?       @map("before_snapshot")
+  afterSnapshot            Json?       @map("after_snapshot")
+  humanReadableSummaryAr   String      @map("human_readable_summary_ar") @db.Text
+  humanReadableSummaryEn   String      @map("human_readable_summary_en") @db.Text
+  createdAt                DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+// =========================== SystemSettings ==========================
+
+model SystemSettings {
+  id                                       Int      @id @default(1)
+  defaultPriceOverrideTolerancePercent     Decimal  @default(5.00) @map("default_price_override_tolerance_percent") @db.Decimal(5, 2)
+  lowStockThresholdBoards                  Decimal  @default(5) @map("low_stock_threshold_boards") @db.Decimal(14, 4)
+  createdAt                                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("system_settings")
+}
+
+// =========================== IdempotencyKey ==========================
+
+model IdempotencyKey {
+  key          String   @id @db.VarChar(120)
+  method       String   @db.VarChar(10)
+  path         String   @db.VarChar(240)
+  responseHash String   @map("response_hash") @db.VarChar(120)
+  responseBody Json     @map("response_body")
+  statusCode   Int      @map("status_code")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}

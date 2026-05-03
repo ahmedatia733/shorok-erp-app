@@ -4,7 +4,6 @@
     "module": "CommonJS",
     "moduleResolution": "node",
     "outDir": "dist",
-    "rootDir": "src",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "incremental": true,
@@ -12,5 +11,5 @@
     "strictPropertyInitialization": false,
     "declaration": false
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "prisma"]
 }
