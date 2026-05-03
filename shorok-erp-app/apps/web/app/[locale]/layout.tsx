@@ -36,7 +36,7 @@ export default async function LocaleLayout({ children, params: { locale } }: Lay
 
   return (
     <html lang={locale} dir={dir}>
-      <body className="bg-slate-50 text-slate-900 antialiased min-h-screen">
+      <body className="bg-background text-textPrimary antialiased min-h-screen">
         <NextIntlClientProvider locale={locale as AppLocale} messages={messages}>
           <AuthProvider>{children}</AuthProvider>
         </NextIntlClientProvider>

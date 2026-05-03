@@ -39,5 +39,22 @@
     "validation_failed": "The submitted data is invalid.",
     "network_error": "Could not reach the server.",
     "unknown": "An unexpected error occurred."
+  },
+  "audit": {
+    "tailTitle": "Activity log",
+    "emptyTitle": "No activity yet",
+    "emptyDescription": "No actions have been recorded for this item.",
+    "loadMore": "Load more",
+    "actions": {
+      "CREATE": "Created",
+      "UPDATE": "Updated",
+      "CONFIRM": "Confirmed",
+      "CANCEL": "Cancelled",
+      "APPROVE": "Approved",
+      "COLLECT": "Collected",
+      "IMPORT": "Imported",
+      "LOGIN": "Signed in",
+      "LOGOUT": "Signed out"
+    }
   }
 }

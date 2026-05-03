@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "../../lib/cn";
 
-type Variant = "primary" | "secondary" | "ghost";
+type Variant = "primary" | "secondary" | "ghost" | "danger";
 type Size = "sm" | "md";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -11,13 +11,14 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const baseClasses =
   "inline-flex items-center justify-center rounded-md font-medium transition-colors " +
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-600 " +
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary " +
   "disabled:opacity-60 disabled:cursor-not-allowed";
 
 const variantClasses: Record<Variant, string> = {
-  primary: "bg-blue-600 text-white hover:bg-blue-700",
-  secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200",
-  ghost: "bg-transparent text-slate-900 hover:bg-slate-100",
+  primary: "bg-primary text-primary-foreground hover:bg-primary-hover",
+  secondary: "bg-surface text-textPrimary border border-border hover:bg-background",
+  ghost: "bg-transparent text-textPrimary hover:bg-background",
+  danger: "bg-danger text-primary-foreground hover:bg-danger-foreground",
 };
 
 const sizeClasses: Record<Size, string> = {

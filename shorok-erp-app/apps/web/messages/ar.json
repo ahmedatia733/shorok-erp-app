@@ -39,5 +39,22 @@
     "validation_failed": "البيانات المدخلة غير صحيحة.",
     "network_error": "تعذّر الاتصال بالخادم.",
     "unknown": "حدث خطأ غير متوقع."
+  },
+  "audit": {
+    "tailTitle": "سجل الأنشطة",
+    "emptyTitle": "لا توجد أنشطة بعد",
+    "emptyDescription": "لم يتم تسجيل أي إجراءات على هذا العنصر حتى الآن.",
+    "loadMore": "تحميل المزيد",
+    "actions": {
+      "CREATE": "إنشاء",
+      "UPDATE": "تحديث",
+      "CONFIRM": "تأكيد",
+      "CANCEL": "إلغاء",
+      "APPROVE": "اعتماد",
+      "COLLECT": "تحصيل",
+      "IMPORT": "استيراد",
+      "LOGIN": "تسجيل دخول",
+      "LOGOUT": "تسجيل خروج"
+    }
   }
 }

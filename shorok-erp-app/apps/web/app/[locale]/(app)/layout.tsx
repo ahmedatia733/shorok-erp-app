@@ -21,7 +21,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
 
   if (isLoading || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-slate-500">
+      <div className="min-h-screen flex items-center justify-center text-textSecondary">
         {tCommon("loading")}
       </div>
     );
@@ -29,7 +29,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
 
   return (
     <div className="min-h-screen flex">
-      <aside className="w-64 border-e border-slate-200 bg-white p-4">
+      <aside className="w-64 border-e border-border bg-surface p-4">
         <div className="mb-6 text-lg font-bold">شروق · Shorok</div>
         <nav className="space-y-1 text-sm">
           {(
@@ -48,7 +48,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
             <a
               key={key}
               href={`/${locale}${path}`}
-              className="block rounded-md px-3 py-2 hover:bg-slate-100"
+              className="block rounded-md px-3 py-2 hover:bg-background"
             >
               {t(key)}
             </a>
@@ -57,8 +57,8 @@ export default function ProtectedAppLayout({ children }: { children: React.React
       </aside>
 
       <div className="flex-1 flex flex-col">
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
-          <div className="text-sm text-slate-600">{user.name}</div>
+        <header className="flex items-center justify-between border-b border-border bg-surface px-6 py-3">
+          <div className="text-sm text-textSecondary">{user.name}</div>
           <div className="flex items-center gap-3">
             <LanguageSwitcher />
             <Button variant="ghost" size="sm" onClick={() => void logout()}>

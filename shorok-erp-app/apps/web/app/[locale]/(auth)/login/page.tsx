@@ -47,14 +47,14 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center px-4">
-      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+      <div className="w-full max-w-md rounded-lg border border-border bg-surface p-8 shadow-sm">
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold">{tApp("name")}</h1>
-          <p className="text-sm text-slate-500 mt-1">{tApp("tagline")}</p>
+          <p className="text-sm text-textSecondary mt-1">{tApp("tagline")}</p>
         </div>
 
         <h2 className="text-lg font-semibold mb-1">{t("title")}</h2>
-        <p className="text-sm text-slate-600 mb-6">{t("subtitle")}</p>
+        <p className="text-sm text-textSecondary mb-6">{t("subtitle")}</p>
 
         {errorKey && (
           <div className="mb-4">
