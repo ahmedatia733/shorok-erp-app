@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: shorok-postgres
+    environment:
+      POSTGRES_USER: shorok
+      POSTGRES_PASSWORD: shorok
+      POSTGRES_DB: shorok_erp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shorok -d shorok_erp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: shorok-api
+    environment:
+      DATABASE_URL: postgresql://shorok:shorok@postgres:5432/shorok_erp?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ar}
+      API_PORT: 3001
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: shorok-web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://api:3001/api/v1
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ar}
+      WEB_PORT: 3000
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

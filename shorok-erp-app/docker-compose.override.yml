@@ -1,0 +1,21 @@
+# Dev override: hot-reload mounts for api/web. Postgres uses the base service.
+# Run apps on host (`pnpm dev`) for the smoothest dev loop; this override is
+# here so `docker compose up` works for a fully-containerized run too.
+services:
+  api:
+    command: pnpm --filter @shorok/api start:dev
+    volumes:
+      - ./:/repo
+      - api_node_modules:/repo/node_modules
+    working_dir: /repo
+
+  web:
+    command: pnpm --filter @shorok/web dev
+    volumes:
+      - ./:/repo
+      - web_node_modules:/repo/node_modules
+    working_dir: /repo
+
+volumes:
+  api_node_modules:
+  web_node_modules:
