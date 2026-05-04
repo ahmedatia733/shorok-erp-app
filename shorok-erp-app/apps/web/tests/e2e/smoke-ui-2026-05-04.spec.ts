@@ -209,6 +209,47 @@ test.describe("Smoke — authenticated UI flows", () => {
     await page.waitForURL(/\/ar\/expenses(\?|$)/, { timeout: 5000 });
   });
 
+  test("Sidebar: unimplemented routes render as disabled (no 404 leaks)", async ({ page }) => {
+    await page.goto("/ar/orders");
+    // Wait for the (app) layout to finish auth-loading and render the sidebar.
+    await page.waitForSelector("aside nav");
+
+    // Implemented routes must be real <a> with hrefs.
+    for (const path of ["/dashboard", "/orders", "/inventory", "/expenses"]) {
+      const link = page.locator(`aside nav a[href="/ar${path}"]`);
+      await expect(link).toHaveCount(1);
+    }
+
+    // Unimplemented routes must NOT have an <a>; they must render as
+    // aria-disabled spans with the "coming soon" affordance.
+    for (const path of [
+      "/suppliers",
+      "/factory-orders",
+      "/reports",
+      "/audit",
+      "/settings",
+    ]) {
+      await expect(page.locator(`aside nav a[href="/ar${path}"]`)).toHaveCount(0);
+    }
+    const disabled = page.locator('aside nav span[aria-disabled="true"]');
+    await expect(disabled).toHaveCount(5);
+    // The localized "soon" badge must render on each.
+    const soonText = (await disabled.allInnerTexts()).join(" ");
+    expect(/قريباً/.test(soonText)).toBe(true);
+
+    await page.screenshot({ path: `${SHOTS}/45-ar-sidebar-disabled.png`, fullPage: true });
+
+    // Same shape in EN, with the EN "Soon" label.
+    await page.goto("/en/orders");
+    await page.waitForSelector("aside nav");
+    await expect(page.locator('aside nav span[aria-disabled="true"]')).toHaveCount(5);
+    const enSoon = (
+      await page.locator('aside nav span[aria-disabled="true"]').allInnerTexts()
+    ).join(" ");
+    // Tailwind's `uppercase` class makes the rendered text "SOON".
+    expect(/soon/i.test(enSoon)).toBe(true);
+  });
+
   test("Locale: language-switcher round-trip preserves auth", async ({ page }) => {
     await page.goto("/ar/inventory");
     // Switch to EN via the LanguageSwitcher in the (app) header.

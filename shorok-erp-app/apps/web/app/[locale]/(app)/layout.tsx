@@ -34,25 +34,42 @@ export default function ProtectedAppLayout({ children }: { children: React.React
         <nav className="space-y-1 text-sm">
           {(
             [
-              ["dashboard", "/dashboard"],
-              ["orders", "/orders"],
-              ["inventory", "/inventory"],
-              ["expenses", "/expenses"],
-              ["suppliers", "/suppliers"],
-              ["factoryOrders", "/factory-orders"],
-              ["reports", "/reports"],
-              ["audit", "/audit"],
-              ["settings", "/settings"],
+              // [key, path, enabled]. enabled=false until that module's
+              // user-story ships — keeps the nav from leaking 404s.
+              ["dashboard", "/dashboard", true],
+              ["orders", "/orders", true],
+              ["inventory", "/inventory", true],
+              ["expenses", "/expenses", true],
+              ["suppliers", "/suppliers", false],
+              ["factoryOrders", "/factory-orders", false],
+              ["reports", "/reports", false],
+              ["audit", "/audit", false],
+              ["settings", "/settings", false],
             ] as const
-          ).map(([key, path]) => (
-            <a
-              key={key}
-              href={`/${locale}${path}`}
-              className="block rounded-md px-3 py-2 hover:bg-background"
-            >
-              {t(key)}
-            </a>
-          ))}
+          ).map(([key, path, enabled]) =>
+            enabled ? (
+              <a
+                key={key}
+                href={`/${locale}${path}`}
+                className="block rounded-md px-3 py-2 hover:bg-background"
+              >
+                {t(key)}
+              </a>
+            ) : (
+              <span
+                key={key}
+                aria-disabled="true"
+                tabIndex={-1}
+                title={tCommon("comingSoon")}
+                className="flex items-center justify-between rounded-md px-3 py-2 text-textSecondary opacity-60 cursor-not-allowed"
+              >
+                <span>{t(key)}</span>
+                <span className="text-xs uppercase tracking-wide">
+                  {tCommon("comingSoon")}
+                </span>
+              </span>
+            ),
+          )}
         </nav>
       </aside>
 
