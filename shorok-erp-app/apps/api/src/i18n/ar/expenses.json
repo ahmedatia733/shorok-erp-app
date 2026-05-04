@@ -1,0 +1,6 @@
+{
+  "summary": {
+    "created": "{actor} سجّل مصروفاً بقيمة {amount} ج.م في فرع {branch}: {description}.",
+    "correction": "{actor} سجّل تسوية مصروف بقيمة {amount} ج.م في فرع {branch}: {description}."
+  }
+}

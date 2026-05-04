@@ -108,3 +108,14 @@ export class ConflictError extends ApiError {
     super(ERROR_CODES.CONFLICT, 409, i18nKey, details);
   }
 }
+
+/**
+ * Business-rule validation failure (HTTP 409). Distinct from ConflictError
+ * because the response code is `validation_failed` — clients can detect it
+ * generically and surface field-level guidance via `details`.
+ */
+export class ValidationError extends ApiError {
+  constructor(details?: Record<string, unknown>) {
+    super(ERROR_CODES.VALIDATION_FAILED, 409, "errors.validation_failed", details);
+  }
+}

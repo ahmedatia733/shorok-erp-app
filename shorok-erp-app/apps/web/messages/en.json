@@ -190,6 +190,37 @@
       "submitting": "Recording…"
     }
   },
+  "expenses": {
+    "title": "Expenses",
+    "create": "Add expense",
+    "branchPicker": "Select branch",
+    "filters": {
+      "from": "From",
+      "to": "To",
+      "paidFromAccount": "Paid from"
+    },
+    "columns": {
+      "date": "Date",
+      "description": "Description",
+      "amount": "Amount",
+      "paidFromAccount": "Paid from",
+      "actor": "User"
+    },
+    "empty": "No expenses yet.",
+    "loadFailed": "Could not load expenses.",
+    "form": {
+      "date": "Date",
+      "description": "Description",
+      "descriptionPlaceholder": "e.g. Transport expense",
+      "amount": "Amount (EGP)",
+      "amountHint": "Positive to record an expense; negative is a correction (OWNER only).",
+      "paidFromAccount": "Paid from account",
+      "paidFromAccountPlaceholder": "e.g. cash / branch-safe",
+      "submit": "Save expense",
+      "submitting": "Saving…",
+      "successCreated": "Expense recorded."
+    }
+  },
   "audit": {
     "tailTitle": "Activity log",
     "emptyTitle": "No activity yet",

@@ -190,6 +190,37 @@
       "submitting": "جارٍ التسجيل…"
     }
   },
+  "expenses": {
+    "title": "المصروفات",
+    "create": "إضافة مصروف",
+    "branchPicker": "اختر الفرع",
+    "filters": {
+      "from": "من",
+      "to": "إلى",
+      "paidFromAccount": "من حساب"
+    },
+    "columns": {
+      "date": "التاريخ",
+      "description": "البيان",
+      "amount": "المبلغ",
+      "paidFromAccount": "من حساب",
+      "actor": "المستخدم"
+    },
+    "empty": "لا توجد مصروفات بعد.",
+    "loadFailed": "تعذر تحميل المصروفات.",
+    "form": {
+      "date": "التاريخ",
+      "description": "البيان",
+      "descriptionPlaceholder": "مثال: مصروف نقل",
+      "amount": "المبلغ (ج.م)",
+      "amountHint": "موجب لتسجيل مصروف، سالب للتسوية (للمالك فقط).",
+      "paidFromAccount": "من حساب",
+      "paidFromAccountPlaceholder": "مثال: نقدي / خزينة الفرع",
+      "submit": "حفظ المصروف",
+      "submitting": "جارٍ الحفظ…",
+      "successCreated": "تم تسجيل المصروف."
+    }
+  },
   "audit": {
     "tailTitle": "سجل الأنشطة",
     "emptyTitle": "لا توجد أنشطة بعد",

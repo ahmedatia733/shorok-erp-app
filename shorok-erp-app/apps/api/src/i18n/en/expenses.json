@@ -1,0 +1,6 @@
+{
+  "summary": {
+    "created": "{actor} recorded an expense of {amount} EGP at {branch}: {description}.",
+    "correction": "{actor} posted an expense correction of {amount} EGP at {branch}: {description}."
+  }
+}
