@@ -280,6 +280,34 @@
     "empty": "لا توجد عمليات لهذا المورد بعد.",
     "loadFailed": "تعذر تحميل السجل."
   },
+  "dashboard": {
+    "title": "لوحة التحكم",
+    "allBranches": "كل الفروع",
+    "kpis": {
+      "sales": "إجمالي المبيعات",
+      "collected": "المحصل",
+      "remaining": "المتبقي",
+      "expenses": "المصروفات"
+    },
+    "stockSummary": "ملخص المخزون",
+    "boardsOnHand": "الألواح المتاحة",
+    "metersOnHand": "الأمتار المتاحة",
+    "supplierBalances": "أرصدة الموردين",
+    "supplierName": "المورد",
+    "balance": "الرصيد",
+    "noSuppliers": "لا يوجد موردون نشطون.",
+    "lowStockTitle": "تنبيه مخزون منخفض",
+    "lowStockEmpty": "لا توجد منتجات تحت الحد الأدنى.",
+    "product": "المنتج",
+    "openInventory": "عرض المخزون",
+    "loadFailed": "تعذر تحميل لوحة التحكم."
+  },
+  "reports": {
+    "title": "التقارير",
+    "placeholderTitle": "صفحة التقارير قيد الإعداد.",
+    "placeholderBody": "تواصل معنا لطلب تقرير محدد. حالياً يمكنك مراجعة لوحة التحكم لكل المؤشرات الأساسية.",
+    "goToDashboard": "الذهاب إلى لوحة التحكم"
+  },
   "audit": {
     "tailTitle": "سجل الأنشطة",
     "emptyTitle": "لا توجد أنشطة بعد",

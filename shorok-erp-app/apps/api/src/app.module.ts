@@ -19,6 +19,7 @@ import { FactoryLedgerModule } from "./modules/factory-ledger/factory-ledger.mod
 import { InventoryModule } from "./modules/inventory/inventory.module";
 import { OrdersModule } from "./modules/orders/orders.module";
 import { ProductsModule } from "./modules/products/products.module";
+import { ReportsModule } from "./modules/reports/reports.module";
 import { SuppliersModule } from "./modules/suppliers/suppliers.module";
 import { SystemSettingsModule } from "./modules/system-settings/system-settings.module";
 import { UsersModule } from "./modules/users/users.module";
@@ -64,6 +65,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     OrdersModule,
     ExpensesModule,
     FactoryLedgerModule,
+    ReportsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ApiErrorFilter },

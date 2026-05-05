@@ -42,7 +42,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
               ["expenses", "/expenses", true],
               ["suppliers", "/suppliers", true],
               ["factoryOrders", "/factory-orders", true],
-              ["reports", "/reports", false],
+              ["reports", "/reports", true],
               ["audit", "/audit", false],
               ["settings", "/settings", false],
             ] as const

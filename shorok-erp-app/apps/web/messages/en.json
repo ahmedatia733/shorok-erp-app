@@ -280,6 +280,34 @@
     "empty": "No entries for this supplier yet.",
     "loadFailed": "Could not load ledger."
   },
+  "dashboard": {
+    "title": "Dashboard",
+    "allBranches": "All branches",
+    "kpis": {
+      "sales": "Total sales",
+      "collected": "Collected",
+      "remaining": "Remaining",
+      "expenses": "Expenses"
+    },
+    "stockSummary": "Stock summary",
+    "boardsOnHand": "Boards on hand",
+    "metersOnHand": "Meters on hand",
+    "supplierBalances": "Supplier balances",
+    "supplierName": "Supplier",
+    "balance": "Balance",
+    "noSuppliers": "No active suppliers.",
+    "lowStockTitle": "Low stock alert",
+    "lowStockEmpty": "No items below the low-stock threshold.",
+    "product": "Product",
+    "openInventory": "Open inventory",
+    "loadFailed": "Could not load the dashboard."
+  },
+  "reports": {
+    "title": "Reports",
+    "placeholderTitle": "The reports page is being prepared.",
+    "placeholderBody": "Contact us to request a specific report. The dashboard already covers the core KPIs.",
+    "goToDashboard": "Go to the dashboard"
+  },
   "audit": {
     "tailTitle": "Activity log",
     "emptyTitle": "No activity yet",
