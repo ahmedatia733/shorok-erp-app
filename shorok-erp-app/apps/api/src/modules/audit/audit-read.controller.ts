@@ -32,6 +32,17 @@ export class AuditReadController {
     const where: Record<string, unknown> = {};
     if (query.entityType) where.entityType = query.entityType;
     if (query.entityId) where.entityId = query.entityId;
+    if (query.actorId) where.actorId = query.actorId;
+    if (query.from || query.to) {
+      const created: Record<string, Date> = {};
+      if (query.from) created.gte = new Date(query.from);
+      if (query.to) {
+        const upper = new Date(query.to);
+        upper.setUTCHours(23, 59, 59, 999);
+        created.lte = upper;
+      }
+      where.createdAt = created;
+    }
 
     if (user.role !== "OWNER") {
       // BRANCH_MANAGER scoping: this MVP implementation only returns rows

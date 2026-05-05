@@ -308,6 +308,20 @@
     "placeholderBody": "Contact us to request a specific report. The dashboard already covers the core KPIs.",
     "goToDashboard": "Go to the dashboard"
   },
+  "auditViewer": {
+    "title": "Audit log",
+    "entityType": "Entity type",
+    "entityId": "Entity id",
+    "actor": "Actor",
+    "actorIdHint": "Actor user id (UUID)",
+    "from": "From",
+    "to": "To",
+    "apply": "Apply filters",
+    "reset": "Reset",
+    "showDetails": "Show details",
+    "hideDetails": "Hide details",
+    "loadFailed": "Could not load the audit log."
+  },
   "audit": {
     "tailTitle": "Activity log",
     "emptyTitle": "No activity yet",

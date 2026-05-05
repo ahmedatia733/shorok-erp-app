@@ -43,7 +43,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
               ["suppliers", "/suppliers", true],
               ["factoryOrders", "/factory-orders", true],
               ["reports", "/reports", true],
-              ["audit", "/audit", false],
+              ["audit", "/audit", true],
               ["settings", "/settings", false],
             ] as const
           ).map(([key, path, enabled]) =>
