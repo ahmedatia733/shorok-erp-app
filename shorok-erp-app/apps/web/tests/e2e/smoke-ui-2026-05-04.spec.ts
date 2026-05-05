@@ -74,6 +74,9 @@ test.describe("Smoke — login form drives the auth flow", () => {
 
     await page.goto("/ar/inventory");
     await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
+    // Wait for the (app) layout to finish auth-loading and the inventory
+    // page to mount its h1 — otherwise we race past the loading state.
+    await page.waitForSelector("h1");
     const heading = (await page.locator("h1, h2").allInnerTexts()).join(" ");
     expect(HAS_ARABIC.test(heading)).toBe(true);
     expect(KEY_LEAK.test(heading)).toBe(false);
