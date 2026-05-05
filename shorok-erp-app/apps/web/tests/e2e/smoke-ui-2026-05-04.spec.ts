@@ -224,32 +224,22 @@ test.describe("Smoke — authenticated UI flows", () => {
       "/factory-orders",
       "/reports",
       "/audit",
+      "/settings",
     ]) {
       const link = page.locator(`aside nav a[href="/ar${path}"]`);
       await expect(link).toHaveCount(1);
     }
 
-    // Only /settings (US8) remains as an aria-disabled span.
-    for (const path of ["/settings"]) {
-      await expect(page.locator(`aside nav a[href="/ar${path}"]`)).toHaveCount(0);
-    }
+    // All MVP modules ship; nothing should still be marked disabled.
     const disabled = page.locator('aside nav span[aria-disabled="true"]');
-    await expect(disabled).toHaveCount(1);
-    // The localized "soon" badge must render on each.
-    const soonText = (await disabled.allInnerTexts()).join(" ");
-    expect(/قريباً/.test(soonText)).toBe(true);
+    await expect(disabled).toHaveCount(0);
 
     await page.screenshot({ path: `${SHOTS}/45-ar-sidebar-disabled.png`, fullPage: true });
 
     // Same shape in EN, with the EN "Soon" label.
     await page.goto("/en/orders");
     await page.waitForSelector("aside nav");
-    await expect(page.locator('aside nav span[aria-disabled="true"]')).toHaveCount(1);
-    const enSoon = (
-      await page.locator('aside nav span[aria-disabled="true"]').allInnerTexts()
-    ).join(" ");
-    // Tailwind's `uppercase` class makes the rendered text "SOON".
-    expect(/soon/i.test(enSoon)).toBe(true);
+    await expect(page.locator('aside nav span[aria-disabled="true"]')).toHaveCount(0);
   });
 
   test("Locale: language-switcher round-trip preserves auth", async ({ page }) => {

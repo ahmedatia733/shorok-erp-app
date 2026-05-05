@@ -308,6 +308,81 @@
     "placeholderBody": "تواصل معنا لطلب تقرير محدد. حالياً يمكنك مراجعة لوحة التحكم لكل المؤشرات الأساسية.",
     "goToDashboard": "الذهاب إلى لوحة التحكم"
   },
+  "settings": {
+    "title": "الإعدادات",
+    "nav": {
+      "users": "المستخدمون",
+      "branches": "الفروع",
+      "products": "المنتجات",
+      "suppliers": "الموردون",
+      "system": "الإعدادات العامة",
+      "import": "الاستيراد"
+    },
+    "users": {
+      "title": "المستخدمون",
+      "create": "إضافة مستخدم",
+      "name": "الاسم",
+      "phone": "رقم الهاتف",
+      "password": "كلمة المرور (٨ أحرف على الأقل)",
+      "role": "الدور",
+      "roles": {
+        "OWNER": "مالك",
+        "BRANCH_MANAGER": "مدير فرع",
+        "ACCOUNTANT": "محاسب",
+        "VIEWER": "مشاهد"
+      },
+      "allowedBranches": "الفروع المسموح بها",
+      "status": "الحالة",
+      "active": "نشط",
+      "disabled": "موقوف",
+      "disable": "إيقاف",
+      "enable": "تفعيل",
+      "actions": "إجراءات",
+      "successCreated": "تم إنشاء المستخدم.",
+      "loadFailed": "تعذر تحميل المستخدمين."
+    },
+    "branches": {
+      "title": "الفروع",
+      "create": "إضافة فرع",
+      "nameAr": "الاسم بالعربية",
+      "nameEn": "الاسم بالإنجليزية",
+      "location": "الموقع (اختياري)",
+      "status": "الحالة",
+      "active": "نشط",
+      "archived": "موقوف",
+      "deactivate": "إيقاف الفرع",
+      "actions": "إجراءات",
+      "successCreated": "تم إنشاء الفرع.",
+      "loadFailed": "تعذر تحميل الفروع."
+    },
+    "products": {
+      "title": "المنتجات",
+      "createSku": "إضافة منتج",
+      "createVariant": "إضافة مقاس",
+      "code": "الكود",
+      "colorAr": "اللون بالعربية",
+      "colorEn": "اللون بالإنجليزية",
+      "sku": "المنتج",
+      "size": "المقاس (متر/لوح)",
+      "salePrice": "سعر البيع للمتر",
+      "purchasePrice": "سعر الشراء للمتر",
+      "tolerance": "هامش السعر %",
+      "noVariants": "لا توجد مقاسات لهذا المنتج بعد.",
+      "active": "نشط",
+      "archived": "موقوف",
+      "status": "الحالة",
+      "loadFailed": "تعذر تحميل المنتجات."
+    },
+    "system": {
+      "title": "الإعدادات العامة",
+      "tolerance": "هامش انحراف السعر الافتراضي %",
+      "toleranceHint": "تُستخدم عند إنشاء طلب لم يحدد المنتج هامشاً خاصاً به.",
+      "threshold": "حد المخزون المنخفض (لوح)",
+      "thresholdHint": "أقل عدد ألواح يبدأ عنده تنبيه المخزون المنخفض.",
+      "successSaved": "تم حفظ الإعدادات.",
+      "loadFailed": "تعذر تحميل الإعدادات."
+    }
+  },
   "auditViewer": {
     "title": "سجل الأنشطة",
     "entityType": "نوع الكيان",

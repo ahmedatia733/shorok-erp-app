@@ -44,7 +44,8 @@ export default function ProtectedAppLayout({ children }: { children: React.React
               ["factoryOrders", "/factory-orders", true],
               ["reports", "/reports", true],
               ["audit", "/audit", true],
-              ["settings", "/settings", false],
+              // Settings is OWNER-only — render only for OWNER, hide otherwise.
+              ["settings", "/settings", user.role === "OWNER"],
             ] as const
           ).map(([key, path, enabled]) =>
             enabled ? (

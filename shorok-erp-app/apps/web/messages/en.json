@@ -308,6 +308,81 @@
     "placeholderBody": "Contact us to request a specific report. The dashboard already covers the core KPIs.",
     "goToDashboard": "Go to the dashboard"
   },
+  "settings": {
+    "title": "Settings",
+    "nav": {
+      "users": "Users",
+      "branches": "Branches",
+      "products": "Products",
+      "suppliers": "Suppliers",
+      "system": "System settings",
+      "import": "Import"
+    },
+    "users": {
+      "title": "Users",
+      "create": "Add user",
+      "name": "Name",
+      "phone": "Phone number",
+      "password": "Password (min 8 chars)",
+      "role": "Role",
+      "roles": {
+        "OWNER": "Owner",
+        "BRANCH_MANAGER": "Branch manager",
+        "ACCOUNTANT": "Accountant",
+        "VIEWER": "Viewer"
+      },
+      "allowedBranches": "Allowed branches",
+      "status": "Status",
+      "active": "Active",
+      "disabled": "Disabled",
+      "disable": "Disable",
+      "enable": "Enable",
+      "actions": "Actions",
+      "successCreated": "User created.",
+      "loadFailed": "Could not load users."
+    },
+    "branches": {
+      "title": "Branches",
+      "create": "Add branch",
+      "nameAr": "Name (Arabic)",
+      "nameEn": "Name (English)",
+      "location": "Location (optional)",
+      "status": "Status",
+      "active": "Active",
+      "archived": "Archived",
+      "deactivate": "Deactivate",
+      "actions": "Actions",
+      "successCreated": "Branch created.",
+      "loadFailed": "Could not load branches."
+    },
+    "products": {
+      "title": "Products",
+      "createSku": "Add product",
+      "createVariant": "Add variant",
+      "code": "Code",
+      "colorAr": "Color (Arabic)",
+      "colorEn": "Color (English)",
+      "sku": "Product",
+      "size": "Size (m / board)",
+      "salePrice": "Default sale price / m",
+      "purchasePrice": "Default purchase price / m",
+      "tolerance": "Price tolerance %",
+      "noVariants": "No variants for this product yet.",
+      "active": "Active",
+      "archived": "Archived",
+      "status": "Status",
+      "loadFailed": "Could not load products."
+    },
+    "system": {
+      "title": "System settings",
+      "tolerance": "Default price-override tolerance %",
+      "toleranceHint": "Used when an order's product variant doesn't override its own tolerance.",
+      "threshold": "Low-stock threshold (boards)",
+      "thresholdHint": "Smallest boards-on-hand value that still triggers a low-stock alert.",
+      "successSaved": "Settings saved.",
+      "loadFailed": "Could not load settings."
+    }
+  },
   "auditViewer": {
     "title": "Audit log",
     "entityType": "Entity type",
