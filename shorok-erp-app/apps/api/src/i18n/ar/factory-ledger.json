@@ -1,0 +1,6 @@
+{
+  "summary": {
+    "purchase_recorded": "{actor} سجّل طلبية مصنع للمورد {supplier}: {boards} لوح ({meters} م) بقيمة {total} ج.م، مدفوع {paid} ج.م.",
+    "payment_recorded": "{actor} سجّل سداد {paid} ج.م للمورد {supplier}."
+  }
+}

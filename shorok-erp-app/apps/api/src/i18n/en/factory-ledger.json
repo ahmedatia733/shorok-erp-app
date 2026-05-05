@@ -1,0 +1,6 @@
+{
+  "summary": {
+    "purchase_recorded": "{actor} recorded a factory purchase from {supplier}: {boards} boards ({meters} m) for {total} EGP, {paid} EGP paid.",
+    "payment_recorded": "{actor} recorded a payment of {paid} EGP to {supplier}."
+  }
+}
