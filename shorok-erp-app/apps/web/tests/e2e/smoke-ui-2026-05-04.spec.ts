@@ -215,24 +215,24 @@ test.describe("Smoke — authenticated UI flows", () => {
     await page.waitForSelector("aside nav");
 
     // Implemented routes must be real <a> with hrefs.
-    for (const path of ["/dashboard", "/orders", "/inventory", "/expenses"]) {
+    for (const path of [
+      "/dashboard",
+      "/orders",
+      "/inventory",
+      "/expenses",
+      "/suppliers",
+      "/factory-orders",
+    ]) {
       const link = page.locator(`aside nav a[href="/ar${path}"]`);
       await expect(link).toHaveCount(1);
     }
 
-    // Unimplemented routes must NOT have an <a>; they must render as
-    // aria-disabled spans with the "coming soon" affordance.
-    for (const path of [
-      "/suppliers",
-      "/factory-orders",
-      "/reports",
-      "/audit",
-      "/settings",
-    ]) {
+    // Unimplemented routes (US5/US6/US8) must render as aria-disabled spans.
+    for (const path of ["/reports", "/audit", "/settings"]) {
       await expect(page.locator(`aside nav a[href="/ar${path}"]`)).toHaveCount(0);
     }
     const disabled = page.locator('aside nav span[aria-disabled="true"]');
-    await expect(disabled).toHaveCount(5);
+    await expect(disabled).toHaveCount(3);
     // The localized "soon" badge must render on each.
     const soonText = (await disabled.allInnerTexts()).join(" ");
     expect(/قريباً/.test(soonText)).toBe(true);
@@ -242,7 +242,7 @@ test.describe("Smoke — authenticated UI flows", () => {
     // Same shape in EN, with the EN "Soon" label.
     await page.goto("/en/orders");
     await page.waitForSelector("aside nav");
-    await expect(page.locator('aside nav span[aria-disabled="true"]')).toHaveCount(5);
+    await expect(page.locator('aside nav span[aria-disabled="true"]')).toHaveCount(3);
     const enSoon = (
       await page.locator('aside nav span[aria-disabled="true"]').allInnerTexts()
     ).join(" ");

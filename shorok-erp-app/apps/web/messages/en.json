@@ -222,6 +222,64 @@
       "successCreated": "Expense recorded."
     }
   },
+  "suppliers": {
+    "title": "Suppliers",
+    "create": "Add supplier",
+    "editTitle": "Edit supplier",
+    "edit": "Edit",
+    "nameAr": "Name (Arabic)",
+    "nameEn": "Name (English)",
+    "status": "Status",
+    "active": "Active",
+    "archived": "Archived",
+    "actions": "Actions",
+    "submitting": "Saving…",
+    "successCreated": "Supplier created.",
+    "successUpdated": "Supplier updated.",
+    "empty": "No suppliers yet.",
+    "loadFailed": "Could not load suppliers."
+  },
+  "factory_orders": {
+    "title": "Factory orders",
+    "create": "Add entry",
+    "ledger": "Ledger",
+    "supplier": "Supplier",
+    "noSuppliers": "No active suppliers.",
+    "archivedTag": "Archived",
+    "pickSupplier": "Pick a supplier to view the ledger.",
+    "totalPurchases": "Total purchases",
+    "totalPaid": "Total paid",
+    "currentBalance": "Current balance",
+    "kindLabel": "Entry type",
+    "kinds": {
+      "purchase": "Purchase",
+      "payment": "Payment"
+    },
+    "columns": {
+      "date": "Date",
+      "kind": "Type",
+      "product": "Product",
+      "boards": "Boards",
+      "total": "Total",
+      "paid": "Paid",
+      "balance": "Balance"
+    },
+    "form": {
+      "orderDate": "Date",
+      "variant": "Product",
+      "boardsQuantity": "Boards",
+      "purchasePricePerMeter": "Purchase price per meter",
+      "paidAmountPurchase": "Amount paid with this purchase",
+      "paidAmountPayment": "Payment amount",
+      "paidHintPurchase": "Leave 0 if the purchase is fully on credit.",
+      "paidHintPayment": "Must be greater than 0.",
+      "notes": "Notes (optional)",
+      "submit": "Save",
+      "submitting": "Saving…"
+    },
+    "empty": "No entries for this supplier yet.",
+    "loadFailed": "Could not load ledger."
+  },
   "audit": {
     "tailTitle": "Activity log",
     "emptyTitle": "No activity yet",

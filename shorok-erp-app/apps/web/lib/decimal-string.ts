@@ -77,6 +77,21 @@ function addDigits(a: string, b: string): string {
   return result;
 }
 
+/** a + b. Returns null if either input is malformed. */
+export function decimalAdd(a: string, b: string): string | null {
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa || !pb) return null;
+  if (pa.negative === pb.negative) {
+    return format({ negative: pa.negative, digits: addDigits(pa.digits, pb.digits) });
+  }
+  // Mixed signs: subtract the smaller from the larger.
+  const cmp = compareDigits(pa.digits, pb.digits);
+  if (cmp === 0) return format({ negative: false, digits: "0" });
+  if (cmp > 0) return format({ negative: pa.negative, digits: subDigits(pa.digits, pb.digits) });
+  return format({ negative: pb.negative, digits: subDigits(pb.digits, pa.digits) });
+}
+
 /** counted − expected. Returns null if either input is malformed. */
 export function decimalSub(counted: string, expected: string): string | null {
   const a = parse(counted);

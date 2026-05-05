@@ -222,6 +222,64 @@
       "successCreated": "تم تسجيل المصروف."
     }
   },
+  "suppliers": {
+    "title": "الموردون",
+    "create": "إضافة مورد",
+    "editTitle": "تعديل المورد",
+    "edit": "تعديل",
+    "nameAr": "الاسم بالعربية",
+    "nameEn": "الاسم بالإنجليزية",
+    "status": "الحالة",
+    "active": "نشط",
+    "archived": "موقوف",
+    "actions": "إجراءات",
+    "submitting": "جارٍ الحفظ…",
+    "successCreated": "تم إنشاء المورد.",
+    "successUpdated": "تم تحديث المورد.",
+    "empty": "لا يوجد موردون بعد.",
+    "loadFailed": "تعذر تحميل الموردين."
+  },
+  "factory_orders": {
+    "title": "طلبيات المصنع",
+    "create": "إضافة عملية",
+    "ledger": "السجل",
+    "supplier": "المورد",
+    "noSuppliers": "لا يوجد موردون نشطون.",
+    "archivedTag": "موقوف",
+    "pickSupplier": "اختر مورداً لعرض السجل.",
+    "totalPurchases": "إجمالي المشتريات",
+    "totalPaid": "إجمالي المدفوع",
+    "currentBalance": "الرصيد الحالي",
+    "kindLabel": "نوع العملية",
+    "kinds": {
+      "purchase": "طلبية شراء",
+      "payment": "سداد"
+    },
+    "columns": {
+      "date": "التاريخ",
+      "kind": "النوع",
+      "product": "المنتج",
+      "boards": "الألواح",
+      "total": "الإجمالي",
+      "paid": "المدفوع",
+      "balance": "الرصيد"
+    },
+    "form": {
+      "orderDate": "التاريخ",
+      "variant": "المنتج",
+      "boardsQuantity": "عدد الألواح",
+      "purchasePricePerMeter": "سعر الشراء للمتر",
+      "paidAmountPurchase": "المبلغ المدفوع مع الطلبية",
+      "paidAmountPayment": "مبلغ السداد",
+      "paidHintPurchase": "اتركه صفراً إذا كانت الطلبية بالكامل آجلة.",
+      "paidHintPayment": "يجب أن يكون أكبر من صفر.",
+      "notes": "ملاحظات (اختياري)",
+      "submit": "حفظ",
+      "submitting": "جارٍ الحفظ…"
+    },
+    "empty": "لا توجد عمليات لهذا المورد بعد.",
+    "loadFailed": "تعذر تحميل السجل."
+  },
   "audit": {
     "tailTitle": "سجل الأنشطة",
     "emptyTitle": "لا توجد أنشطة بعد",
