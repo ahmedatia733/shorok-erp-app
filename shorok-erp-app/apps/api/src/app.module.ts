@@ -30,6 +30,7 @@ import { PrismaModule } from "./prisma/prisma.module";
     ConfigModule.forRoot({
       isGlobal: true,
       validate: loadEnv,
+      envFilePath: ["../../.env", ".env"],
     }),
     LoggerModule.forRoot({
       pinoHttp: {
