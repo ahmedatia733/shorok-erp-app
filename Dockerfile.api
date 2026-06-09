@@ -28,4 +28,4 @@ ENV NODE_ENV=production
 EXPOSE 3001
 # Run migrations then start the API.
 # PORT is injected by Railway; main.ts reads process.env.PORT.
-CMD ["sh", "-c", "pnpm --filter @shorok/api exec prisma migrate deploy && node apps/api/dist/main"]
+CMD ["sh", "-c", "pnpm --filter @shorok/api exec prisma migrate deploy && pnpm --filter @shorok/api exec prisma db seed && node apps/api/dist/main"]
