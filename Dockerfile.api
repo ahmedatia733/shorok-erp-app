@@ -10,6 +10,8 @@ RUN pnpm install --frozen-lockfile
 # ── Builder: generate Prisma client + compile NestJS ──────────────────────
 FROM deps AS builder
 WORKDIR /repo/shorok-erp-app
+# Build shared package first so @shorok/shared dist/index.d.ts exists for tsc
+RUN pnpm --filter @shorok/shared build
 RUN pnpm --filter @shorok/api exec prisma generate
 RUN pnpm --filter @shorok/api build
 
