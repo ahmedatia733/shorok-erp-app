@@ -15,7 +15,7 @@ async function bootstrap() {
     origin: (origin, callback) => callback(null, origin ?? false),
   });
 
-  const port = Number(process.env.API_PORT ?? 3001);
+  const port = Number(process.env.PORT ?? process.env.API_PORT ?? 3001);
   await app.listen(port);
   app.get(Logger).log(`Shorok API listening on :${port}`);
 }

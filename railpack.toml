@@ -1,0 +1,9 @@
+# Railpack config for Shorok ERP monorepo.
+# Both Railway services (API + Web) build from this repo root.
+# The start.sh script routes to the correct app via RAILWAY_SERVICE_NAME.
+
+[build]
+cmd = "corepack enable && corepack prepare pnpm@10.33.0 --activate && cd shorok-erp-app && pnpm install --frozen-lockfile && pnpm --filter @shorok/api prisma:generate && pnpm --filter @shorok/api build && pnpm --filter @shorok/web build"
+
+[deploy]
+startCommand = "bash start.sh"
