@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# ── Deps: install workspace dependencies ──────────────────────────────────
+FROM node:20-alpine AS deps
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+WORKDIR /repo
+COPY . .
+WORKDIR /repo/shorok-erp-app
+RUN pnpm install --frozen-lockfile
+
+# ── Builder: compile Next.js ───────────────────────────────────────────────
+FROM deps AS builder
+WORKDIR /repo/shorok-erp-app
+# NEXT_PUBLIC_API_BASE_URL must be available at build time (it is inlined
+# by Next.js into the client bundle). Railway injects it from service vars.
+ARG NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+RUN pnpm --filter @shorok/web build
+
+# ── Runner: lean production image ─────────────────────────────────────────
+FROM node:20-alpine AS runner
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+WORKDIR /repo
+COPY --from=builder /repo .
+WORKDIR /repo/shorok-erp-app
+ENV NODE_ENV=production
+EXPOSE 3000
+# PORT is injected by Railway; next start reads process.env.PORT.
+CMD ["pnpm", "--filter", "@shorok/web", "start"]

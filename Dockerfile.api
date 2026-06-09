@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1
+# ── Deps: install workspace dependencies ──────────────────────────────────
+FROM node:20-alpine AS deps
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+WORKDIR /repo
+COPY . .
+WORKDIR /repo/shorok-erp-app
+RUN pnpm install --frozen-lockfile
+
+# ── Builder: generate Prisma client + compile NestJS ──────────────────────
+FROM deps AS builder
+WORKDIR /repo/shorok-erp-app
+RUN pnpm --filter @shorok/api exec prisma generate
+RUN pnpm --filter @shorok/api build
+
+# ── Runner: lean production image ─────────────────────────────────────────
+FROM node:20-alpine AS runner
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+WORKDIR /repo
+COPY --from=builder /repo .
+WORKDIR /repo/shorok-erp-app
+ENV NODE_ENV=production
+EXPOSE 3001
+# Run migrations then start the API.
+# PORT is injected by Railway; main.ts reads process.env.PORT.
+CMD ["sh", "-c", "pnpm --filter @shorok/api exec prisma migrate deploy && node apps/api/dist/main"]
