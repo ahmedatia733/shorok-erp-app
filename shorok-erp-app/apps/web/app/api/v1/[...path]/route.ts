@@ -18,15 +18,18 @@ async function handler(
   // which would cause the browser to double-decompress and get nothing.
   headers.set("accept-encoding", "identity");
 
+  const hasBody =
+    request.method !== "GET" &&
+    request.method !== "HEAD" &&
+    request.body !== null;
+
   const upstreamRes = await fetch(url, {
     method: request.method,
     headers,
-    body:
-      request.method !== "GET" && request.method !== "HEAD"
-        ? request.body
-        : undefined,
+    body: hasBody ? request.body : undefined,
+    // duplex required when body is a ReadableStream (Node 18+)
     // @ts-expect-error — duplex is valid but not yet in TS lib
-    duplex: "half",
+    ...(hasBody ? { duplex: "half" } : {}),
   });
 
   // Buffer the body so transfer-encoding / content-encoding quirks don't
