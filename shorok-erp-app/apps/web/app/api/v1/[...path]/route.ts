@@ -11,9 +11,12 @@ async function handler(
   const search = request.nextUrl.search;
   const url = `${API_ORIGIN()}/api/v1/${path.join("/")}${search}`;
 
-  // Forward all request headers except host (Next.js sets it for us).
   const headers = new Headers(request.headers);
   headers.delete("host");
+  // Ask the API for plain (uncompressed) data so Node's fetch doesn't
+  // decode gzip while we simultaneously forward content-encoding: gzip,
+  // which would cause the browser to double-decompress and get nothing.
+  headers.set("accept-encoding", "identity");
 
   const upstreamRes = await fetch(url, {
     method: request.method,
@@ -22,15 +25,21 @@ async function handler(
       request.method !== "GET" && request.method !== "HEAD"
         ? request.body
         : undefined,
-    // Required for streaming body forwarding in Node 18+
     // @ts-expect-error — duplex is valid but not yet in TS lib
     duplex: "half",
   });
 
-  // Forward the response including Set-Cookie (refresh token).
-  return new NextResponse(upstreamRes.body, {
+  // Buffer the body so transfer-encoding / content-encoding quirks don't
+  // produce an empty response when the client reads it.
+  const body = await upstreamRes.arrayBuffer();
+
+  const responseHeaders = new Headers(upstreamRes.headers);
+  responseHeaders.delete("transfer-encoding");
+  responseHeaders.delete("content-encoding");
+
+  return new NextResponse(body, {
     status: upstreamRes.status,
-    headers: upstreamRes.headers,
+    headers: responseHeaders,
   });
 }
 
