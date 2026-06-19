@@ -22,7 +22,8 @@
     "factoryOrders": "طلبيات المصنع",
     "reports": "التقارير",
     "audit": "سجل الأنشطة",
-    "settings": "الإعدادات"
+    "settings": "الإعدادات",
+    "import": "استيراد البيانات"
   },
   "auth": {
     "title": "تسجيل الدخول",
@@ -412,6 +413,37 @@
       "IMPORT": "استيراد",
       "LOGIN": "تسجيل دخول",
       "LOGOUT": "تسجيل خروج"
+    }
+  },
+  "import": {
+    "title": "استيراد البيانات من Excel",
+    "step1Title": "تحديد الملف والنوع",
+    "step2Title": "مراجعة البيانات قبل الاستيراد",
+    "kindLabel": "نوع البيانات",
+    "kinds": {
+      "orders": "طلبات العملاء",
+      "inventory": "حركة المخزون",
+      "expenses": "المصروفات",
+      "factory_ledger": "كشف حساب المصنع"
+    },
+    "fileLabel": "ملف Excel (.xlsx)",
+    "previewBtn": "معاينة البيانات",
+    "commitBtn": "تأكيد الاستيراد",
+    "rowsParsed": "إجمالي الصفوف",
+    "rowsValid": "صفوف صالحة",
+    "missingSkus": "أكواد منتجات غير موجودة في النظام",
+    "missingVariants": "مقاسات غير موجودة في النظام",
+    "validationErrors": "أخطاء في البيانات",
+    "errorRow": "الصف",
+    "errorMsg": "الخطأ",
+    "readyToImport": "البيانات جاهزة للاستيراد بدون أخطاء.",
+    "successMsg": "تم الاستيراد بنجاح",
+    "importedRows": "تم استيراد {count} صف بنجاح.",
+    "importAnother": "استيراد ملف آخر",
+    "errors": {
+      "branchRequired": "يرجى اختيار الفرع أولاً.",
+      "supplierRequired": "يرجى اختيار المورد أولاً.",
+      "generic": "حدث خطأ أثناء معالجة الملف."
     }
   }
 }

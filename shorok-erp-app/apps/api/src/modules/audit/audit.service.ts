@@ -15,6 +15,8 @@ export interface AuditWriteInput {
   /** Human-readable summaries — both locales required by Constitution Principle III. */
   summaryAr: string;
   summaryEn: string;
+  /** Optional back-dated timestamp for data import migration. */
+  createdAt?: Date;
 }
 
 /**
@@ -43,6 +45,7 @@ export class AuditService {
             : (input.afterSnapshot as Prisma.InputJsonValue),
         humanReadableSummaryAr: input.summaryAr,
         humanReadableSummaryEn: input.summaryEn,
+        createdAt: input.createdAt,
       },
     });
   }

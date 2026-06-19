@@ -22,7 +22,8 @@
     "factoryOrders": "Factory Orders",
     "reports": "Reports",
     "audit": "Audit Log",
-    "settings": "Settings"
+    "settings": "Settings",
+    "import": "Data Import"
   },
   "auth": {
     "title": "Sign in",
@@ -412,6 +413,37 @@
       "IMPORT": "Imported",
       "LOGIN": "Signed in",
       "LOGOUT": "Signed out"
+    }
+  },
+  "import": {
+    "title": "Import Data from Excel",
+    "step1Title": "Select File & Type",
+    "step2Title": "Review Before Importing",
+    "kindLabel": "Data Type",
+    "kinds": {
+      "orders": "Customer Orders",
+      "inventory": "Inventory Movement",
+      "expenses": "Expenses",
+      "factory_ledger": "Factory Account Statement"
+    },
+    "fileLabel": "Excel File (.xlsx)",
+    "previewBtn": "Preview Data",
+    "commitBtn": "Confirm Import",
+    "rowsParsed": "Total Rows",
+    "rowsValid": "Valid Rows",
+    "missingSkus": "Product codes not found in system",
+    "missingVariants": "Sizes not found in system",
+    "validationErrors": "Data Errors",
+    "errorRow": "Row",
+    "errorMsg": "Error",
+    "readyToImport": "Data is ready to import with no errors.",
+    "successMsg": "Import completed successfully",
+    "importedRows": "{count} rows imported successfully.",
+    "importAnother": "Import another file",
+    "errors": {
+      "branchRequired": "Please select a branch first.",
+      "supplierRequired": "Please select a supplier first.",
+      "generic": "An error occurred while processing the file."
     }
   }
 }

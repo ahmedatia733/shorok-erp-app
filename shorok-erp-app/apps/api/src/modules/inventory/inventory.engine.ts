@@ -25,6 +25,8 @@ export interface InventoryApplyInput {
   humanReadableNote?: string | null;
   /** Optional: provide a pre-existing transactional client to run inside an outer tx. */
   tx?: Prisma.TransactionClient;
+  /** Optional back-dated timestamp for data import migration. */
+  createdAt?: Date;
 }
 
 export interface InventoryApplyResult {
@@ -156,6 +158,7 @@ export class InventoryEngine {
         referenceId: input.reference?.id ?? null,
         createdBy: input.actor.id,
         humanReadableNote: input.humanReadableNote ?? null,
+        createdAt: input.createdAt,
       },
     });
 
@@ -176,6 +179,7 @@ export class InventoryEngine {
       },
       summaryAr: input.summaryAr,
       summaryEn: input.summaryEn,
+      createdAt: input.createdAt,
     });
 
     return {
