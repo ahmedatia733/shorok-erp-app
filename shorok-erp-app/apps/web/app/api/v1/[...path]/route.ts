@@ -32,18 +32,18 @@ async function handler(
     body: reqBody,
   });
 
-  // Buffer the body so transfer-encoding / content-encoding quirks don't
-  // produce an empty response when the client reads it.
-  const body = await upstreamRes.arrayBuffer();
-
   const responseHeaders = new Headers(upstreamRes.headers);
   responseHeaders.delete("transfer-encoding");
   responseHeaders.delete("content-encoding");
 
-  return new NextResponse(body, {
-    status: upstreamRes.status,
-    headers: responseHeaders,
-  });
+  // 204/304 must have no body — the Response constructor throws otherwise.
+  if (upstreamRes.status === 204 || upstreamRes.status === 304) {
+    return new NextResponse(null, { status: upstreamRes.status, headers: responseHeaders });
+  }
+
+  // Buffer the body so encoding quirks don't produce an empty response.
+  const body = await upstreamRes.arrayBuffer();
+  return new NextResponse(body, { status: upstreamRes.status, headers: responseHeaders });
 }
 
 export const GET = handler;
