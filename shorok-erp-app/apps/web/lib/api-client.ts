@@ -10,7 +10,9 @@
  */
 import type { AppLocale } from "../i18n";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api/v1";
+// Relative URL — Next.js rewrites /api/v1/* → the real API (see next.config.mjs).
+// Works in both local dev and production without any build-time env baking.
+const API_BASE = "/api/v1";
 
 export interface ApiErrorPayload {
   code: string;
