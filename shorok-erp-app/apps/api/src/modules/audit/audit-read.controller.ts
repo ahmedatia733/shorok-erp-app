@@ -221,6 +221,72 @@ export class AuditReadController {
           return { entityType: "factory_ledger_entry", entityId: log.entityId };
         }
 
+        case "DELETE:customer_order": {
+          if (!snap.id) throw new ConflictError("errors.revert_not_supported");
+          // Recreate the order with the original UUID so entityId still matches.
+          const order = await tx.customerOrder.create({
+            data: {
+              id: snap.id as string,
+              branchId: snap.branchId as string,
+              orderDate: new Date(snap.orderDate as string),
+              customerName: snap.customerName as string,
+              productVariantId: snap.productVariantId as string,
+              boardsQuantity: snap.boardsQuantity as string,
+              metersQuantity: snap.metersQuantity as string,
+              salePricePerMeter: snap.salePricePerMeter as string,
+              priceOverrideStatus: snap.priceOverrideStatus as "WITHIN_TOLERANCE" | "PENDING_APPROVAL" | "APPROVED",
+              priceApprovedByUserId: (snap.priceApprovedByUserId as string | null) ?? null,
+              priceApprovedAt: snap.priceApprovedAt ? new Date(snap.priceApprovedAt as string) : null,
+              requiredAmount: snap.requiredAmount as string,
+              collectedAmount: snap.collectedAmount as string,
+              remainingAmount: snap.remainingAmount as string,
+              receiverName: (snap.receiverName as string | null) ?? null,
+              status: snap.status as "DRAFT" | "PENDING_PRICE_APPROVAL" | "CONFIRMED" | "PARTIALLY_COLLECTED" | "PAID" | "CANCELLED",
+              createdBy: (snap.createdBy as string) ?? user.id,
+            },
+          });
+          // Recreate collections.
+          const collections = (snap.collections as Array<Record<string, unknown>>) ?? [];
+          for (const c of collections) {
+            await tx.orderCollection.create({
+              data: {
+                id: c.id as string,
+                orderId: order.id,
+                collectedAt: new Date(c.collectedAt as string),
+                amount: c.amount as string,
+                paidToAccount: (c.paidToAccount as string | null) ?? null,
+                createdBy: c.createdBy as string,
+              },
+            });
+          }
+          // Recreate inventory movements.
+          const movements = (snap.movements as Array<Record<string, unknown>>) ?? [];
+          for (const m of movements) {
+            await tx.inventoryMovement.create({
+              data: {
+                id: m.id as string,
+                branchId: m.branchId as string,
+                productVariantId: m.productVariantId as string,
+                movementType: m.movementType as "RECEIPT" | "SALE" | "ADJUSTMENT" | "COUNT_CORRECTION",
+                boardsQuantity: m.boardsQuantity as string,
+                metersQuantity: m.metersQuantity as string,
+                referenceType: (m.referenceType as string | null) ?? null,
+                referenceId: (m.referenceId as string | null) ?? null,
+                createdBy: m.createdBy as string,
+                humanReadableNote: (m.humanReadableNote as string | null) ?? null,
+              },
+            });
+          }
+          await this.audit.write({
+            tx, actorId: user.id, action: "CREATE",
+            entityType: "customer_order", entityId: order.id,
+            afterSnapshot: snap,
+            summaryAr: `${user.name} تراجع عن حذف طلب: ${order.customerName} — ${order.requiredAmount} ج.م`,
+            summaryEn: `${user.name} reverted deletion of order: ${order.customerName} — ${order.requiredAmount} EGP`,
+          });
+          return { entityType: "customer_order", entityId: order.id };
+        }
+
         case "UPDATE:branch": {
           if (!log.entityId) throw new ConflictError("errors.revert_not_supported");
           const branch = await tx.branch.findUnique({ where: { id: log.entityId } });

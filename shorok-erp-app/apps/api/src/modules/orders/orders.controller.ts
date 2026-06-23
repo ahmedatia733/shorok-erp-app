@@ -158,9 +158,17 @@ export class OrdersController {
     return this.prisma.runInTransaction(async (tx) => {
       const order = await tx.customerOrder.findUnique({
         where: { id },
-        include: { productVariant: { include: { sku: true } } },
+        include: {
+          productVariant: { include: { sku: true } },
+          collections: true,
+        },
       });
       if (!order) throw new NotFoundError({ id });
+
+      // Snapshot collections and inventory movements before deletion.
+      const movements = await tx.inventoryMovement.findMany({
+        where: { referenceId: id, referenceType: "sale_order" },
+      });
 
       // Delete child collections (FK restrict, must go first).
       await tx.orderCollection.deleteMany({ where: { orderId: id } });
@@ -179,9 +187,43 @@ export class OrdersController {
         entityType: "customer_order",
         entityId: id,
         beforeSnapshot: {
+          id: order.id,
+          branchId: order.branchId,
+          orderDate: order.orderDate,
           customerName: order.customerName,
-          status: order.status,
+          productVariantId: order.productVariantId,
+          boardsQuantity: order.boardsQuantity.toString(),
+          metersQuantity: order.metersQuantity.toString(),
+          salePricePerMeter: order.salePricePerMeter.toString(),
+          priceOverrideStatus: order.priceOverrideStatus,
+          priceApprovedByUserId: order.priceApprovedByUserId,
+          priceApprovedAt: order.priceApprovedAt,
           requiredAmount: order.requiredAmount.toString(),
+          collectedAmount: order.collectedAmount.toString(),
+          remainingAmount: order.remainingAmount.toString(),
+          receiverName: order.receiverName,
+          status: order.status,
+          createdBy: order.createdBy,
+          createdAt: order.createdAt,
+          collections: order.collections.map((c) => ({
+            id: c.id,
+            collectedAt: c.collectedAt,
+            amount: c.amount.toString(),
+            paidToAccount: c.paidToAccount,
+            createdBy: c.createdBy,
+          })),
+          movements: movements.map((m) => ({
+            id: m.id,
+            branchId: m.branchId,
+            productVariantId: m.productVariantId,
+            movementType: m.movementType,
+            boardsQuantity: m.boardsQuantity.toString(),
+            metersQuantity: m.metersQuantity.toString(),
+            referenceType: m.referenceType,
+            referenceId: m.referenceId,
+            createdBy: m.createdBy,
+            humanReadableNote: m.humanReadableNote,
+          })),
         },
         summaryAr: `${user.name} حذف طلب: ${order.customerName} — ${order.requiredAmount} ج.م`,
         summaryEn: `${user.name} deleted order: ${order.customerName} — ${order.requiredAmount} EGP`,
