@@ -11,7 +11,13 @@
     "loadMore": "Load more",
     "language": "Language",
     "logout": "Sign out",
-    "comingSoon": "Soon"
+    "comingSoon": "Soon",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteConfirm": "Delete?",
+    "yes": "Yes",
+    "no": "No",
+    "actionFailed": "Action failed, please try again."
   },
   "nav": {
     "dashboard": "Dashboard",

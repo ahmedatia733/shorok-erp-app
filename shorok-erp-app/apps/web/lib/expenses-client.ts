@@ -42,3 +42,11 @@ export const createExpense = (body: {
   amount: string;
   paidFromAccount: string;
 }) => apiCall<ExpenseRow>("/expenses", { method: "POST", body });
+
+export const updateExpense = (
+  id: string,
+  body: Partial<{ expenseDate: string; description: string; amount: string; paidFromAccount: string }>,
+) => apiCall<ExpenseRow>(`/expenses/${id}`, { method: "PATCH", body });
+
+export const deleteExpense = (id: string) =>
+  apiCall<void>(`/expenses/${id}`, { method: "DELETE" });

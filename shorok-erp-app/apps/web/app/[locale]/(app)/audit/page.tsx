@@ -21,6 +21,7 @@ const actionVariant: Record<
 > = {
   CREATE: "info",
   UPDATE: "neutral",
+  DELETE: "danger",
   CONFIRM: "success",
   CANCEL: "danger",
   APPROVE: "success",

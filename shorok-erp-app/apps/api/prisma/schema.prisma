@@ -61,6 +61,7 @@ enum PriceOverrideStatus {
 enum AuditAction {
   CREATE
   UPDATE
+  DELETE
   CONFIRM
   CANCEL
   APPROVE

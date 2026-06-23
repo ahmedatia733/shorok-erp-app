@@ -110,3 +110,6 @@ export const recordCollection = (
   id: string,
   body: { amount: string; paidToAccount?: string },
 ) => apiCall<OrderDetail>(`/orders/${id}/collections`, { method: "POST", body });
+
+export const deleteOrder = (id: string) =>
+  apiCall<void>(`/orders/${id}`, { method: "DELETE" });

@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { I18nService } from "nestjs-i18n";
 import {
   CreateExpenseRequestSchema,
   ExpensesQuerySchema,
+  UpdateExpenseRequestSchema,
   type CreateExpenseRequest,
   type ExpensesQuery,
+  type UpdateExpenseRequest,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -153,6 +155,95 @@ export class ExpensesController {
         paidFromAccount: expense.paidFromAccount,
         createdAt: expense.createdAt,
       };
+    });
+  }
+
+  /** PATCH /expenses/:id — OWNER only: edit any expense field. */
+  @Patch(":id")
+  @Roles("OWNER")
+  async update(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(UpdateExpenseRequestSchema)) body: UpdateExpenseRequest,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.prisma.runInTransaction(async (tx) => {
+      const before = await tx.expense.findUnique({ where: { id } });
+      if (!before) throw new NotFoundError({ id });
+
+      const newAmount = body.amount !== undefined ? new Decimal(body.amount) : null;
+      if (newAmount?.isZero()) throw new ValidationError({ reason: "amount_must_be_nonzero" });
+
+      const after = await tx.expense.update({
+        where: { id },
+        data: {
+          ...(body.expenseDate ? { expenseDate: new Date(body.expenseDate) } : {}),
+          ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(newAmount ? { amount: newAmount.toFixed(2) } : {}),
+          ...(body.paidFromAccount !== undefined ? { paidFromAccount: body.paidFromAccount } : {}),
+        },
+        include: { creator: { select: { id: true, name: true } } },
+      });
+
+      const branch = await tx.branch.findUnique({ where: { id: before.branchId } });
+      await this.audit.write({
+        tx,
+        actorId: user.id,
+        action: "UPDATE",
+        entityType: "expense",
+        entityId: id,
+        beforeSnapshot: {
+          amount: before.amount.toString(),
+          description: before.description,
+          expenseDate: before.expenseDate,
+          paidFromAccount: before.paidFromAccount,
+        },
+        afterSnapshot: {
+          amount: after.amount.toString(),
+          description: after.description,
+          expenseDate: after.expenseDate,
+          paidFromAccount: after.paidFromAccount,
+        },
+        summaryAr: `${user.name} عدّل مصروف: ${after.description} — ${after.amount} ج.م`,
+        summaryEn: `${user.name} edited expense: ${after.description} — ${after.amount} EGP`,
+      });
+
+      return {
+        id: after.id,
+        branchId: after.branchId,
+        expenseDate: after.expenseDate,
+        description: after.description,
+        amount: after.amount.toString(),
+        paidFromAccount: after.paidFromAccount,
+        createdAt: after.createdAt,
+        creator: after.creator,
+      };
+    });
+  }
+
+  /** DELETE /expenses/:id — OWNER only: hard delete. */
+  @Delete(":id")
+  @Roles("OWNER")
+  @HttpCode(204)
+  async remove(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.prisma.runInTransaction(async (tx) => {
+      const expense = await tx.expense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundError({ id });
+
+      await tx.expense.delete({ where: { id } });
+
+      await this.audit.write({
+        tx,
+        actorId: user.id,
+        action: "DELETE",
+        entityType: "expense",
+        entityId: id,
+        beforeSnapshot: {
+          amount: expense.amount.toString(),
+          description: expense.description,
+        },
+        summaryAr: `${user.name} حذف مصروف: ${expense.description} — ${expense.amount} ج.م`,
+        summaryEn: `${user.name} deleted expense: ${expense.description} — ${expense.amount} EGP`,
+      });
     });
   }
 }

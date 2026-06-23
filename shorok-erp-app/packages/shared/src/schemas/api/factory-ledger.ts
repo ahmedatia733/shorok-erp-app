@@ -20,6 +20,16 @@ export const CreateFactoryPaymentRequestSchema = z.object({
 });
 export type CreateFactoryPaymentRequest = z.infer<typeof CreateFactoryPaymentRequestSchema>;
 
+export const UpdateFactoryEntryRequestSchema = z.object({
+  orderDate: IsoDateSchema.optional(),
+  productVariantId: UuidSchema.optional(),
+  boardsQuantity: DecimalStringSchema.optional(),
+  purchasePricePerMeter: DecimalStringSchema.optional(),
+  paidAmount: DecimalStringSchema.optional(),
+  notes: z.string().max(2000).nullish(),
+});
+export type UpdateFactoryEntryRequest = z.infer<typeof UpdateFactoryEntryRequestSchema>;
+
 export const FactoryLedgerQuerySchema = z.object({
   supplierId: UuidSchema,
   cursor: z.string().nullish(),

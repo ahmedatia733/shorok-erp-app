@@ -58,3 +58,18 @@ export const createFactoryPayment = (body: {
   paidAmount: string;
   notes?: string;
 }) => apiCall<FactoryEntryRow>("/factory-ledger/payments", { method: "POST", body });
+
+export const updateFactoryEntry = (
+  id: string,
+  body: Partial<{
+    orderDate: string;
+    productVariantId: string;
+    boardsQuantity: string;
+    purchasePricePerMeter: string;
+    paidAmount: string;
+    notes: string | null;
+  }>,
+) => apiCall<FactoryEntryRow>(`/factory-ledger/entries/${id}`, { method: "PATCH", body });
+
+export const deleteFactoryEntry = (id: string) =>
+  apiCall<void>(`/factory-ledger/entries/${id}`, { method: "DELETE" });

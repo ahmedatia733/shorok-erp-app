@@ -14,7 +14,7 @@ import { Skeleton } from "../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../components/ui/table";
 import { BranchPicker } from "../../../../components/features/inventory/branch-picker";
 import { ApiClientError } from "../../../../lib/api-client";
-import { listOrders, type OrderListRow } from "../../../../lib/orders-client";
+import { listOrders, deleteOrder, type OrderListRow } from "../../../../lib/orders-client";
 import { formatCurrency, formatDate } from "../../../../lib/format";
 import { useCurrentUser } from "../../../../lib/auth";
 
@@ -42,6 +42,7 @@ const STATUS_BADGE: Record<
 
 export default function OrdersPage() {
   const t = useTranslations("orders");
+  const tCommon = useTranslations("common");
   const locale = useLocale() as AppLocale;
   const user = useCurrentUser();
   const [branchId, setBranchId] = useState<string | null>(null);
@@ -49,6 +50,24 @@ export default function OrdersPage() {
   const [rows, setRows] = useState<OrderListRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const isOwner = user?.role === "OWNER";
+
+  const handleDelete = async () => {
+    if (!deletingId) return;
+    setDeleteLoading(true);
+    try {
+      await deleteOrder(deletingId);
+      setRows((prev) => prev.filter((r) => r.id !== deletingId));
+      setDeletingId(null);
+    } catch {
+      setError(tCommon("actionFailed"));
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!branchId) {
@@ -143,46 +162,80 @@ export default function OrdersPage() {
                     {t("columns.remaining")}
                   </TH>
                   <TH>{t("columns.status")}</TH>
+                  {isOwner ? <TH className="w-28"></TH> : null}
                 </TR>
               </THead>
               <TBody>
-                {rows.map((o) => (
-                  <TR key={o.id}>
-                    <TD dir="ltr">{formatDate(o.orderDate, locale)}</TD>
-                    <TD>
-                      <Link
-                        href={`/${locale}/orders/${o.id}`}
-                        className="text-info hover:underline"
-                      >
-                        {o.customerName}
-                      </Link>
-                    </TD>
-                    <TD>
-                      {locale === "ar"
-                        ? o.productVariant.sku.colorNameAr
-                        : o.productVariant.sku.colorNameEn}{" "}
-                      <span dir="ltr" className="text-textSecondary">
-                        · {o.productVariant.sku.code} ·{" "}
-                        {o.productVariant.sizeMetersPerBoard}m
-                      </span>
-                    </TD>
-                    <TD dir="ltr" className="text-end">
-                      {o.boardsQuantity}
-                    </TD>
-                    <TD dir="ltr" className="text-end font-medium">
-                      {formatCurrency(o.requiredAmount, locale)}
-                    </TD>
-                    <TD dir="ltr" className="text-end">
-                      {formatCurrency(o.collectedAmount, locale)}
-                    </TD>
-                    <TD dir="ltr" className="text-end">
-                      {formatCurrency(o.remainingAmount, locale)}
-                    </TD>
-                    <TD>
-                      <Badge variant={STATUS_BADGE[o.status]}>{t(`status.${o.status}`)}</Badge>
-                    </TD>
-                  </TR>
-                ))}
+                {rows.map((o) => {
+                  const isDeleting = deletingId === o.id;
+                  return (
+                    <TR key={o.id}>
+                      <TD dir="ltr">{formatDate(o.orderDate, locale)}</TD>
+                      <TD>
+                        <Link
+                          href={`/${locale}/orders/${o.id}`}
+                          className="text-info hover:underline"
+                        >
+                          {o.customerName}
+                        </Link>
+                      </TD>
+                      <TD>
+                        {locale === "ar"
+                          ? o.productVariant.sku.colorNameAr
+                          : o.productVariant.sku.colorNameEn}{" "}
+                        <span dir="ltr" className="text-textSecondary">
+                          · {o.productVariant.sku.code} ·{" "}
+                          {o.productVariant.sizeMetersPerBoard}m
+                        </span>
+                      </TD>
+                      <TD dir="ltr" className="text-end">
+                        {o.boardsQuantity}
+                      </TD>
+                      <TD dir="ltr" className="text-end font-medium">
+                        {formatCurrency(o.requiredAmount, locale)}
+                      </TD>
+                      <TD dir="ltr" className="text-end">
+                        {formatCurrency(o.collectedAmount, locale)}
+                      </TD>
+                      <TD dir="ltr" className="text-end">
+                        {formatCurrency(o.remainingAmount, locale)}
+                      </TD>
+                      <TD>
+                        <Badge variant={STATUS_BADGE[o.status]}>{t(`status.${o.status}`)}</Badge>
+                      </TD>
+                      {isOwner ? (
+                        <TD>
+                          {isDeleting ? (
+                            <span className="flex items-center gap-2 text-xs">
+                              <span className="text-error">{tCommon("deleteConfirm")}</span>
+                              <button
+                                onClick={() => void handleDelete()}
+                                disabled={deleteLoading}
+                                className="text-error font-medium hover:underline disabled:opacity-50"
+                              >
+                                {tCommon("yes")}
+                              </button>
+                              <button
+                                onClick={() => setDeletingId(null)}
+                                className="text-textSecondary hover:underline"
+                              >
+                                {tCommon("no")}
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              title={tCommon("delete")}
+                              onClick={() => setDeletingId(o.id)}
+                              className="text-base"
+                            >
+                              🗑️
+                            </button>
+                          )}
+                        </TD>
+                      ) : null}
+                    </TR>
+                  );
+                })}
               </TBody>
             </Table>
           )}

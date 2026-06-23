@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, HttpCode, Param, Patch, Post } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import {
   CreateOrderRequestSchema,
@@ -147,6 +147,45 @@ export class OrdersController {
       });
 
       return after;
+    });
+  }
+
+  /** DELETE /orders/:id — OWNER only: hard delete (cascade collections + inventory movements). */
+  @Delete(":id")
+  @Roles("OWNER")
+  @HttpCode(204)
+  async remove(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.prisma.runInTransaction(async (tx) => {
+      const order = await tx.customerOrder.findUnique({
+        where: { id },
+        include: { productVariant: { include: { sku: true } } },
+      });
+      if (!order) throw new NotFoundError({ id });
+
+      // Delete child collections (FK restrict, must go first).
+      await tx.orderCollection.deleteMany({ where: { orderId: id } });
+
+      // Remove any inventory movements tied to this order.
+      await tx.inventoryMovement.deleteMany({
+        where: { referenceId: id, referenceType: "sale_order" },
+      });
+
+      await tx.customerOrder.delete({ where: { id } });
+
+      await this.audit.write({
+        tx,
+        actorId: user.id,
+        action: "DELETE",
+        entityType: "customer_order",
+        entityId: id,
+        beforeSnapshot: {
+          customerName: order.customerName,
+          status: order.status,
+          requiredAmount: order.requiredAmount.toString(),
+        },
+        summaryAr: `${user.name} حذف طلب: ${order.customerName} — ${order.requiredAmount} ج.م`,
+        summaryEn: `${user.name} deleted order: ${order.customerName} — ${order.requiredAmount} EGP`,
+      });
     });
   }
 }

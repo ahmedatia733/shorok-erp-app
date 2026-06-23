@@ -43,6 +43,7 @@ export type PriceOverrideStatus = z.infer<typeof PriceOverrideStatusEnum>;
 export const AuditActionEnum = z.enum([
   "CREATE",
   "UPDATE",
+  "DELETE",
   "CONFIRM",
   "CANCEL",
   "APPROVE",

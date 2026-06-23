@@ -30,6 +30,7 @@ interface PageResponse {
 const actionVariant: Record<AuditAction, "neutral" | "success" | "warning" | "danger" | "info"> = {
   CREATE: "info",
   UPDATE: "neutral",
+  DELETE: "danger",
   CONFIRM: "success",
   CANCEL: "danger",
   APPROVE: "success",

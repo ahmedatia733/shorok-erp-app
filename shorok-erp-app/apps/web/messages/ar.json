@@ -11,7 +11,13 @@
     "loadMore": "تحميل المزيد",
     "language": "اللغة",
     "logout": "تسجيل الخروج",
-    "comingSoon": "قريباً"
+    "comingSoon": "قريباً",
+    "edit": "تعديل",
+    "delete": "حذف",
+    "deleteConfirm": "هل تريد الحذف؟",
+    "yes": "نعم",
+    "no": "لا",
+    "actionFailed": "فشل تنفيذ الإجراء، حاول مرة أخرى."
   },
   "nav": {
     "dashboard": "لوحة التحكم",
