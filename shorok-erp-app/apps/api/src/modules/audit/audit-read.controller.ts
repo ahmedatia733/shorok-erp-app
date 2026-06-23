@@ -221,6 +221,107 @@ export class AuditReadController {
           return { entityType: "factory_ledger_entry", entityId: log.entityId };
         }
 
+        case "UPDATE:branch": {
+          if (!log.entityId) throw new ConflictError("errors.revert_not_supported");
+          const branch = await tx.branch.findUnique({ where: { id: log.entityId } });
+          if (!branch) throw new NotFoundError({ branchId: log.entityId });
+          const updated = await tx.branch.update({
+            where: { id: log.entityId },
+            data: {
+              ...(snap.nameAr !== undefined ? { nameAr: snap.nameAr as string } : {}),
+              ...(snap.nameEn !== undefined ? { nameEn: snap.nameEn as string } : {}),
+              ...(snap.location !== undefined ? { location: (snap.location as string | null) ?? null } : {}),
+              ...(snap.active !== undefined ? { active: snap.active as boolean } : {}),
+            },
+          });
+          await this.audit.write({
+            tx, actorId: user.id, action: "UPDATE",
+            entityType: "branch", entityId: log.entityId,
+            beforeSnapshot: log.afterSnapshot, afterSnapshot: snap,
+            summaryAr: `${user.name} تراجع عن تعديل الفرع «${updated.nameAr}»`,
+            summaryEn: `${user.name} reverted update of branch "${updated.nameEn}"`,
+          });
+          return { entityType: "branch", entityId: log.entityId };
+        }
+
+        case "UPDATE:supplier": {
+          if (!log.entityId) throw new ConflictError("errors.revert_not_supported");
+          const supplier = await tx.supplier.findUnique({ where: { id: log.entityId } });
+          if (!supplier) throw new NotFoundError({ supplierId: log.entityId });
+          const updated = await tx.supplier.update({
+            where: { id: log.entityId },
+            data: {
+              ...(snap.nameAr !== undefined ? { nameAr: snap.nameAr as string } : {}),
+              ...(snap.nameEn !== undefined ? { nameEn: snap.nameEn as string } : {}),
+              ...(snap.active !== undefined ? { active: snap.active as boolean } : {}),
+            },
+          });
+          await this.audit.write({
+            tx, actorId: user.id, action: "UPDATE",
+            entityType: "supplier", entityId: log.entityId,
+            beforeSnapshot: log.afterSnapshot, afterSnapshot: snap,
+            summaryAr: `${user.name} تراجع عن تعديل المورد «${updated.nameAr}»`,
+            summaryEn: `${user.name} reverted update of supplier "${updated.nameEn}"`,
+          });
+          return { entityType: "supplier", entityId: log.entityId };
+        }
+
+        case "UPDATE:product_sku": {
+          if (!log.entityId) throw new ConflictError("errors.revert_not_supported");
+          const sku = await tx.productSku.findUnique({ where: { id: log.entityId } });
+          if (!sku) throw new NotFoundError({ skuId: log.entityId });
+          const updated = await tx.productSku.update({
+            where: { id: log.entityId },
+            data: {
+              ...(snap.code !== undefined ? { code: snap.code as string } : {}),
+              ...(snap.colorNameAr !== undefined ? { colorNameAr: snap.colorNameAr as string } : {}),
+              ...(snap.colorNameEn !== undefined ? { colorNameEn: snap.colorNameEn as string } : {}),
+              ...(snap.category !== undefined ? { category: snap.category as "NORMAL" | "SPECIAL" } : {}),
+              ...(snap.active !== undefined ? { active: snap.active as boolean } : {}),
+            },
+          });
+          await this.audit.write({
+            tx, actorId: user.id, action: "UPDATE",
+            entityType: "product_sku", entityId: log.entityId,
+            beforeSnapshot: log.afterSnapshot, afterSnapshot: snap,
+            summaryAr: `${user.name} تراجع عن تعديل الصنف «${updated.colorNameAr}»`,
+            summaryEn: `${user.name} reverted update of SKU "${updated.colorNameEn}"`,
+          });
+          return { entityType: "product_sku", entityId: log.entityId };
+        }
+
+        case "UPDATE:product_variant": {
+          if (!log.entityId) throw new ConflictError("errors.revert_not_supported");
+          const variant = await tx.productVariant.findUnique({ where: { id: log.entityId } });
+          if (!variant) throw new NotFoundError({ variantId: log.entityId });
+          await tx.productVariant.update({
+            where: { id: log.entityId },
+            data: {
+              ...(snap.defaultSalePricePerMeter !== undefined
+                ? { defaultSalePricePerMeter: snap.defaultSalePricePerMeter as string }
+                : {}),
+              ...(snap.defaultPurchasePricePerMeter !== undefined
+                ? { defaultPurchasePricePerMeter: snap.defaultPurchasePricePerMeter as string }
+                : {}),
+              ...(snap.priceOverrideTolerancePercent !== undefined
+                ? { priceOverrideTolerancePercent: (snap.priceOverrideTolerancePercent as string | null) ?? null }
+                : {}),
+              ...(snap.sizeMetersPerBoard !== undefined
+                ? { sizeMetersPerBoard: snap.sizeMetersPerBoard as string }
+                : {}),
+              ...(snap.active !== undefined ? { active: snap.active as boolean } : {}),
+            },
+          });
+          await this.audit.write({
+            tx, actorId: user.id, action: "UPDATE",
+            entityType: "product_variant", entityId: log.entityId,
+            beforeSnapshot: log.afterSnapshot, afterSnapshot: snap,
+            summaryAr: `${user.name} تراجع عن تعديل مقاس المنتج`,
+            summaryEn: `${user.name} reverted update of product variant`,
+          });
+          return { entityType: "product_variant", entityId: log.entityId };
+        }
+
         default:
           throw new ConflictError("errors.revert_not_supported");
       }

@@ -197,6 +197,10 @@ const REVERTIBLE = new Set([
   "UPDATE:expense",
   "DELETE:factory_ledger_entry",
   "UPDATE:factory_ledger_entry",
+  "UPDATE:branch",
+  "UPDATE:supplier",
+  "UPDATE:product_sku",
+  "UPDATE:product_variant",
 ]);
 
 function AuditRow({ row, locale }: { row: AuditLog; locale: AppLocale }) {
