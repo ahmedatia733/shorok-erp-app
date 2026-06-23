@@ -307,7 +307,8 @@
     "lowStockEmpty": "لا توجد منتجات تحت الحد الأدنى.",
     "product": "المنتج",
     "openInventory": "عرض المخزون",
-    "loadFailed": "تعذر تحميل لوحة التحكم."
+    "loadFailed": "تعذر تحميل لوحة التحكم.",
+    "refresh": "تحديث"
   },
   "reports": {
     "title": "التقارير",
@@ -402,7 +403,12 @@
     "reset": "إعادة ضبط",
     "showDetails": "إظهار التفاصيل",
     "hideDetails": "إخفاء التفاصيل",
-    "loadFailed": "تعذر تحميل سجل الأنشطة."
+    "loadFailed": "تعذر تحميل سجل الأنشطة.",
+    "revert": "تراجع",
+    "reverting": "جارٍ التراجع…",
+    "revertSuccess": "تم التراجع بنجاح",
+    "revertFailed": "فشل التراجع",
+    "revertNotSupported": "لا يمكن التراجع عن هذا الإجراء"
   },
   "audit": {
     "tailTitle": "سجل الأنشطة",
@@ -412,6 +418,7 @@
     "actions": {
       "CREATE": "إنشاء",
       "UPDATE": "تحديث",
+      "DELETE": "حذف",
       "CONFIRM": "تأكيد",
       "CANCEL": "إلغاء",
       "APPROVE": "اعتماد",

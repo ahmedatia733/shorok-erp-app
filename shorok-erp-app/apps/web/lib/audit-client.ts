@@ -18,6 +18,11 @@ export interface AuditFilters {
   limit?: number;
 }
 
+export const revertAuditAction = (logId: string) =>
+  apiCall<{ entityType: string; entityId: string }>(`/audit/logs/${logId}/revert`, {
+    method: "POST",
+  });
+
 export const listAudit = (f: AuditFilters) => {
   const params = new URLSearchParams();
   params.set("limit", String(f.limit ?? 20));

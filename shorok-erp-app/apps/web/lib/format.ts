@@ -18,20 +18,22 @@ export function formatNumber(value: number | string, locale: AppLocale): string 
 
 export function formatDate(value: Date | string, locale: AppLocale): string {
   const d = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-EG" : "en-US", {
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar-EG" : "en-GB", {
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
-    month: "short",
-    day: "numeric",
+    calendar: "gregory",
   }).format(d);
 }
 
 export function formatDateTime(value: Date | string, locale: AppLocale): string {
   const d = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar-EG" : "en-US", {
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar-EG" : "en-GB", {
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
-    month: "short",
-    day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    calendar: "gregory",
   }).format(d);
 }

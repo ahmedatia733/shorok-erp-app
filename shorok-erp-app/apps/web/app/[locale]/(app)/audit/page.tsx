@@ -12,7 +12,8 @@ import { EmptyState } from "../../../../components/ui/empty-state";
 import { Input } from "../../../../components/ui/input";
 import { Label } from "../../../../components/ui/label";
 import { Skeleton } from "../../../../components/ui/skeleton";
-import { listAudit, type AuditFilters } from "../../../../lib/audit-client";
+import { listAudit, revertAuditAction, type AuditFilters } from "../../../../lib/audit-client";
+import { useCurrentUser } from "../../../../lib/auth";
 import { formatDateTime } from "../../../../lib/format";
 
 const actionVariant: Record<
@@ -191,14 +192,41 @@ export default function AuditViewerPage() {
   );
 }
 
+const REVERTIBLE = new Set([
+  "DELETE:expense",
+  "UPDATE:expense",
+  "DELETE:factory_ledger_entry",
+  "UPDATE:factory_ledger_entry",
+]);
+
 function AuditRow({ row, locale }: { row: AuditLog; locale: AppLocale }) {
   const tAudit = useTranslations("audit");
   const t = useTranslations("auditViewer");
+  const user = useCurrentUser();
   const [expanded, setExpanded] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  const [revertMsg, setRevertMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   const summary = locale === "ar" ? row.humanReadableSummaryAr : row.humanReadableSummaryEn;
   const hasDetails =
     (row.beforeSnapshot && Object.keys(row.beforeSnapshot as object).length > 0) ||
     (row.afterSnapshot && Object.keys(row.afterSnapshot as object).length > 0);
+
+  const canRevert = user?.role === "OWNER" && REVERTIBLE.has(`${row.action}:${row.entityType}`);
+
+  const handleRevert = async () => {
+    setReverting(true);
+    setRevertMsg(null);
+    try {
+      await revertAuditAction(row.id);
+      setRevertMsg({ ok: true, text: t("revertSuccess") });
+    } catch {
+      setRevertMsg({ ok: false, text: t("revertFailed") });
+    } finally {
+      setReverting(false);
+    }
+  };
+
   return (
     <Card>
       <CardBody>
@@ -215,7 +243,26 @@ function AuditRow({ row, locale }: { row: AuditLog; locale: AppLocale }) {
               {formatDateTime(row.createdAt, locale)}
             </div>
           </div>
+          {canRevert ? (
+            <div className="flex-shrink-0">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleRevert()}
+                disabled={reverting || revertMsg?.ok === true}
+              >
+                {reverting ? t("reverting") : t("revert")}
+              </Button>
+            </div>
+          ) : null}
         </div>
+
+        {revertMsg ? (
+          <Alert variant={revertMsg.ok ? "success" : "error"} className="mt-2 text-sm">
+            {revertMsg.text}
+          </Alert>
+        ) : null}
+
         {hasDetails ? (
           <div className="mt-3">
             <Button

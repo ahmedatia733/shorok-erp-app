@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import type { AppLocale } from "../../../../i18n";
 import { Alert } from "../../../../components/ui/alert";
+import { Button } from "../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../components/ui/card";
 import { EmptyState } from "../../../../components/ui/empty-state";
 import { Skeleton } from "../../../../components/ui/skeleton";
@@ -16,6 +17,7 @@ import { useCurrentUser } from "../../../../lib/auth";
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
+  const tCommon = useTranslations("common");
   const locale = useLocale() as AppLocale;
   const user = useCurrentUser();
 
@@ -26,24 +28,31 @@ export default function DashboardPage() {
   const [allBranches, setAllBranches] = useState(isOwner);
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   useEffect(() => {
     setData(null);
     setError(null);
     if (!allBranches && !branchId) return;
     let cancelled = false;
+    setRefreshing(true);
     void (async () => {
       try {
         const res = await getDashboard(allBranches ? null : branchId);
         if (!cancelled) setData(res);
       } catch {
         if (!cancelled) setError(t("loadFailed"));
+      } finally {
+        if (!cancelled) setRefreshing(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [branchId, allBranches, t]);
+  }, [branchId, allBranches, t, refreshKey]);
 
   const ready = data !== null;
 
@@ -52,6 +61,9 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <h1 className="text-xl font-bold">{t("title")}</h1>
         <div className="flex flex-col items-stretch gap-2 md:flex-row md:items-center md:gap-4">
+          <Button variant="secondary" size="sm" onClick={refresh} disabled={refreshing}>
+            {refreshing ? tCommon("loading") : t("refresh")}
+          </Button>
           {isOwner ? (
             <label className="inline-flex items-center gap-2 text-sm">
               <input
