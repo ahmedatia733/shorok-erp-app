@@ -17,7 +17,8 @@
     "deleteConfirm": "Delete?",
     "yes": "Yes",
     "no": "No",
-    "actionFailed": "Action failed, please try again."
+    "actionFailed": "Action failed, please try again.",
+    "actions": "Actions"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -361,7 +362,8 @@
       "deactivate": "Deactivate",
       "actions": "Actions",
       "successCreated": "Branch created.",
-      "loadFailed": "Could not load branches."
+      "loadFailed": "Could not load branches.",
+      "editTitle": "Edit Branch"
     },
     "products": {
       "title": "Products",
@@ -379,7 +381,11 @@
       "active": "Active",
       "archived": "Archived",
       "status": "Status",
-      "loadFailed": "Could not load products."
+      "loadFailed": "Could not load products.",
+      "editSkuTitle": "Edit Product",
+      "editVariantTitle": "Edit Variant",
+      "archive": "Archive",
+      "restore": "Restore"
     },
     "system": {
       "title": "System settings",

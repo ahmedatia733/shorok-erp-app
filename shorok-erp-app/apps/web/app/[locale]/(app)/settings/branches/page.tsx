@@ -8,12 +8,14 @@ import { Button } from "../../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Input } from "../../../../../components/ui/input";
 import { Label } from "../../../../../components/ui/label";
+import { Modal } from "../../../../../components/ui/modal";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { ApiClientError } from "../../../../../lib/api-client";
 import {
   createBranch,
   deactivateBranch,
+  updateBranch,
   listAllBranches,
   type BranchRow,
 } from "../../../../../lib/admin-client";
@@ -29,12 +31,21 @@ export default function SettingsBranchesPage() {
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
+  // Create form
   const [nameAr, setNameAr] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [location, setLocation] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Edit modal
+  const [editRow, setEditRow] = useState<BranchRow | null>(null);
+  const [editNameAr, setEditNameAr] = useState("");
+  const [editNameEn, setEditNameEn] = useState("");
+  const [editLocation, setEditLocation] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +92,35 @@ export default function SettingsBranchesPage() {
       setReload((n) => n + 1);
     } catch (err) {
       if (err instanceof ApiClientError) setError(err.localizedMessage(locale));
+    }
+  };
+
+  const openEdit = (b: BranchRow) => {
+    setEditRow(b);
+    setEditNameAr(b.nameAr);
+    setEditNameEn(b.nameEn);
+    setEditLocation(b.location ?? "");
+    setEditError(null);
+  };
+
+  const onEditSave = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editRow) return;
+    setEditLoading(true);
+    setEditError(null);
+    try {
+      const updated = await updateBranch(editRow.id, {
+        nameAr: editNameAr.trim(),
+        nameEn: editNameEn.trim(),
+        location: editLocation.trim() || undefined,
+      });
+      setRows((prev) => prev?.map((r) => (r.id === updated.id ? updated : r)) ?? prev);
+      setEditRow(null);
+    } catch (err) {
+      if (err instanceof ApiClientError) setEditError(err.localizedMessage(locale));
+      else setEditError(tCommon("actionFailed"));
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -178,15 +218,24 @@ export default function SettingsBranchesPage() {
                       </Badge>
                     </TD>
                     <TD>
-                      {b.active ? (
+                      <div className="flex items-center gap-2">
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => void onDeactivate(b.id)}
+                          onClick={() => openEdit(b)}
                         >
-                          {t("deactivate")}
+                          {tCommon("edit")}
                         </Button>
-                      ) : null}
+                        {b.active ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void onDeactivate(b.id)}
+                          >
+                            {t("deactivate")}
+                          </Button>
+                        ) : null}
+                      </div>
                     </TD>
                   </TR>
                 ))}
@@ -195,6 +244,62 @@ export default function SettingsBranchesPage() {
           )}
         </CardBody>
       </Card>
+
+      <Modal
+        open={editRow !== null}
+        onClose={() => setEditRow(null)}
+        title={t("editTitle")}
+      >
+        <form onSubmit={onEditSave} className="space-y-3">
+          {editError ? (
+            <Alert variant="error">{editError}</Alert>
+          ) : null}
+          <div>
+            <Label htmlFor="editNameAr">{t("nameAr")}</Label>
+            <Input
+              id="editNameAr"
+              required
+              maxLength={120}
+              value={editNameAr}
+              onChange={(e) => setEditNameAr(e.target.value)}
+              disabled={editLoading}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editNameEn">{t("nameEn")}</Label>
+            <Input
+              id="editNameEn"
+              dir="ltr"
+              required
+              maxLength={120}
+              value={editNameEn}
+              onChange={(e) => setEditNameEn(e.target.value)}
+              disabled={editLoading}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editLocation">{t("location")}</Label>
+            <Input
+              id="editLocation"
+              maxLength={240}
+              value={editLocation}
+              onChange={(e) => setEditLocation(e.target.value)}
+              disabled={editLoading}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setEditRow(null)} disabled={editLoading}>
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={editLoading || !editNameAr.trim() || !editNameEn.trim()}
+            >
+              {editLoading ? tCommon("loading") : tCommon("save")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { Button } from "../../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Input } from "../../../../../components/ui/input";
 import { Label } from "../../../../../components/ui/label";
+import { Modal } from "../../../../../components/ui/modal";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { ApiClientError } from "../../../../../lib/api-client";
@@ -17,6 +18,8 @@ import {
   createVariant,
   listAllVariants,
   listSkus,
+  updateSku,
+  updateVariant,
   type SkuRow,
   type VariantRow,
 } from "../../../../../lib/admin-client";
@@ -31,14 +34,14 @@ export default function SettingsProductsPage() {
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
-  // SKU form
+  // SKU create form
   const [code, setCode] = useState("");
   const [colorAr, setColorAr] = useState("");
   const [colorEn, setColorEn] = useState("");
   const [skuSubmitting, setSkuSubmitting] = useState(false);
   const [skuError, setSkuError] = useState<string | null>(null);
 
-  // Variant form (per-SKU)
+  // Variant create form
   const [variantSku, setVariantSku] = useState<string | null>(null);
   const [size, setSize] = useState("");
   const [salePrice, setSalePrice] = useState("");
@@ -46,6 +49,22 @@ export default function SettingsProductsPage() {
   const [tolerance, setTolerance] = useState("");
   const [variantSubmitting, setVariantSubmitting] = useState(false);
   const [variantError, setVariantError] = useState<string | null>(null);
+
+  // SKU edit modal
+  const [editSku, setEditSku] = useState<SkuRow | null>(null);
+  const [editSkuCode, setEditSkuCode] = useState("");
+  const [editSkuColorAr, setEditSkuColorAr] = useState("");
+  const [editSkuColorEn, setEditSkuColorEn] = useState("");
+  const [editSkuLoading, setEditSkuLoading] = useState(false);
+  const [editSkuError, setEditSkuError] = useState<string | null>(null);
+
+  // Variant edit modal
+  const [editVariant, setEditVariant] = useState<VariantRow | null>(null);
+  const [editVSalePrice, setEditVSalePrice] = useState("");
+  const [editVPurchasePrice, setEditVPurchasePrice] = useState("");
+  const [editVTolerance, setEditVTolerance] = useState("");
+  const [editVLoading, setEditVLoading] = useState(false);
+  const [editVError, setEditVError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +138,82 @@ export default function SettingsProductsPage() {
       if (err instanceof ApiClientError) setVariantError(err.localizedMessage(locale));
     } finally {
       setVariantSubmitting(false);
+    }
+  };
+
+  const openEditSku = (s: SkuRow) => {
+    setEditSku(s);
+    setEditSkuCode(s.code);
+    setEditSkuColorAr(s.colorNameAr);
+    setEditSkuColorEn(s.colorNameEn);
+    setEditSkuError(null);
+  };
+
+  const onEditSkuSave = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editSku) return;
+    setEditSkuLoading(true);
+    setEditSkuError(null);
+    try {
+      const updated = await updateSku(editSku.id, {
+        code: editSkuCode.trim(),
+        colorNameAr: editSkuColorAr.trim(),
+        colorNameEn: editSkuColorEn.trim(),
+      });
+      setSkus((prev) => prev?.map((s) => (s.id === updated.id ? updated : s)) ?? prev);
+      setEditSku(null);
+    } catch (err) {
+      if (err instanceof ApiClientError) setEditSkuError(err.localizedMessage(locale));
+      else setEditSkuError(tCommon("actionFailed"));
+    } finally {
+      setEditSkuLoading(false);
+    }
+  };
+
+  const onToggleSkuActive = async (s: SkuRow) => {
+    try {
+      const updated = await updateSku(s.id, { active: !s.active });
+      setSkus((prev) => prev?.map((r) => (r.id === updated.id ? updated : r)) ?? prev);
+    } catch (err) {
+      if (err instanceof ApiClientError) setError(err.localizedMessage(locale));
+    }
+  };
+
+  const openEditVariant = (v: VariantRow) => {
+    setEditVariant(v);
+    setEditVSalePrice(v.defaultSalePricePerMeter);
+    setEditVPurchasePrice(v.defaultPurchasePricePerMeter);
+    setEditVTolerance(v.priceOverrideTolerancePercent ?? "");
+    setEditVError(null);
+  };
+
+  const onEditVariantSave = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editVariant) return;
+    setEditVLoading(true);
+    setEditVError(null);
+    try {
+      const updated = await updateVariant(editVariant.id, {
+        defaultSalePricePerMeter: editVSalePrice.trim(),
+        defaultPurchasePricePerMeter: editVPurchasePrice.trim(),
+        priceOverrideTolerancePercent: editVTolerance.trim() || null,
+      });
+      setVariants((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+      setEditVariant(null);
+    } catch (err) {
+      if (err instanceof ApiClientError) setEditVError(err.localizedMessage(locale));
+      else setEditVError(tCommon("actionFailed"));
+    } finally {
+      setEditVLoading(false);
+    }
+  };
+
+  const onToggleVariantActive = async (v: VariantRow) => {
+    try {
+      const updated = await updateVariant(v.id, { active: !v.active });
+      setVariants((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+    } catch (err) {
+      if (err instanceof ApiClientError) setError(err.localizedMessage(locale));
     }
   };
 
@@ -303,7 +398,7 @@ export default function SettingsProductsPage() {
                 const vs = variantsBySku.get(s.id) ?? [];
                 return (
                   <div key={s.id} className="rounded-md border border-border p-3">
-                    <div className="mb-2 flex items-center gap-2">
+                    <div className="mb-2 flex items-center gap-2 flex-wrap">
                       <span className="font-medium" dir="ltr">
                         {s.code}
                       </span>
@@ -313,6 +408,18 @@ export default function SettingsProductsPage() {
                       <Badge variant={s.active ? "success" : "neutral"}>
                         {s.active ? t("active") : t("archived")}
                       </Badge>
+                      <div className="ms-auto flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => openEditSku(s)}>
+                          {tCommon("edit")}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void onToggleSkuActive(s)}
+                        >
+                          {s.active ? t("archive") : t("restore")}
+                        </Button>
+                      </div>
                     </div>
                     {vs.length === 0 ? (
                       <div className="text-sm text-textSecondary">{t("noVariants")}</div>
@@ -325,6 +432,7 @@ export default function SettingsProductsPage() {
                             <TH>{t("purchasePrice")}</TH>
                             <TH>{t("tolerance")}</TH>
                             <TH>{t("status")}</TH>
+                            <TH>{tCommon("actions")}</TH>
                           </TR>
                         </THead>
                         <TBody>
@@ -339,6 +447,24 @@ export default function SettingsProductsPage() {
                                   {v.active ? t("active") : t("archived")}
                                 </Badge>
                               </TD>
+                              <TD>
+                                <div className="flex gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openEditVariant(v)}
+                                  >
+                                    {tCommon("edit")}
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => void onToggleVariantActive(v)}
+                                  >
+                                    {v.active ? t("archive") : t("restore")}
+                                  </Button>
+                                </div>
+                              </TD>
                             </TR>
                           ))}
                         </TBody>
@@ -351,6 +477,134 @@ export default function SettingsProductsPage() {
           )}
         </CardBody>
       </Card>
+
+      {/* Edit SKU modal */}
+      <Modal
+        open={editSku !== null}
+        onClose={() => setEditSku(null)}
+        title={t("editSkuTitle")}
+      >
+        <form onSubmit={onEditSkuSave} className="space-y-3">
+          {editSkuError ? <Alert variant="error">{editSkuError}</Alert> : null}
+          <div>
+            <Label htmlFor="editSkuCode">{t("code")}</Label>
+            <Input
+              id="editSkuCode"
+              required
+              dir="ltr"
+              maxLength={60}
+              value={editSkuCode}
+              onChange={(e) => setEditSkuCode(e.target.value)}
+              disabled={editSkuLoading}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editSkuColorAr">{t("colorAr")}</Label>
+            <Input
+              id="editSkuColorAr"
+              required
+              maxLength={120}
+              value={editSkuColorAr}
+              onChange={(e) => setEditSkuColorAr(e.target.value)}
+              disabled={editSkuLoading}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editSkuColorEn">{t("colorEn")}</Label>
+            <Input
+              id="editSkuColorEn"
+              required
+              dir="ltr"
+              maxLength={120}
+              value={editSkuColorEn}
+              onChange={(e) => setEditSkuColorEn(e.target.value)}
+              disabled={editSkuLoading}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setEditSku(null)} disabled={editSkuLoading}>
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                editSkuLoading ||
+                !editSkuCode.trim() ||
+                !editSkuColorAr.trim() ||
+                !editSkuColorEn.trim()
+              }
+            >
+              {editSkuLoading ? tCommon("loading") : tCommon("save")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Variant modal */}
+      <Modal
+        open={editVariant !== null}
+        onClose={() => setEditVariant(null)}
+        title={t("editVariantTitle")}
+      >
+        <form onSubmit={onEditVariantSave} className="space-y-3">
+          {editVError ? <Alert variant="error">{editVError}</Alert> : null}
+          <div>
+            <Label htmlFor="editVSalePrice">{t("salePrice")}</Label>
+            <Input
+              id="editVSalePrice"
+              type="number"
+              step="0.01"
+              min="0.01"
+              dir="ltr"
+              required
+              value={editVSalePrice}
+              onChange={(e) => setEditVSalePrice(e.target.value)}
+              disabled={editVLoading}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editVPurchasePrice">{t("purchasePrice")}</Label>
+            <Input
+              id="editVPurchasePrice"
+              type="number"
+              step="0.01"
+              min="0.01"
+              dir="ltr"
+              required
+              value={editVPurchasePrice}
+              onChange={(e) => setEditVPurchasePrice(e.target.value)}
+              disabled={editVLoading}
+            />
+          </div>
+          <div>
+            <Label htmlFor="editVTolerance">{t("tolerance")}</Label>
+            <Input
+              id="editVTolerance"
+              type="number"
+              step="0.01"
+              min="0"
+              dir="ltr"
+              placeholder="5.00"
+              value={editVTolerance}
+              onChange={(e) => setEditVTolerance(e.target.value)}
+              disabled={editVLoading}
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setEditVariant(null)} disabled={editVLoading}>
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                editVLoading || !editVSalePrice.trim() || !editVPurchasePrice.trim()
+              }
+            >
+              {editVLoading ? tCommon("loading") : tCommon("save")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -17,7 +17,8 @@
     "deleteConfirm": "هل تريد الحذف؟",
     "yes": "نعم",
     "no": "لا",
-    "actionFailed": "فشل تنفيذ الإجراء، حاول مرة أخرى."
+    "actionFailed": "فشل تنفيذ الإجراء، حاول مرة أخرى.",
+    "actions": "إجراءات"
   },
   "nav": {
     "dashboard": "لوحة التحكم",
@@ -361,7 +362,8 @@
       "deactivate": "إيقاف الفرع",
       "actions": "إجراءات",
       "successCreated": "تم إنشاء الفرع.",
-      "loadFailed": "تعذر تحميل الفروع."
+      "loadFailed": "تعذر تحميل الفروع.",
+      "editTitle": "تعديل الفرع"
     },
     "products": {
       "title": "المنتجات",
@@ -379,7 +381,11 @@
       "active": "نشط",
       "archived": "موقوف",
       "status": "الحالة",
-      "loadFailed": "تعذر تحميل المنتجات."
+      "loadFailed": "تعذر تحميل المنتجات.",
+      "editSkuTitle": "تعديل المنتج",
+      "editVariantTitle": "تعديل المقاس",
+      "archive": "أرشفة",
+      "restore": "استعادة"
     },
     "system": {
       "title": "الإعدادات العامة",
