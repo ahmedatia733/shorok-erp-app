@@ -216,7 +216,7 @@ function AuditRow({ row, locale }: { row: AuditLog; locale: AppLocale }) {
     (row.beforeSnapshot && Object.keys(row.beforeSnapshot as object).length > 0) ||
     (row.afterSnapshot && Object.keys(row.afterSnapshot as object).length > 0);
 
-  const canRevert = user?.role === "OWNER" && REVERTIBLE.has(`${row.action}:${row.entityType}`);
+  const canRevert = user?.role === "OWNER" && (row.action === "DELETE" || row.action === "UPDATE");
 
   const handleRevert = async () => {
     setReverting(true);
@@ -224,8 +224,12 @@ function AuditRow({ row, locale }: { row: AuditLog; locale: AppLocale }) {
     try {
       await revertAuditAction(row.id);
       setRevertMsg({ ok: true, text: t("revertSuccess") });
-    } catch {
-      setRevertMsg({ ok: false, text: t("revertFailed") });
+    } catch (err: unknown) {
+      const isConflict =
+        err instanceof Error &&
+        "payload" in err &&
+        (err as { payload: { code: string } }).payload?.code === "conflict";
+      setRevertMsg({ ok: false, text: isConflict ? t("revertNotSupported") : t("revertFailed") });
     } finally {
       setReverting(false);
     }
