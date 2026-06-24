@@ -122,8 +122,13 @@ export class AuditReadController {
     return this.prisma.runInTransaction(async (tx) => {
       switch (key) {
         case "DELETE:expense": {
+          if (snap.id) {
+            const exists = await tx.expense.findUnique({ where: { id: snap.id as string } });
+            if (exists) throw new ConflictError("errors.already_reverted");
+          }
           const expense = await tx.expense.create({
             data: {
+              ...(snap.id ? { id: snap.id as string } : {}),
               branchId: snap.branchId as string,
               expenseDate: new Date(snap.expenseDate as string),
               description: snap.description as string,
@@ -167,8 +172,13 @@ export class AuditReadController {
         }
 
         case "DELETE:factory_ledger_entry": {
+          if (snap.id) {
+            const exists = await tx.factoryLedgerEntry.findUnique({ where: { id: snap.id as string } });
+            if (exists) throw new ConflictError("errors.already_reverted");
+          }
           const entry = await tx.factoryLedgerEntry.create({
             data: {
+              ...(snap.id ? { id: snap.id as string } : {}),
               supplierId: snap.supplierId as string,
               orderDate: new Date(snap.orderDate as string),
               productVariantId: (snap.productVariantId as string | null) ?? null,
@@ -223,6 +233,8 @@ export class AuditReadController {
 
         case "DELETE:customer_order": {
           if (!snap.id) throw new ConflictError("errors.revert_not_supported");
+          const existingOrder = await tx.customerOrder.findUnique({ where: { id: snap.id as string } });
+          if (existingOrder) throw new ConflictError("errors.already_reverted");
           // Recreate the order with the original UUID so entityId still matches.
           const order = await tx.customerOrder.create({
             data: {

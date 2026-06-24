@@ -12,6 +12,7 @@ import { EmptyState } from "../../../../components/ui/empty-state";
 import { Input } from "../../../../components/ui/input";
 import { Label } from "../../../../components/ui/label";
 import { Skeleton } from "../../../../components/ui/skeleton";
+import { ApiClientError } from "../../../../lib/api-client";
 import { listAudit, revertAuditAction, type AuditFilters } from "../../../../lib/audit-client";
 import { useCurrentUser } from "../../../../lib/auth";
 import { formatDateTime } from "../../../../lib/format";
@@ -225,11 +226,11 @@ function AuditRow({ row, locale }: { row: AuditLog; locale: AppLocale }) {
       await revertAuditAction(row.id);
       setRevertMsg({ ok: true, text: t("revertSuccess") });
     } catch (err: unknown) {
-      const isConflict =
-        err instanceof Error &&
-        "payload" in err &&
-        (err as { payload: { code: string } }).payload?.code === "conflict";
-      setRevertMsg({ ok: false, text: isConflict ? t("revertNotSupported") : t("revertFailed") });
+      const msg =
+        err instanceof ApiClientError
+          ? err.localizedMessage(locale)
+          : t("revertFailed");
+      setRevertMsg({ ok: false, text: msg });
     } finally {
       setReverting(false);
     }

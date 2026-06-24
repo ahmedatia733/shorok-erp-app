@@ -255,6 +255,7 @@ export class FactoryLedgerEntriesController {
         entityType: "factory_ledger_entry",
         entityId: id,
         beforeSnapshot: {
+          id: entry.id,
           supplierId: entry.supplierId,
           orderDate: entry.orderDate,
           productVariantId: entry.productVariantId,

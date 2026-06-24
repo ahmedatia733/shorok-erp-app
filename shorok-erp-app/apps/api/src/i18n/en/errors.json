@@ -12,6 +12,8 @@
   "invalid_state_transition": "This transition is not allowed for the current order status.",
   "collection_exceeds_required": "The collection amount exceeds the order's required amount.",
   "conflict": "A data conflict occurred.",
+  "revert_not_supported": "This action cannot be reverted.",
+  "already_reverted": "This action has already been reverted.",
   "not_found": "The requested item was not found.",
   "invalid_workbook": "The Excel workbook is invalid.",
   "missing_references": "Some references could not be resolved.",

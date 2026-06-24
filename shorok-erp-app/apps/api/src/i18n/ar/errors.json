@@ -12,6 +12,8 @@
   "invalid_state_transition": "لا يمكن تنفيذ هذا الانتقال على حالة الطلب.",
   "collection_exceeds_required": "المبلغ المحصل أكبر من المبلغ المطلوب للطلب.",
   "conflict": "تعارض في البيانات.",
+  "revert_not_supported": "لا يمكن التراجع عن هذا الإجراء.",
+  "already_reverted": "تم التراجع عن هذا الإجراء بالفعل.",
   "not_found": "العنصر المطلوب غير موجود.",
   "invalid_workbook": "ملف الإكسل غير صالح.",
   "missing_references": "بعض المراجع غير موجودة في النظام.",

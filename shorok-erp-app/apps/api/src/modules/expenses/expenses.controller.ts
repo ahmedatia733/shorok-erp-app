@@ -241,6 +241,7 @@ export class ExpensesController {
         entityType: "expense",
         entityId: id,
         beforeSnapshot: {
+          id: expense.id,
           branchId: expense.branchId,
           expenseDate: expense.expenseDate,
           description: expense.description,
