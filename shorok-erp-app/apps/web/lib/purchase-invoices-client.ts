@@ -9,7 +9,10 @@ export interface PurchaseInvoiceLineRow {
   skuNameEn: string;
   sizeMetersPerBoard: string;
   boardsQuantity: string;
+  lengthM: string | null;
+  widthM: string | null;
   metersQuantity: string;
+  unitLabel: string | null;
   unitPrice: string;
   lineTotal: string;
   taxRate: string;
@@ -21,24 +24,38 @@ export interface PurchaseInvoiceRow {
   id: string;
   invoiceNumber: string;
   invoiceDate: string;
+  dueDate: string | null;
   supplierId: string;
   supplierNameAr: string;
   supplierNameEn: string;
   branchId: string;
   branchNameAr: string;
   branchNameEn: string;
+  basedOn: string | null;
+  docDirection: string | null;
+  customsNumber: string | null;
   notes: string | null;
   status: "DRAFT" | "CONFIRMED" | "CANCELLED";
   subtotal: string;
   taxAmount: string;
   grandTotal: string;
   createdAt: string;
+  createdByName: string;
   lines: PurchaseInvoiceLineRow[];
 }
 
 export interface PurchaseInvoicePage {
   data: PurchaseInvoiceRow[];
   nextCursor: string | null;
+}
+
+export interface VariantOption {
+  id: string;
+  skuCode: string;
+  skuNameAr: string;
+  skuNameEn: string;
+  sizeMetersPerBoard: string;
+  defaultPurchasePricePerMeter: string;
 }
 
 export const listPurchaseInvoices = (params: {
@@ -66,12 +83,19 @@ export const getPurchaseInvoice = (id: string) =>
 
 export const createPurchaseInvoice = (body: {
   invoiceDate: string;
+  dueDate?: string;
   supplierId: string;
   branchId: string;
+  basedOn?: string;
+  docDirection?: string;
+  customsNumber?: string;
   notes?: string;
   lines: Array<{
     productVariantId: string;
     boardsQuantity: string;
+    lengthM?: string;
+    widthM?: string;
+    unitLabel?: string;
     unitPrice: string;
     taxRate: string;
     isFree: boolean;
@@ -83,3 +107,22 @@ export const confirmPurchaseInvoice = (id: string) =>
 
 export const deletePurchaseInvoice = (id: string) =>
   apiCall<void>(`/purchase-invoices/${id}`, { method: "DELETE" });
+
+export const listVariantsForInvoice = async (): Promise<VariantOption[]> => {
+  const rows = await apiCall<
+    Array<{
+      id: string;
+      sizeMetersPerBoard: string;
+      defaultPurchasePricePerMeter: string;
+      sku: { code: string; colorNameAr: string; colorNameEn: string };
+    }>
+  >("/products/variants");
+  return rows.map((v) => ({
+    id: v.id,
+    skuCode: v.sku.code,
+    skuNameAr: v.sku.colorNameAr,
+    skuNameEn: v.sku.colorNameEn,
+    sizeMetersPerBoard: v.sizeMetersPerBoard,
+    defaultPurchasePricePerMeter: v.defaultPurchasePricePerMeter,
+  }));
+};

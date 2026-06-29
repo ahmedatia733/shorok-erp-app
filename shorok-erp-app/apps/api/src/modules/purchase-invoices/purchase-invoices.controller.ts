@@ -26,18 +26,23 @@ export class PurchaseInvoicesController {
       id: inv.id,
       invoiceNumber: inv.invoiceNumber,
       invoiceDate: inv.invoiceDate,
+      dueDate: inv.dueDate ?? null,
       supplierId: inv.supplierId,
       supplierNameAr: inv.supplier?.nameAr ?? "",
       supplierNameEn: inv.supplier?.nameEn ?? "",
       branchId: inv.branchId,
       branchNameAr: inv.branch?.nameAr ?? "",
       branchNameEn: inv.branch?.nameEn ?? "",
+      basedOn: inv.basedOn ?? null,
+      docDirection: inv.docDirection ?? null,
+      customsNumber: inv.customsNumber ?? null,
       notes: inv.notes ?? null,
       status: inv.status,
       subtotal: inv.subtotal.toString(),
       taxAmount: inv.taxAmount.toString(),
       grandTotal: inv.grandTotal.toString(),
       createdAt: inv.createdAt,
+      createdByName: inv.creator?.name ?? "",
       lines: (inv.lines ?? []).map((l: any) => ({
         id: l.id,
         productVariantId: l.productVariantId,
@@ -46,7 +51,10 @@ export class PurchaseInvoicesController {
         skuNameEn: l.productVariant?.sku?.colorNameEn ?? "",
         sizeMetersPerBoard: l.productVariant?.sizeMetersPerBoard?.toString() ?? "",
         boardsQuantity: l.boardsQuantity.toString(),
+        lengthM: l.lengthM?.toString() ?? null,
+        widthM: l.widthM?.toString() ?? null,
         metersQuantity: l.metersQuantity.toString(),
+        unitLabel: l.unitLabel ?? null,
         unitPrice: l.unitPrice.toString(),
         lineTotal: l.lineTotal.toString(),
         taxRate: l.taxRate.toString(),
@@ -98,6 +106,7 @@ export class PurchaseInvoicesController {
       include: {
         supplier: { select: { id: true, nameAr: true, nameEn: true } },
         branch: { select: { id: true, nameAr: true, nameEn: true } },
+        creator: { select: { id: true, name: true } },
         lines: {
           include: { productVariant: { include: { sku: true } } },
         },
@@ -122,6 +131,7 @@ export class PurchaseInvoicesController {
       include: {
         supplier: { select: { id: true, nameAr: true, nameEn: true } },
         branch: { select: { id: true, nameAr: true, nameEn: true } },
+        creator: { select: { id: true, name: true } },
         lines: {
           include: { productVariant: { include: { sku: true } } },
         },
@@ -147,7 +157,10 @@ export class PurchaseInvoicesController {
     const lineData: Array<{
       productVariantId: string;
       boardsQuantity: Decimal;
+      lengthM: Decimal | null;
+      widthM: Decimal | null;
       metersQuantity: Decimal;
+      unitLabel: string | null;
       unitPrice: Decimal;
       lineTotal: Decimal;
       taxRate: Decimal;
@@ -164,7 +177,16 @@ export class PurchaseInvoicesController {
       }
 
       const boardsQty = new Decimal(line.boardsQuantity);
-      const metersQty = boardsQty.mul(variant.sizeMetersPerBoard.toString());
+      const lengthM = line.lengthM ? new Decimal(line.lengthM) : null;
+      const widthM = line.widthM ? new Decimal(line.widthM) : null;
+
+      let metersQty: Decimal;
+      if (lengthM) {
+        metersQty = boardsQty.mul(lengthM).mul(widthM ?? new Decimal(1));
+      } else {
+        metersQty = boardsQty.mul(variant.sizeMetersPerBoard.toString());
+      }
+
       const unitPrice = new Decimal(line.unitPrice);
       const taxRate = new Decimal(line.taxRate);
 
@@ -181,7 +203,10 @@ export class PurchaseInvoicesController {
       lineData.push({
         productVariantId: line.productVariantId,
         boardsQuantity: boardsQty,
+        lengthM,
+        widthM,
         metersQuantity: metersQty,
+        unitLabel: line.unitLabel ?? null,
         unitPrice,
         lineTotal,
         taxRate,
@@ -202,9 +227,13 @@ export class PurchaseInvoicesController {
         data: {
           invoiceNumber,
           invoiceDate: new Date(body.invoiceDate),
+          dueDate: body.dueDate ? new Date(body.dueDate) : null,
           supplierId: body.supplierId,
           branchId: body.branchId,
-          notes: body.notes,
+          basedOn: body.basedOn ?? null,
+          docDirection: body.docDirection ?? null,
+          customsNumber: body.customsNumber ?? null,
+          notes: body.notes ?? null,
           status: "DRAFT",
           subtotal: subtotal.toFixed(2),
           taxAmount: totalTax.toFixed(2),
@@ -214,7 +243,10 @@ export class PurchaseInvoicesController {
             create: lineData.map((l) => ({
               productVariantId: l.productVariantId,
               boardsQuantity: l.boardsQuantity.toFixed(4),
+              lengthM: l.lengthM ? l.lengthM.toFixed(4) : null,
+              widthM: l.widthM ? l.widthM.toFixed(4) : null,
               metersQuantity: l.metersQuantity.toFixed(4),
+              unitLabel: l.unitLabel,
               unitPrice: l.unitPrice.toFixed(2),
               lineTotal: l.lineTotal.toFixed(2),
               taxRate: l.taxRate.toFixed(2),

@@ -574,6 +574,13 @@
     "successDeleted": "Invoice deleted.",
     "selectVariant": "Select product",
     "empty": "No purchase invoices yet.",
-    "nav": "Purchase Invoices"
+    "nav": "Purchase Invoices",
+    "dueDate": "Due Date",
+    "docDirection": "Document Direction",
+    "actualDate": "Actual Date",
+    "basedOn": "Based On",
+    "customsNumber": "Customs Clearance No.",
+    "createdBy": "Created By",
+    "branchLabel": "Branch"
   }
 }

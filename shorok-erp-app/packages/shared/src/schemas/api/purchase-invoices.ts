@@ -3,9 +3,14 @@ import { UuidSchema, IsoDateSchema } from "../primitives";
 
 export const PurchaseInvoiceStatusEnum = z.enum(["DRAFT", "CONFIRMED", "CANCELLED"]);
 
+const decimalStr = z.string().regex(/^\d+(\.\d{1,4})?$/);
+
 export const PurchaseInvoiceLineInputSchema = z.object({
   productVariantId: UuidSchema,
-  boardsQuantity: z.string().regex(/^\d+(\.\d{1,4})?$/),
+  boardsQuantity: decimalStr,
+  lengthM: decimalStr.optional(),
+  widthM: decimalStr.optional(),
+  unitLabel: z.string().max(30).optional(),
   unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/),
   taxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0"),
   isFree: z.boolean().default(false),
@@ -14,8 +19,12 @@ export type PurchaseInvoiceLineInput = z.infer<typeof PurchaseInvoiceLineInputSc
 
 export const CreatePurchaseInvoiceRequestSchema = z.object({
   invoiceDate: IsoDateSchema,
+  dueDate: IsoDateSchema.optional(),
   supplierId: UuidSchema,
   branchId: UuidSchema,
+  basedOn: z.string().max(300).optional(),
+  docDirection: z.string().max(100).optional(),
+  customsNumber: z.string().max(100).optional(),
   notes: z.string().max(1000).optional(),
   lines: z.array(PurchaseInvoiceLineInputSchema).min(1),
 });
