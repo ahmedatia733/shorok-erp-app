@@ -30,7 +30,16 @@
     "reports": "Reports",
     "audit": "Audit Log",
     "settings": "Settings",
-    "import": "Data Import"
+    "import": "Data Import",
+    "inventoryMovements": "Inventory Movements",
+    "accountingSection": "Accounting",
+    "purchasingSection": "Purchasing",
+    "salesSection": "Sales",
+    "warehousesSection": "Warehouses",
+    "reportsSection": "Reports",
+    "chartOfAccounts": "Chart of Accounts",
+    "journalEntries": "Journal Entries",
+    "incomeStatement": "Income Statement"
   },
   "auth": {
     "title": "Sign in",
@@ -432,6 +441,65 @@
       "IMPORT": "Imported",
       "LOGIN": "Signed in",
       "LOGOUT": "Signed out"
+    }
+  },
+  "accounting": {
+    "accounts": {
+      "title": "Chart of Accounts",
+      "addAccount": "Add Account",
+      "code": "Account Code",
+      "nameAr": "Name (Arabic)",
+      "nameEn": "Name (English)",
+      "category": "Category",
+      "accountType": "Account Type",
+      "parent": "Parent Account",
+      "balance": "Balance",
+      "isLeaf": "Leaf Account",
+      "active": "Active",
+      "archived": "Archived",
+      "loadFailed": "Could not load accounts.",
+      "successCreated": "Account created.",
+      "successUpdated": "Account updated.",
+      "editTitle": "Edit Account",
+      "categories": {
+        "ASSET": "Assets",
+        "LIABILITY": "Liabilities",
+        "EQUITY": "Equity",
+        "REVENUE": "Revenue",
+        "COST_OF_SALES": "Cost of Sales",
+        "EXPENSE": "Expenses"
+      }
+    },
+    "journal": {
+      "title": "Journal Entries",
+      "newEntry": "New Entry",
+      "entryDate": "Date",
+      "description": "Description",
+      "totalDebit": "Total Debit",
+      "account": "Account",
+      "debit": "Debit",
+      "credit": "Credit",
+      "note": "Note",
+      "addLine": "Add line",
+      "unbalanced": "Unbalanced entry — total debit does not equal total credit",
+      "loadFailed": "Could not load journal entries.",
+      "successCreated": "Journal entry saved.",
+      "deleteConfirm": "Delete this journal entry?",
+      "loadMore": "Load more"
+    },
+    "incomeStatement": {
+      "title": "Income Statement",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply",
+      "revenue": "Revenue",
+      "costOfSales": "Cost of Sales",
+      "grossProfit": "Gross Profit",
+      "expenses": "Expenses",
+      "totalExpenses": "Total Expenses",
+      "netProfit": "Net Profit / Loss",
+      "loadFailed": "Could not load the income statement.",
+      "noData": "No data available for the selected period."
     }
   },
   "import": {

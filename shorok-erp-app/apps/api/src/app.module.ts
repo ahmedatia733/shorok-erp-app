@@ -25,6 +25,8 @@ import { SuppliersModule } from "./modules/suppliers/suppliers.module";
 import { SystemSettingsModule } from "./modules/system-settings/system-settings.module";
 import { UsersModule } from "./modules/users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { AccountsModule } from "./modules/accounts/accounts.module";
+import { JournalModule } from "./modules/journal/journal.module";
 
 @Module({
   imports: [
@@ -69,6 +71,8 @@ import { PrismaModule } from "./prisma/prisma.module";
     FactoryLedgerModule,
     ReportsModule,
     ImportModule,
+    AccountsModule,
+    JournalModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ApiErrorFilter },

@@ -30,7 +30,16 @@
     "reports": "التقارير",
     "audit": "سجل الأنشطة",
     "settings": "الإعدادات",
-    "import": "استيراد البيانات"
+    "import": "استيراد البيانات",
+    "inventoryMovements": "حركات المخزون",
+    "accountingSection": "القسم المالي",
+    "purchasingSection": "المشتريات",
+    "salesSection": "المبيعات",
+    "warehousesSection": "المخازن",
+    "reportsSection": "التقارير",
+    "chartOfAccounts": "دليل الحسابات",
+    "journalEntries": "القيود اليومية",
+    "incomeStatement": "قائمة الدخل"
   },
   "auth": {
     "title": "تسجيل الدخول",
@@ -432,6 +441,65 @@
       "IMPORT": "استيراد",
       "LOGIN": "تسجيل دخول",
       "LOGOUT": "تسجيل خروج"
+    }
+  },
+  "accounting": {
+    "accounts": {
+      "title": "دليل الحسابات",
+      "addAccount": "إضافة حساب",
+      "code": "رقم الحساب",
+      "nameAr": "الاسم بالعربية",
+      "nameEn": "الاسم بالإنجليزية",
+      "category": "التصنيف",
+      "accountType": "نوع الحساب",
+      "parent": "الحساب الرئيسي",
+      "balance": "الرصيد",
+      "isLeaf": "قابل للقيود",
+      "active": "نشط",
+      "archived": "موقوف",
+      "loadFailed": "تعذر تحميل الحسابات.",
+      "successCreated": "تم إنشاء الحساب.",
+      "successUpdated": "تم تحديث الحساب.",
+      "editTitle": "تعديل الحساب",
+      "categories": {
+        "ASSET": "أصول",
+        "LIABILITY": "التزامات",
+        "EQUITY": "حقوق الملكية",
+        "REVENUE": "إيرادات",
+        "COST_OF_SALES": "تكلفة المبيعات",
+        "EXPENSE": "مصروفات"
+      }
+    },
+    "journal": {
+      "title": "القيود اليومية",
+      "newEntry": "قيد جديد",
+      "entryDate": "التاريخ",
+      "description": "البيان",
+      "totalDebit": "إجمالي المدين",
+      "account": "الحساب",
+      "debit": "مدين",
+      "credit": "دائن",
+      "note": "ملاحظة",
+      "addLine": "إضافة سطر",
+      "unbalanced": "القيد غير متوازن — المدين لا يساوي الدائن",
+      "loadFailed": "تعذر تحميل القيود.",
+      "successCreated": "تم حفظ القيد.",
+      "deleteConfirm": "هل تريد حذف هذا القيد؟",
+      "loadMore": "تحميل المزيد"
+    },
+    "incomeStatement": {
+      "title": "قائمة الدخل",
+      "from": "من",
+      "to": "إلى",
+      "apply": "تطبيق",
+      "revenue": "الإيرادات",
+      "costOfSales": "تكلفة المبيعات",
+      "grossProfit": "مجمل الربح",
+      "expenses": "المصروفات",
+      "totalExpenses": "إجمالي المصروفات",
+      "netProfit": "صافي الربح / الخسارة",
+      "loadFailed": "تعذر تحميل القائمة.",
+      "noData": "لا توجد بيانات للفترة المحددة."
     }
   },
   "import": {

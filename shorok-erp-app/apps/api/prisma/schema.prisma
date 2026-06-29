@@ -71,6 +71,25 @@ enum AuditAction {
   LOGOUT
 }
 
+enum AccountCategory {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  COST_OF_SALES
+  EXPENSE
+}
+
+enum AccountType {
+  FIXED_ASSET
+  CURRENT_ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  COST_OF_SALES
+  EXPENSE
+}
+
 // =============================== Branch ==============================
 
 model Branch {
@@ -114,6 +133,7 @@ model User {
   expensesCreated   Expense[]
   factoryEntries    FactoryLedgerEntry[]
   auditLogs         AuditLog[]
+  journalEntries    JournalEntry[]       @relation("JournalEntryCreatedBy")
 
   @@map("users")
 }
@@ -386,4 +406,63 @@ model IdempotencyKey {
 
   @@index([expiresAt])
   @@map("idempotency_keys")
+}
+
+// ============================== Account ==============================
+
+model Account {
+  id          String          @id @default(uuid()) @db.Uuid
+  code        String          @unique @db.VarChar(20)
+  nameAr      String          @map("name_ar") @db.VarChar(160)
+  nameEn      String          @map("name_en") @db.VarChar(160)
+  category    AccountCategory
+  accountType AccountType     @map("account_type")
+  parentId    String?         @map("parent_id") @db.Uuid
+  isLeaf      Boolean         @default(true) @map("is_leaf")
+  active      Boolean         @default(true)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  parent       Account?       @relation("AccountChildren", fields: [parentId], references: [id])
+  children     Account[]      @relation("AccountChildren")
+  journalLines JournalLine[]
+
+  @@index([category])
+  @@index([parentId])
+  @@map("accounts")
+}
+
+// =========================== JournalEntry ============================
+
+model JournalEntry {
+  id            String    @id @default(uuid()) @db.Uuid
+  entryDate     DateTime  @map("entry_date") @db.Date
+  description   String    @db.VarChar(500)
+  referenceType String?   @map("reference_type") @db.VarChar(60)
+  referenceId   String?   @map("reference_id") @db.Uuid
+  createdBy     String    @map("created_by") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  creator User          @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
+  lines   JournalLine[]
+
+  @@index([entryDate(sort: Desc)])
+  @@map("journal_entries")
+}
+
+// =========================== JournalLine =============================
+
+model JournalLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  journalEntryId String  @map("journal_entry_id") @db.Uuid
+  accountId      String  @map("account_id") @db.Uuid
+  debit          Decimal @default(0) @db.Decimal(14, 2)
+  credit         Decimal @default(0) @db.Decimal(14, 2)
+  note           String? @db.VarChar(300)
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      Account      @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("journal_lines")
 }

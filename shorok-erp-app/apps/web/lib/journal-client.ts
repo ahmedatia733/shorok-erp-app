@@ -1,0 +1,75 @@
+"use client";
+import { apiCall } from "./api-client";
+
+export interface JournalLineRow {
+  id: string;
+  accountId: string;
+  accountCode: string;
+  accountNameAr: string;
+  accountNameEn: string;
+  debit: string;
+  credit: string;
+  note: string | null;
+}
+
+export interface JournalEntryRow {
+  id: string;
+  entryDate: string;
+  description: string;
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+  totalDebit: string;
+  lines: JournalLineRow[];
+}
+
+export interface JournalPage {
+  data: JournalEntryRow[];
+  nextCursor: string | null;
+}
+
+export const listJournal = (params: {
+  from?: string;
+  to?: string;
+  accountId?: string;
+  cursor?: string | null;
+  limit?: number;
+}) => {
+  const p = new URLSearchParams();
+  if (params.limit) p.set("limit", String(params.limit));
+  if (params.from) p.set("from", params.from);
+  if (params.to) p.set("to", params.to);
+  if (params.accountId) p.set("accountId", params.accountId);
+  if (params.cursor) p.set("cursor", params.cursor);
+  return apiCall<JournalPage>(`/journal?${p.toString()}`);
+};
+
+export const createJournalEntry = (body: {
+  entryDate: string;
+  description: string;
+  referenceType?: string;
+  lines: Array<{ accountId: string; debit: string; credit: string; note?: string }>;
+}) => apiCall<JournalEntryRow>("/journal", { method: "POST", body });
+
+export const deleteJournalEntry = (id: string) =>
+  apiCall<void>(`/journal/${id}`, { method: "DELETE" });
+
+export interface IncomeStatementData {
+  revenue: string;
+  costOfSales: string;
+  grossProfit: string;
+  expenses: Array<{
+    accountId: string;
+    code: string;
+    nameAr: string;
+    nameEn: string;
+    amount: string;
+  }>;
+  totalExpenses: string;
+  netProfit: string;
+  from: string;
+  to: string;
+}
+
+export const getIncomeStatement = (from: string, to: string) =>
+  apiCall<IncomeStatementData>(`/reports/income-statement?from=${from}&to=${to}`);
