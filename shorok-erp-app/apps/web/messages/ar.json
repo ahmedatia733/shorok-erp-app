@@ -39,7 +39,8 @@
     "reportsSection": "التقارير",
     "chartOfAccounts": "دليل الحسابات",
     "journalEntries": "القيود اليومية",
-    "incomeStatement": "قائمة الدخل"
+    "incomeStatement": "قائمة الدخل",
+    "purchaseInvoices": "فواتير المشتريات"
   },
   "auth": {
     "title": "تسجيل الدخول",
@@ -532,5 +533,47 @@
       "supplierRequired": "يرجى اختيار المورد أولاً.",
       "generic": "حدث خطأ أثناء معالجة الملف."
     }
+  },
+  "purchaseInvoices": {
+    "title": "فواتير المشتريات",
+    "newInvoice": "فاتورة جديدة",
+    "invoiceNumber": "رقم الفاتورة",
+    "invoiceDate": "تاريخ الفاتورة",
+    "supplier": "المورد",
+    "branch": "المخزن",
+    "notes": "ملاحظات",
+    "status": "الحالة",
+    "subtotal": "المجموع",
+    "taxAmount": "الضريبة",
+    "grandTotal": "الإجمالي",
+    "statusDraft": "مسودة",
+    "statusConfirmed": "مؤكدة",
+    "statusCancelled": "ملغاة",
+    "lines": "تفاصيل الأصناف",
+    "lineCode": "الكود",
+    "lineProduct": "الصنف",
+    "lineBoards": "العدد (ألواح)",
+    "lineUnit": "الوحدة (م/لوح)",
+    "lineMeters": "الكمية (م)",
+    "lineUnitPrice": "سعر الوحدة",
+    "lineTotal": "الإجمالي",
+    "lineFree": "مجاني",
+    "lineTaxRate": "ضريبة %",
+    "lineTaxAmount": "قيمة الضريبة",
+    "addLine": "إضافة صنف",
+    "saveDraft": "حفظ كمسودة",
+    "confirm": "تأكيد الفاتورة",
+    "confirmPrompt": "هل تريد تأكيد الفاتورة؟ سيتم تحديث المخزون.",
+    "delete": "حذف الفاتورة",
+    "deletePrompt": "هل تريد حذف هذه الفاتورة؟",
+    "loadFailed": "تعذر تحميل الفواتير.",
+    "saveFailed": "تعذر حفظ الفاتورة.",
+    "confirmFailed": "تعذر تأكيد الفاتورة.",
+    "successCreated": "تم إنشاء الفاتورة.",
+    "successConfirmed": "تم تأكيد الفاتورة وتحديث المخزون.",
+    "successDeleted": "تم حذف الفاتورة.",
+    "selectVariant": "اختر الصنف",
+    "empty": "لا توجد فواتير مشتريات.",
+    "nav": "فواتير المشتريات"
   }
 }

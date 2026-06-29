@@ -71,6 +71,12 @@ enum AuditAction {
   LOGOUT
 }
 
+enum PurchaseInvoiceStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
 enum AccountCategory {
   ASSET
   LIABILITY
@@ -106,6 +112,7 @@ model Branch {
   inventoryMovements    InventoryMovement[]
   customerOrders        CustomerOrder[]
   expenses              Expense[]
+  purchaseInvoices      PurchaseInvoice[]    @relation("PurchaseInvoiceBranch")
 
   @@map("branches")
 }
@@ -134,6 +141,7 @@ model User {
   factoryEntries    FactoryLedgerEntry[]
   auditLogs         AuditLog[]
   journalEntries    JournalEntry[]       @relation("JournalEntryCreatedBy")
+  purchaseInvoicesCreated PurchaseInvoice[] @relation("PurchaseInvoiceCreatedBy")
 
   @@map("users")
 }
@@ -202,6 +210,7 @@ model ProductVariant {
   inventoryMovements   InventoryMovement[]
   customerOrders       CustomerOrder[]
   factoryEntries       FactoryLedgerEntry[]
+  purchaseInvoiceLines PurchaseInvoiceLine[]
 
   @@unique([skuId, sizeMetersPerBoard])
   @@index([skuId])
@@ -219,6 +228,7 @@ model Supplier {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   factoryEntries FactoryLedgerEntry[]
+  purchaseInvoices PurchaseInvoice[]
 
   @@map("suppliers")
 }
@@ -465,4 +475,51 @@ model JournalLine {
   @@index([journalEntryId])
   @@index([accountId])
   @@map("journal_lines")
+}
+
+// ========================= PurchaseInvoice ===========================
+
+model PurchaseInvoice {
+  id            String                @id @default(uuid()) @db.Uuid
+  invoiceNumber String                @unique @map("invoice_number") @db.VarChar(30)
+  invoiceDate   DateTime              @map("invoice_date") @db.Date
+  supplierId    String                @map("supplier_id") @db.Uuid
+  branchId      String                @map("branch_id") @db.Uuid
+  notes         String?               @db.VarChar(1000)
+  status        PurchaseInvoiceStatus @default(DRAFT)
+  subtotal      Decimal               @default(0) @db.Decimal(14, 2)
+  taxAmount     Decimal               @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  grandTotal    Decimal               @default(0) @map("grand_total") @db.Decimal(14, 2)
+  createdBy     String                @map("created_by") @db.Uuid
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  branch   Branch   @relation("PurchaseInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  creator  User     @relation("PurchaseInvoiceCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  lines    PurchaseInvoiceLine[]
+
+  @@index([supplierId])
+  @@index([branchId])
+  @@index([invoiceDate(sort: Desc)])
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceLine {
+  id               String  @id @default(uuid()) @db.Uuid
+  invoiceId        String  @map("invoice_id") @db.Uuid
+  productVariantId String  @map("product_variant_id") @db.Uuid
+  boardsQuantity   Decimal @map("boards_quantity") @db.Decimal(14, 4)
+  metersQuantity   Decimal @map("meters_quantity") @db.Decimal(14, 4)
+  unitPrice        Decimal @map("unit_price") @db.Decimal(14, 2)
+  lineTotal        Decimal @map("line_total") @db.Decimal(14, 2)
+  taxRate          Decimal @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount        Decimal @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  isFree           Boolean @default(false) @map("is_free")
+
+  invoice        PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant  @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@map("purchase_invoice_lines")
 }

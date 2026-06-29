@@ -39,7 +39,8 @@
     "reportsSection": "Reports",
     "chartOfAccounts": "Chart of Accounts",
     "journalEntries": "Journal Entries",
-    "incomeStatement": "Income Statement"
+    "incomeStatement": "Income Statement",
+    "purchaseInvoices": "Purchase Invoices"
   },
   "auth": {
     "title": "Sign in",
@@ -532,5 +533,47 @@
       "supplierRequired": "Please select a supplier first.",
       "generic": "An error occurred while processing the file."
     }
+  },
+  "purchaseInvoices": {
+    "title": "Purchase Invoices",
+    "newInvoice": "New Invoice",
+    "invoiceNumber": "Invoice Number",
+    "invoiceDate": "Invoice Date",
+    "supplier": "Supplier",
+    "branch": "Warehouse",
+    "notes": "Notes",
+    "status": "Status",
+    "subtotal": "Subtotal",
+    "taxAmount": "Tax",
+    "grandTotal": "Grand Total",
+    "statusDraft": "Draft",
+    "statusConfirmed": "Confirmed",
+    "statusCancelled": "Cancelled",
+    "lines": "Line Items",
+    "lineCode": "Code",
+    "lineProduct": "Product",
+    "lineBoards": "Qty (Boards)",
+    "lineUnit": "Unit (m/board)",
+    "lineMeters": "Qty (m)",
+    "lineUnitPrice": "Unit Price",
+    "lineTotal": "Total",
+    "lineFree": "Free",
+    "lineTaxRate": "Tax %",
+    "lineTaxAmount": "Tax Amount",
+    "addLine": "Add Item",
+    "saveDraft": "Save as Draft",
+    "confirm": "Confirm Invoice",
+    "confirmPrompt": "Confirm this invoice? Inventory will be updated.",
+    "delete": "Delete Invoice",
+    "deletePrompt": "Delete this invoice?",
+    "loadFailed": "Could not load invoices.",
+    "saveFailed": "Could not save invoice.",
+    "confirmFailed": "Could not confirm invoice.",
+    "successCreated": "Invoice created.",
+    "successConfirmed": "Invoice confirmed and inventory updated.",
+    "successDeleted": "Invoice deleted.",
+    "selectVariant": "Select product",
+    "empty": "No purchase invoices yet.",
+    "nav": "Purchase Invoices"
   }
 }
