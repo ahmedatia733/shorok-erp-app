@@ -29,11 +29,9 @@ interface InvoiceLine {
   unitLabel: string;
   unitPrice: string;
   taxRate: string;
-  taxRate2: string;
   metersQuantity: string;
   lineTotal: string;
   taxAmount: string;
-  taxAmount2: string;
 }
 
 function today() {
@@ -50,11 +48,9 @@ function mkLine(): InvoiceLine {
     unitLabel: "متر",
     unitPrice: "",
     taxRate: "0",
-    taxRate2: "0",
     metersQuantity: "",
     lineTotal: "",
     taxAmount: "",
-    taxAmount2: "",
   };
 }
 
@@ -68,14 +64,11 @@ function recompute(line: InvoiceLine, variant?: VariantOption): Partial<InvoiceL
   const price = parseFloat(line.unitPrice) || 0;
   const lineTotal = meters * price;
   const taxRate = parseFloat(line.taxRate) || 0;
-  const taxRate2 = parseFloat(line.taxRate2) || 0;
   const taxAmount = (lineTotal * taxRate) / 100;
-  const taxAmount2 = (lineTotal * taxRate2) / 100;
   return {
     metersQuantity: meters > 0 ? meters.toFixed(4) : "",
     lineTotal: lineTotal > 0 ? lineTotal.toFixed(2) : "",
     taxAmount: taxAmount > 0 ? taxAmount.toFixed(2) : "",
-    taxAmount2: taxAmount2 > 0 ? taxAmount2.toFixed(2) : "",
   };
 }
 
@@ -130,7 +123,7 @@ export default function NewPurchaseInvoicePage() {
 
   const subtotal = lines.reduce((s, l) => s + (parseFloat(l.lineTotal) || 0), 0);
   const totalTax = lines.reduce(
-    (s, l) => s + (parseFloat(l.taxAmount) || 0) + (parseFloat(l.taxAmount2) || 0),
+    (s, l) => s + (parseFloat(l.taxAmount) || 0),
     0,
   );
   const grandTotal = subtotal + totalTax;
@@ -279,8 +272,6 @@ export default function NewPurchaseInvoicePage() {
               <th className="border border-border px-2 py-1.5 text-center w-24">الإجمالي</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة %</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة 2%</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة 2</th>
               <th className="border border-border px-2 py-1.5 w-8" />
             </tr>
           </thead>
@@ -405,21 +396,6 @@ export default function NewPurchaseInvoicePage() {
                   </td>
                   <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
                     {line.taxAmount}
-                  </td>
-                  <td className="border border-border px-1 py-1">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      value={line.taxRate2}
-                      onChange={(e) => updateLine(idx, { taxRate2: e.target.value })}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none"
-                      dir="ltr"
-                    />
-                  </td>
-                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
-                    {line.taxAmount2}
                   </td>
                   <td className="border border-border px-1 py-1 text-center">
                     <button
