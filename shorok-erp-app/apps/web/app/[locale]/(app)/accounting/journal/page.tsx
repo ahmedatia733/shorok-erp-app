@@ -283,7 +283,7 @@ export default function JournalPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title={t("newEntry")}
-        className="max-w-3xl"
+        className="max-w-5xl w-[95vw]"
       >
         <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
           {createError && <Alert variant="error">{createError}</Alert>}

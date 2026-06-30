@@ -32,12 +32,12 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
     >
       <div
         className={cn(
-          "w-full max-w-md rounded-lg border border-border bg-surface shadow-xl",
+          "w-full max-w-md rounded-lg border border-border bg-surface shadow-xl flex flex-col max-h-[90vh]",
           className,
         )}
       >
         {title && (
-          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4 shrink-0">
             <h2 className="font-semibold text-textPrimary">{title}</h2>
             <button
               type="button"
@@ -49,7 +49,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
             </button>
           </div>
         )}
-        <div className="px-5 py-4">{children}</div>
+        <div className="px-5 py-4 overflow-y-auto">{children}</div>
       </div>
     </div>
   );
