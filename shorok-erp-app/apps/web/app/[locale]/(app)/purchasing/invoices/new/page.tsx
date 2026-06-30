@@ -267,8 +267,8 @@ export default function NewPurchaseInvoicePage() {
           <thead>
             <tr className="bg-background text-textSecondary text-xs">
               <th className="border border-border px-2 py-1.5 text-center w-8">#</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">الكود</th>
-              <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">الصنف</th>
+              <th className="border border-border px-2 py-1.5 text-center w-28">الكود</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[160px]">الصنف</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">عدد</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">ط</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">ع</th>
@@ -292,23 +292,20 @@ export default function NewPurchaseInvoicePage() {
                   <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">
                     {idx + 1}
                   </td>
-                  <td className="border border-border px-1 py-1 text-center font-mono text-xs text-textSecondary">
-                    {variant?.skuCode ?? ""}
-                  </td>
                   <td className="border border-border px-1 py-1">
                     <select
                       value={line.productVariantId}
                       onChange={(e) => onVariantChange(idx, e.target.value)}
-                      className="w-full bg-transparent text-sm focus:outline-none"
+                      className="w-full bg-transparent text-sm focus:outline-none font-mono"
                     >
-                      <option value="">اختر الصنف</option>
+                      <option value="">اختر</option>
                       {variants.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.skuCode} — {locale === "ar" ? v.skuNameAr : v.skuNameEn} (
-                          {v.sizeMetersPerBoard}م)
-                        </option>
+                        <option key={v.id} value={v.id}>{v.skuCode}</option>
                       ))}
                     </select>
+                  </td>
+                  <td className="border border-border px-1 py-1 text-sm text-end pe-2">
+                    {variant ? (locale === "ar" ? variant.skuNameAr : variant.skuNameEn) : ""}
                   </td>
                   <td className="border border-border px-1 py-1">
                     <input
