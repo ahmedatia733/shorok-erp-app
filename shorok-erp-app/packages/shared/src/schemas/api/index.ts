@@ -15,3 +15,4 @@ export * from "./journal";
 export * from "./purchase-invoices";
 export * from "./payments";
 export * from "./journal-templates";
+export * from "./customers";
