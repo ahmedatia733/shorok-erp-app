@@ -34,3 +34,20 @@ export const DashboardResponseSchema = z.object({
   lowStock: z.array(LowStockEntrySchema),
 });
 export type DashboardResponse = z.infer<typeof DashboardResponseSchema>;
+
+export const TrialBalanceQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type TrialBalanceQuery = z.infer<typeof TrialBalanceQuerySchema>;
+
+export const BalanceSheetQuerySchema = z.object({
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type BalanceSheetQuery = z.infer<typeof BalanceSheetQuerySchema>;
+
+export const AgingQuerySchema = z.object({
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  type: z.enum(["AR", "AP"]).default("AR"),
+});
+export type AgingQuery = z.infer<typeof AgingQuerySchema>;
