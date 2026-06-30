@@ -281,7 +281,6 @@ export default function NewPurchaseInvoicePage() {
               <th className="border border-border px-2 py-1.5 text-center w-24">الوحدة (م/لوح)</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">سعر الوحدة</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">الإجمالي</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14">مجاني</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة %</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة 2%</th>
@@ -392,14 +391,6 @@ export default function NewPurchaseInvoicePage() {
                   >
                     {line.lineTotal}
                   </td>
-                  <td className="border border-border px-1 py-1 text-center">
-                    <input
-                      type="checkbox"
-                      checked={line.isFree}
-                      onChange={(e) => updateLine(idx, { isFree: e.target.checked })}
-                      className="h-4 w-4"
-                    />
-                  </td>
                   <td className="border border-border px-1 py-1">
                     <input
                       type="number"
@@ -408,8 +399,7 @@ export default function NewPurchaseInvoicePage() {
                       step="0.01"
                       value={line.taxRate}
                       onChange={(e) => updateLine(idx, { taxRate: e.target.value })}
-                      disabled={line.isFree}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50"
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
                       dir="ltr"
                     />
                   </td>
@@ -424,8 +414,7 @@ export default function NewPurchaseInvoicePage() {
                       step="0.01"
                       value={line.taxRate2}
                       onChange={(e) => updateLine(idx, { taxRate2: e.target.value })}
-                      disabled={line.isFree}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50"
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
                       dir="ltr"
                     />
                   </td>
