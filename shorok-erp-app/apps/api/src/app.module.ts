@@ -30,6 +30,7 @@ import { JournalModule } from "./modules/journal/journal.module";
 import { PurchaseInvoicesModule } from "./modules/purchase-invoices/purchase-invoices.module";
 import { PaymentsModule } from "./modules/payments/payments.module";
 import { JournalTemplatesModule } from "./modules/journal-templates/journal-templates.module";
+import { CustomersModule } from "./modules/customers/customers.module";
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { JournalTemplatesModule } from "./modules/journal-templates/journal-temp
     PurchaseInvoicesModule,
     PaymentsModule,
     JournalTemplatesModule,
+    CustomersModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ApiErrorFilter },
