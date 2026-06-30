@@ -142,8 +142,57 @@ model User {
   auditLogs         AuditLog[]
   journalEntries    JournalEntry[]       @relation("JournalEntryCreatedBy")
   purchaseInvoicesCreated PurchaseInvoice[] @relation("PurchaseInvoiceCreatedBy")
+  payments                Payment[]
 
   @@map("users")
+}
+
+// ========================= PaymentAccount ============================
+
+enum PaymentAccountType {
+  CASH
+  BANK
+}
+
+enum PaymentEntityType {
+  SUPPLIER
+  CUSTOMER
+}
+
+model PaymentAccount {
+  id        String             @id @default(uuid()) @db.Uuid
+  name      String             @db.VarChar(100)
+  type      PaymentAccountType
+  active    Boolean            @default(true)
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payments Payment[]
+
+  @@map("payment_accounts")
+}
+
+// ============================ Payment ================================
+
+model Payment {
+  id               String            @id @default(uuid()) @db.Uuid
+  entityType       PaymentEntityType @map("entity_type")
+  entityId         String            @map("entity_id") @db.Uuid
+  paymentAccountId String            @map("payment_account_id") @db.Uuid
+  amount           Decimal           @db.Decimal(14, 2)
+  paymentDate      DateTime          @map("payment_date") @db.Date
+  referenceNumber  String?           @map("reference_number") @db.VarChar(100)
+  notes            String?           @db.VarChar(500)
+  createdBy        String            @map("created_by") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  paymentAccount PaymentAccount @relation(fields: [paymentAccountId], references: [id])
+  creator        User           @relation(fields: [createdBy], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([paymentAccountId])
+  @@map("payments")
 }
 
 model UserBranchAccess {

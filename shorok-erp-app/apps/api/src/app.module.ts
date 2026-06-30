@@ -28,6 +28,7 @@ import { PrismaModule } from "./prisma/prisma.module";
 import { AccountsModule } from "./modules/accounts/accounts.module";
 import { JournalModule } from "./modules/journal/journal.module";
 import { PurchaseInvoicesModule } from "./modules/purchase-invoices/purchase-invoices.module";
+import { PaymentsModule } from "./modules/payments/payments.module";
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { PurchaseInvoicesModule } from "./modules/purchase-invoices/purchase-inv
     AccountsModule,
     JournalModule,
     PurchaseInvoicesModule,
+    PaymentsModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ApiErrorFilter },
