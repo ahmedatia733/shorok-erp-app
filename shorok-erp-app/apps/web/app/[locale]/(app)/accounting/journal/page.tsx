@@ -21,8 +21,8 @@ import { formatDate, formatCurrency } from "../../../../../lib/format";
 
 interface JournalLineInput {
   accountId: string;
-  debit: string;
-  credit: string;
+  type: "debit" | "credit";
+  amount: string;
   note: string;
 }
 
@@ -53,8 +53,8 @@ export default function JournalPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [leafAccounts, setLeafAccounts] = useState<AccountRow[]>([]);
   const [lines, setLines] = useState<JournalLineInput[]>([
-    { accountId: "", debit: "0.00", credit: "0.00", note: "" },
-    { accountId: "", debit: "0.00", credit: "0.00", note: "" },
+    { accountId: "", type: "debit", amount: "0.00", note: "" },
+    { accountId: "", type: "credit", amount: "0.00", note: "" },
   ]);
   const [entryDate, setEntryDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState("");
@@ -90,17 +90,14 @@ export default function JournalPage() {
     }
   }, [createOpen, leafAccounts.length]);
 
-  function sumDebit(): number {
-    return lines.reduce((acc, l) => acc + parseFloat(l.debit || "0"), 0);
-  }
-  function sumCredit(): number {
-    return lines.reduce((acc, l) => acc + parseFloat(l.credit || "0"), 0);
-  }
-
-  const totalDebitNum = sumDebit();
-  const totalCreditNum = sumCredit();
+  const totalDebitNum = lines.filter((l) => l.type === "debit").reduce((acc, l) => acc + parseFloat(l.amount || "0"), 0);
+  const totalCreditNum = lines.filter((l) => l.type === "credit").reduce((acc, l) => acc + parseFloat(l.amount || "0"), 0);
   const isBalanced = Math.abs(totalDebitNum - totalCreditNum) < 0.005;
-  const canSubmit = isBalanced && lines.length >= 2 && lines.every((l) => l.accountId);
+  const canSubmit =
+    isBalanced &&
+    lines.some((l) => l.type === "debit") &&
+    lines.some((l) => l.type === "credit") &&
+    lines.every((l) => l.accountId && parseFloat(l.amount || "0") > 0);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -113,15 +110,15 @@ export default function JournalPage() {
         description,
         lines: lines.map((l) => ({
           accountId: l.accountId,
-          debit: parseFloat(l.debit || "0").toFixed(2),
-          credit: parseFloat(l.credit || "0").toFixed(2),
+          debit: l.type === "debit" ? parseFloat(l.amount || "0").toFixed(2) : "0.00",
+          credit: l.type === "credit" ? parseFloat(l.amount || "0").toFixed(2) : "0.00",
           note: l.note || undefined,
         })),
       });
       setCreateOpen(false);
       setLines([
-        { accountId: "", debit: "0.00", credit: "0.00", note: "" },
-        { accountId: "", debit: "0.00", credit: "0.00", note: "" },
+        { accountId: "", type: "debit", amount: "0.00", note: "" },
+        { accountId: "", type: "credit", amount: "0.00", note: "" },
       ]);
       setDescription("");
       await loadJournal();
@@ -143,14 +140,14 @@ export default function JournalPage() {
   }
 
   function addLine() {
-    setLines((prev) => [...prev, { accountId: "", debit: "0.00", credit: "0.00", note: "" }]);
+    setLines((prev) => [...prev, { accountId: "", type: "debit", amount: "0.00", note: "" }]);
   }
 
   function removeLine(idx: number) {
     setLines((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function updateLine(idx: number, field: keyof JournalLineInput, value: string) {
+  function updateLine(idx: number, field: keyof JournalLineInput, value: string | "debit" | "credit") {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
   }
 
@@ -315,15 +312,20 @@ export default function JournalPage() {
               <thead className="border-b border-border bg-background">
                 <tr>
                   <th className="px-3 py-2 text-start">{t("account")}</th>
-                  <th className="px-3 py-2 text-start">{t("debit")}</th>
-                  <th className="px-3 py-2 text-start">{t("credit")}</th>
+                  <th className="px-3 py-2 text-start w-24">النوع</th>
+                  <th className="px-3 py-2 text-start w-32">المبلغ</th>
                   <th className="px-3 py-2 text-start">{t("note")}</th>
-                  <th className="px-3 py-2" />
+                  <th className="px-3 py-2 w-8" />
                 </tr>
               </thead>
               <tbody>
                 {lines.map((line, idx) => (
-                  <tr key={idx} className="border-b border-border last:border-0">
+                  <tr
+                    key={idx}
+                    className={`border-b border-border last:border-0 ${
+                      line.type === "debit" ? "bg-red-50/30" : "bg-green-50/30"
+                    }`}
+                  >
                     <td className="px-2 py-1">
                       <select
                         className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
@@ -331,7 +333,7 @@ export default function JournalPage() {
                         onChange={(e) => updateLine(idx, "accountId", e.target.value)}
                         required
                       >
-                        <option value="">—</option>
+                        <option value="">— اختر الحساب —</option>
                         {leafAccounts.map((a) => (
                           <option key={a.id} value={a.id}>
                             {a.code} — {locale === "ar" ? a.nameAr : a.nameEn}
@@ -340,33 +342,40 @@ export default function JournalPage() {
                       </select>
                     </td>
                     <td className="px-2 py-1">
+                      <select
+                        className={`w-full rounded border border-border px-2 py-1 text-sm font-medium ${
+                          line.type === "debit"
+                            ? "bg-red-50 text-red-700"
+                            : "bg-green-50 text-green-700"
+                        }`}
+                        value={line.type}
+                        onChange={(e) => updateLine(idx, "type", e.target.value as "debit" | "credit")}
+                      >
+                        <option value="debit">مدين</option>
+                        <option value="credit">دائن</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-1">
                       <Input
-                        className="w-28"
-                        value={line.debit}
-                        onChange={(e) => updateLine(idx, "debit", e.target.value)}
+                        className="w-full"
+                        value={line.amount}
+                        onChange={(e) => updateLine(idx, "amount", e.target.value)}
                         inputMode="decimal"
                       />
                     </td>
                     <td className="px-2 py-1">
                       <Input
-                        className="w-28"
-                        value={line.credit}
-                        onChange={(e) => updateLine(idx, "credit", e.target.value)}
-                        inputMode="decimal"
-                      />
-                    </td>
-                    <td className="px-2 py-1">
-                      <Input
+                        className="w-full"
                         value={line.note}
                         onChange={(e) => updateLine(idx, "note", e.target.value)}
                         maxLength={300}
                       />
                     </td>
-                    <td className="px-2 py-1">
+                    <td className="px-2 py-1 text-center">
                       {lines.length > 2 && (
                         <button
                           type="button"
-                          className="text-danger text-xs"
+                          className="text-danger text-sm"
                           onClick={() => removeLine(idx)}
                         >
                           ✕
@@ -376,14 +385,15 @@ export default function JournalPage() {
                   </tr>
                 ))}
               </tbody>
-              <tfoot className="border-t border-border bg-background">
+              <tfoot className="border-t-2 border-border bg-background">
                 <tr>
-                  <td className="px-3 py-2 font-medium text-sm">{t("totalDebit")}</td>
-                  <td className={`px-3 py-2 font-medium ${!isBalanced ? "text-red-600" : "text-green-600"}`}>
-                    {totalDebitDisplay}
-                  </td>
-                  <td className={`px-3 py-2 font-medium ${!isBalanced ? "text-red-600" : "text-green-600"}`}>
-                    {totalCreditDisplay}
+                  <td className="px-3 py-2 font-medium text-sm" colSpan={2}>الإجمالي</td>
+                  <td className="px-3 py-2 text-sm">
+                    <div className={`font-medium ${!isBalanced ? "text-red-600" : "text-green-700"}`}>
+                      <span>مدين: {totalDebitDisplay}</span>
+                      <span className="mx-2">|</span>
+                      <span>دائن: {totalCreditDisplay}</span>
+                    </div>
                   </td>
                   <td colSpan={2} />
                 </tr>
