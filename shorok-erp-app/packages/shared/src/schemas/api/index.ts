@@ -16,3 +16,4 @@ export * from "./purchase-invoices";
 export * from "./payments";
 export * from "./journal-templates";
 export * from "./customers";
+export * from "./fixed-assets";

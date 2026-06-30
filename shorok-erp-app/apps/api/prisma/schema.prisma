@@ -145,6 +145,8 @@ model User {
   payments                Payment[]
   journalTemplates        JournalTemplate[]
   customerTransactions    CustomerTransaction[]
+  fixedAssets             FixedAsset[]         @relation("FixedAssetCreatedBy")
+  depreciationEntries     DepreciationEntry[]  @relation("DepreciationEntryCreatedBy")
 
   @@map("users")
 }
@@ -492,6 +494,9 @@ model Account {
   children     Account[]      @relation("AccountChildren")
   journalLines JournalLine[]
   templateLines JournalTemplateLine[]
+  fixedAssetsAsAsset      FixedAsset[] @relation("AssetAccount")
+  fixedAssetsAsAccumDep   FixedAsset[] @relation("AccumulatedDepAccount")
+  fixedAssetsAsDepExpense FixedAsset[] @relation("DepreciationExpenseAccount")
 
   @@index([category])
   @@index([parentId])
@@ -665,4 +670,55 @@ model CustomerTransaction {
   @@index([customerId])
   @@index([customerId, date(sort: Asc)])
   @@map("customer_transactions")
+}
+
+// ========================= FixedAsset ================================
+
+model FixedAsset {
+  id                           String   @id @default(uuid()) @db.Uuid
+  code                         String   @unique @db.VarChar(20)
+  nameAr                       String   @map("name_ar") @db.VarChar(200)
+  nameEn                       String   @default("") @map("name_en") @db.VarChar(200)
+  acquisitionDate              DateTime @map("acquisition_date") @db.Date
+  acquisitionCost              Decimal  @map("acquisition_cost") @db.Decimal(14, 2)
+  salvageValue                 Decimal  @default(0) @map("salvage_value") @db.Decimal(14, 2)
+  usefulLifeMonths             Int      @map("useful_life_months")
+  depreciationMethod           String   @default("STRAIGHT_LINE") @map("depreciation_method") @db.VarChar(20)
+  assetAccountId               String   @map("asset_account_id") @db.Uuid
+  accumulatedDepAccountId      String   @map("accumulated_dep_account_id") @db.Uuid
+  depreciationExpenseAccountId String   @map("depreciation_expense_account_id") @db.Uuid
+  active                       Boolean  @default(true)
+  notes                        String?  @db.VarChar(500)
+  createdBy                    String   @map("created_by") @db.Uuid
+  createdAt                    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  assetAccount               Account   @relation("AssetAccount", fields: [assetAccountId], references: [id])
+  accumulatedDepAccount      Account   @relation("AccumulatedDepAccount", fields: [accumulatedDepAccountId], references: [id])
+  depreciationExpenseAccount Account   @relation("DepreciationExpenseAccount", fields: [depreciationExpenseAccountId], references: [id])
+  creator                    User      @relation("FixedAssetCreatedBy", fields: [createdBy], references: [id])
+  depreciationEntries        DepreciationEntry[]
+
+  @@index([active])
+  @@map("fixed_assets")
+}
+
+// ====================== DepreciationEntry ============================
+
+model DepreciationEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  assetId        String   @map("asset_id") @db.Uuid
+  periodDate     DateTime @map("period_date") @db.Date
+  amount         Decimal  @db.Decimal(14, 2)
+  journalEntryId String?  @map("journal_entry_id") @db.Uuid
+  notes          String?  @db.VarChar(300)
+  createdBy      String   @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  asset   FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  creator User       @relation("DepreciationEntryCreatedBy", fields: [createdBy], references: [id])
+
+  @@unique([assetId, periodDate])
+  @@index([assetId])
+  @@map("depreciation_entries")
 }
