@@ -17,18 +17,19 @@ import {
 } from "../../../../../../lib/purchase-invoices-client";
 import { AP_COLORS, apColorMap } from "../../../../../../lib/ap-colors";
 
+const SIZE_K = 5.25; // كبير
+const SIZE_S = 4.0;  // صغير
+
 interface InvoiceLine {
   _key: string;
   colorCode: string;
   productVariantId: string;
   boardsQuantity: string;
-  lengthM: string;
-  widthM: string;
+  sizeChoice: "" | "K" | "S";
   unitLabel: string;
   unitPrice: string;
   taxRate: string;
   taxRate2: string;
-  isFree: boolean;
   metersQuantity: string;
   lineTotal: string;
   taxAmount: string;
@@ -45,13 +46,11 @@ function mkLine(): InvoiceLine {
     colorCode: "",
     productVariantId: "",
     boardsQuantity: "",
-    lengthM: "",
-    widthM: "",
+    sizeChoice: "",
     unitLabel: "متر",
     unitPrice: "",
     taxRate: "0",
     taxRate2: "0",
-    isFree: false,
     metersQuantity: "",
     lineTotal: "",
     taxAmount: "",
@@ -61,19 +60,17 @@ function mkLine(): InvoiceLine {
 
 function recompute(line: InvoiceLine, variant?: VariantOption): Partial<InvoiceLine> {
   const boards = parseFloat(line.boardsQuantity) || 0;
-  const L = parseFloat(line.lengthM) || 0;
-  const W = parseFloat(line.widthM) || 0;
-  const size = variant ? parseFloat(variant.sizeMetersPerBoard) : 0;
-  let meters = 0;
-  if (L > 0 && W > 0) meters = boards * L * W;
-  else if (L > 0) meters = boards * L;
-  else if (size > 0) meters = boards * size;
+  const sizeM =
+    line.sizeChoice === "K" ? SIZE_K :
+    line.sizeChoice === "S" ? SIZE_S :
+    (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
+  const meters = boards * sizeM;
   const price = parseFloat(line.unitPrice) || 0;
-  const lineTotal = line.isFree ? 0 : meters * price;
+  const lineTotal = meters * price;
   const taxRate = parseFloat(line.taxRate) || 0;
   const taxRate2 = parseFloat(line.taxRate2) || 0;
-  const taxAmount = line.isFree ? 0 : (lineTotal * taxRate) / 100;
-  const taxAmount2 = line.isFree ? 0 : (lineTotal * taxRate2) / 100;
+  const taxAmount = (lineTotal * taxRate) / 100;
+  const taxAmount2 = (lineTotal * taxRate2) / 100;
   return {
     metersQuantity: meters > 0 ? meters.toFixed(4) : "",
     lineTotal: lineTotal > 0 ? lineTotal.toFixed(2) : "",
@@ -157,12 +154,11 @@ export default function NewPurchaseInvoicePage() {
           productVariantId: l.productVariantId,
           colorCode: l.colorCode || undefined,
           boardsQuantity: l.boardsQuantity || "1",
-          lengthM: l.lengthM || undefined,
-          widthM: l.widthM || undefined,
+          lengthM: l.sizeChoice === "K" ? String(SIZE_K) : l.sizeChoice === "S" ? String(SIZE_S) : undefined,
           unitLabel: l.unitLabel || undefined,
           unitPrice: l.unitPrice || "0",
           taxRate: l.taxRate || "0",
-          isFree: l.isFree,
+          isFree: false,
         })),
       });
       router.push(`/${locale}/purchasing/invoices/${inv.id}`);
@@ -275,8 +271,8 @@ export default function NewPurchaseInvoicePage() {
               <th className="border border-border px-2 py-1.5 text-center min-w-[120px]">اسم الكود</th>
               <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">الصنف</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">عدد</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">ط</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">ع</th>
+              <th className="border border-border px-2 py-1.5 text-center w-12" title="كبير (5.25م)">ك</th>
+              <th className="border border-border px-2 py-1.5 text-center w-12" title="صغير (4م)">ص</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">الوحدة (م/لوح)</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">سعر الوحدة</th>
@@ -339,28 +335,33 @@ export default function NewPurchaseInvoicePage() {
                       dir="ltr"
                     />
                   </td>
-                  <td className="border border-border px-1 py-1">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={line.lengthM}
-                      onChange={(e) => updateLine(idx, { lengthM: e.target.value })}
-                      placeholder={variant?.sizeMetersPerBoard ?? ""}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none"
-                      dir="ltr"
-                    />
+                  {/* ك — كبير 5.25م */}
+                  <td className="border border-border px-1 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => updateLine(idx, { sizeChoice: line.sizeChoice === "K" ? "" : "K" })}
+                      className={`w-7 h-7 rounded text-xs font-bold border transition-colors ${
+                        line.sizeChoice === "K"
+                          ? "bg-primary text-white border-primary"
+                          : "border-border text-textSecondary hover:border-primary"
+                      }`}
+                    >
+                      ك
+                    </button>
                   </td>
-                  <td className="border border-border px-1 py-1">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={line.widthM}
-                      onChange={(e) => updateLine(idx, { widthM: e.target.value })}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none"
-                      dir="ltr"
-                    />
+                  {/* ص — صغير 4م */}
+                  <td className="border border-border px-1 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => updateLine(idx, { sizeChoice: line.sizeChoice === "S" ? "" : "S" })}
+                      className={`w-7 h-7 rounded text-xs font-bold border transition-colors ${
+                        line.sizeChoice === "S"
+                          ? "bg-primary text-white border-primary"
+                          : "border-border text-textSecondary hover:border-primary"
+                      }`}
+                    >
+                      ص
+                    </button>
                   </td>
                   <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
                     {line.metersQuantity}
@@ -380,8 +381,7 @@ export default function NewPurchaseInvoicePage() {
                       step="0.01"
                       value={line.unitPrice}
                       onChange={(e) => updateLine(idx, { unitPrice: e.target.value })}
-                      disabled={line.isFree}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50"
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
                       dir="ltr"
                     />
                   </td>
