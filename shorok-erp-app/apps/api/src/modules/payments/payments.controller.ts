@@ -146,24 +146,17 @@ export class PaymentsController {
     if (query.from) dateFilter.gte = new Date(query.from);
     if (query.to) dateFilter.lte = new Date(query.to);
 
-    let invoices: any[] = [];
-    let payments: any[] = [];
-    try {
-      [invoices, payments] = await Promise.all([
-        this.prisma.purchaseInvoice.findMany({
-          where: { supplierId, status: "CONFIRMED", ...(Object.keys(dateFilter).length ? { invoiceDate: dateFilter } : {}) },
-          orderBy: { invoiceDate: "asc" },
-        }),
-        this.prisma.payment.findMany({
-          where: { entityType: "SUPPLIER", entityId: supplierId, ...(Object.keys(dateFilter).length ? { paymentDate: dateFilter } : {}) },
-          include: { paymentAccount: true },
-          orderBy: { paymentDate: "asc" },
-        }),
-      ]);
-    } catch (err) {
-      console.error("[supplierStatement] DB error:", err);
-      throw err;
-    }
+    const [invoices, payments] = await Promise.all([
+      this.prisma.purchaseInvoice.findMany({
+        where: { supplierId, status: "CONFIRMED", ...(Object.keys(dateFilter).length ? { invoiceDate: dateFilter } : {}) },
+        orderBy: { invoiceDate: "asc" },
+      }),
+      this.prisma.payment.findMany({
+        where: { entityType: "SUPPLIER", entityId: supplierId, ...(Object.keys(dateFilter).length ? { paymentDate: dateFilter } : {}) },
+        include: { paymentAccount: true },
+        orderBy: { paymentDate: "asc" },
+      }),
+    ]);
 
     const entries: any[] = [
       ...invoices.map((inv) => ({
