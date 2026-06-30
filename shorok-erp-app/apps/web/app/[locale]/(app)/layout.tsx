@@ -125,6 +125,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
             onToggle={() => setSalesOpen((v) => !v)}
           >
             <NavLink href={`/${locale}/orders`} label={t("orders")} />
+            <NavLink href={`/${locale}/sales/invoices`} label="فواتير المبيعات" />
           </NavSection>
 
           {/* Warehouses section */}

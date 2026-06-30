@@ -113,6 +113,7 @@ model Branch {
   customerOrders        CustomerOrder[]
   expenses              Expense[]
   purchaseInvoices      PurchaseInvoice[]    @relation("PurchaseInvoiceBranch")
+  salesInvoices         SalesInvoice[]       @relation("SalesInvoiceBranch")
 
   @@map("branches")
 }
@@ -142,6 +143,7 @@ model User {
   auditLogs         AuditLog[]
   journalEntries    JournalEntry[]       @relation("JournalEntryCreatedBy")
   purchaseInvoicesCreated PurchaseInvoice[] @relation("PurchaseInvoiceCreatedBy")
+  salesInvoicesCreated    SalesInvoice[]   @relation("SalesInvoiceCreatedBy")
   payments                Payment[]
   journalTemplates        JournalTemplate[]
   customerTransactions    CustomerTransaction[]
@@ -269,6 +271,7 @@ model ProductVariant {
   customerOrders       CustomerOrder[]
   factoryEntries       FactoryLedgerEntry[]
   purchaseInvoiceLines PurchaseInvoiceLine[]
+  salesInvoiceLines    SalesInvoiceLine[]
 
   @@unique([skuId, sizeMetersPerBoard])
   @@index([skuId])
@@ -643,7 +646,8 @@ model Customer {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  transactions CustomerTransaction[]
+  transactions   CustomerTransaction[]
+  salesInvoices  SalesInvoice[]
 
   @@map("customers")
 }
@@ -721,4 +725,63 @@ model DepreciationEntry {
   @@unique([assetId, periodDate])
   @@index([assetId])
   @@map("depreciation_entries")
+}
+
+// ========================= SalesInvoice ==============================
+
+model SalesInvoice {
+  id                  String    @id @default(uuid()) @db.Uuid
+  invoiceNumber       BigInt    @unique @default(autoincrement()) @map("invoice_number")
+  invoiceDate         DateTime  @map("invoice_date") @db.Date
+  dueDate             DateTime? @map("due_date") @db.Date
+  customerId          String    @map("customer_id") @db.Uuid
+  branchId            String    @map("branch_id") @db.Uuid
+  status              String    @default("DRAFT") @db.VarChar(20)
+  notes               String?   @db.VarChar(1000)
+  subtotal            Decimal   @default(0) @db.Decimal(14, 2)
+  discountAmount      Decimal   @default(0) @map("discount_amount") @db.Decimal(14, 2)
+  taxRate             Decimal   @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount           Decimal   @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  grandTotal          Decimal   @default(0) @map("grand_total") @db.Decimal(14, 2)
+  totalCost           Decimal   @default(0) @map("total_cost") @db.Decimal(14, 2)
+  arAccountId         String?   @map("ar_account_id") @db.Uuid
+  revenueAccountId    String?   @map("revenue_account_id") @db.Uuid
+  taxAccountId        String?   @map("tax_account_id") @db.Uuid
+  cogsAccountId       String?   @map("cogs_account_id") @db.Uuid
+  inventoryAccountId  String?   @map("inventory_account_id") @db.Uuid
+  journalEntryId      String?   @map("journal_entry_id") @db.Uuid
+  cogsJournalEntryId  String?   @map("cogs_journal_entry_id") @db.Uuid
+  customerTxId        String?   @map("customer_tx_id") @db.Uuid
+  createdBy           String    @map("created_by") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  customer  Customer         @relation(fields: [customerId], references: [id])
+  branch    Branch           @relation("SalesInvoiceBranch", fields: [branchId], references: [id])
+  creator   User             @relation("SalesInvoiceCreatedBy", fields: [createdBy], references: [id])
+  lines     SalesInvoiceLine[]
+
+  @@index([customerId])
+  @@index([invoiceDate(sort: Desc)])
+  @@map("sales_invoices")
+}
+
+model SalesInvoiceLine {
+  id               String   @id @default(uuid()) @db.Uuid
+  invoiceId        String   @map("invoice_id") @db.Uuid
+  productVariantId String   @map("product_variant_id") @db.Uuid
+  quantity         Decimal  @db.Decimal(14, 4)
+  unitLabel        String   @default("وحدة") @map("unit_label") @db.VarChar(30)
+  unitPrice        Decimal  @map("unit_price") @db.Decimal(14, 2)
+  costPrice        Decimal  @default(0) @map("cost_price") @db.Decimal(14, 2)
+  discountPct      Decimal  @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  lineTotal        Decimal  @map("line_total") @db.Decimal(14, 2)
+  lineCost         Decimal  @default(0) @map("line_cost") @db.Decimal(14, 2)
+  note             String?  @db.VarChar(300)
+
+  invoice        SalesInvoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+
+  @@index([invoiceId])
+  @@map("sales_invoice_lines")
 }

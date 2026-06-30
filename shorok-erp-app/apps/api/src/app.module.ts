@@ -32,6 +32,7 @@ import { PaymentsModule } from "./modules/payments/payments.module";
 import { JournalTemplatesModule } from "./modules/journal-templates/journal-templates.module";
 import { CustomersModule } from "./modules/customers/customers.module";
 import { FixedAssetsModule } from "./modules/fixed-assets/fixed-assets.module";
+import { SalesInvoicesModule } from "./modules/sales-invoices/sales-invoices.module";
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { FixedAssetsModule } from "./modules/fixed-assets/fixed-assets.module";
     JournalTemplatesModule,
     CustomersModule,
     FixedAssetsModule,
+    SalesInvoicesModule,
   ],
   providers: [
     { provide: APP_FILTER, useClass: ApiErrorFilter },
