@@ -11,6 +11,7 @@ export const PurchaseInvoiceLineInputSchema = z.object({
   boardsQuantity: decimalStr,
   lengthM: decimalStr.optional(),
   widthM: decimalStr.optional(),
+  heightM: decimalStr.optional(),
   unitLabel: z.string().max(30).optional(),
   unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/),
   taxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0"),

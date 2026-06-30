@@ -54,6 +54,7 @@ export class PurchaseInvoicesController {
         boardsQuantity: l.boardsQuantity.toString(),
         lengthM: l.lengthM?.toString() ?? null,
         widthM: l.widthM?.toString() ?? null,
+        heightM: l.heightM?.toString() ?? null,
         metersQuantity: l.metersQuantity.toString(),
         unitLabel: l.unitLabel ?? null,
         unitPrice: l.unitPrice.toString(),
@@ -161,6 +162,7 @@ export class PurchaseInvoicesController {
       boardsQuantity: Decimal;
       lengthM: Decimal | null;
       widthM: Decimal | null;
+      heightM: Decimal | null;
       metersQuantity: Decimal;
       unitLabel: string | null;
       unitPrice: Decimal;
@@ -208,6 +210,7 @@ export class PurchaseInvoicesController {
         boardsQuantity: boardsQty,
         lengthM,
         widthM,
+        heightM: line.heightM ? new Decimal(line.heightM) : null,
         metersQuantity: metersQty,
         unitLabel: line.unitLabel ?? null,
         unitPrice,
@@ -249,6 +252,7 @@ export class PurchaseInvoicesController {
               boardsQuantity: l.boardsQuantity.toFixed(4),
               lengthM: l.lengthM ? l.lengthM.toFixed(4) : null,
               widthM: l.widthM ? l.widthM.toFixed(4) : null,
+              heightM: l.heightM ? l.heightM.toFixed(4) : null,
               metersQuantity: l.metersQuantity.toFixed(4),
               unitLabel: l.unitLabel,
               unitPrice: l.unitPrice.toFixed(2),

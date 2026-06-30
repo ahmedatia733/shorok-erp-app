@@ -96,6 +96,7 @@ export const createPurchaseInvoice = (body: {
     boardsQuantity: string;
     lengthM?: string;
     widthM?: string;
+    heightM?: string;
     unitLabel?: string;
     unitPrice: string;
     taxRate: string;

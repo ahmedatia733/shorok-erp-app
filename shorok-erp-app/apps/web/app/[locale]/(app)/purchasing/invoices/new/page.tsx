@@ -26,10 +26,14 @@ interface InvoiceLine {
   productVariantId: string;
   boardsQuantity: string;
   sizeChoice: "" | "K" | "S";
+  customL: string;
+  customW: string;
+  customH: string;
   unitLabel: string;
   unitPrice: string;
   taxRate: string;
   metersQuantity: string;
+  sqm: string;
   lineTotal: string;
   taxAmount: string;
 }
@@ -45,10 +49,14 @@ function mkLine(): InvoiceLine {
     productVariantId: "",
     boardsQuantity: "",
     sizeChoice: "",
+    customL: "",
+    customW: "",
+    customH: "",
     unitLabel: "متر",
     unitPrice: "",
     taxRate: "0",
     metersQuantity: "",
+    sqm: "",
     lineTotal: "",
     taxAmount: "",
   };
@@ -56,16 +64,30 @@ function mkLine(): InvoiceLine {
 
 function recompute(line: InvoiceLine, variant?: VariantOption): Partial<InvoiceLine> {
   const boards = parseFloat(line.boardsQuantity) || 0;
-  const sizeM =
-    line.sizeChoice === "K" ? SIZE_K :
-    line.sizeChoice === "S" ? SIZE_S :
-    (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
-  const meters = boards * sizeM;
+  const L = parseFloat(line.customL) || 0;
+  const W = parseFloat(line.customW) || 0;
+
+  // م² from custom size (طول × عرض)
+  const sqm = L > 0 && W > 0 ? L * W : 0;
+
+  // metersQuantity: custom size overrides ك/ص
+  let meters = 0;
+  if (sqm > 0) {
+    meters = boards * sqm;
+  } else {
+    const sizeM =
+      line.sizeChoice === "K" ? SIZE_K :
+      line.sizeChoice === "S" ? SIZE_S :
+      (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
+    meters = boards * sizeM;
+  }
+
   const price = parseFloat(line.unitPrice) || 0;
   const lineTotal = meters * price;
   const taxRate = parseFloat(line.taxRate) || 0;
   const taxAmount = (lineTotal * taxRate) / 100;
   return {
+    sqm: sqm > 0 ? sqm.toFixed(4) : "",
     metersQuantity: meters > 0 ? meters.toFixed(4) : "",
     lineTotal: lineTotal > 0 ? lineTotal.toFixed(2) : "",
     taxAmount: taxAmount > 0 ? taxAmount.toFixed(2) : "",
@@ -145,7 +167,9 @@ export default function NewPurchaseInvoicePage() {
           productVariantId: l.productVariantId,
           colorCode: l.colorCode || undefined,
           boardsQuantity: l.boardsQuantity || "1",
-          lengthM: l.sizeChoice === "K" ? String(SIZE_K) : l.sizeChoice === "S" ? String(SIZE_S) : undefined,
+          lengthM: l.customL || (l.sizeChoice === "K" ? String(SIZE_K) : l.sizeChoice === "S" ? String(SIZE_S) : undefined),
+          widthM: l.customW || undefined,
+          heightM: l.customH || undefined,
           unitLabel: l.unitLabel || undefined,
           unitPrice: l.unitPrice || "0",
           taxRate: l.taxRate || "0",
@@ -264,6 +288,10 @@ export default function NewPurchaseInvoicePage() {
               <th className="border border-border px-2 py-1.5 text-center w-16">عدد</th>
               <th className="border border-border px-2 py-1.5 text-center w-12" title="كبير (5.25م)">ك</th>
               <th className="border border-border px-2 py-1.5 text-center w-12" title="صغير (4م)">ص</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14" title="طول (مقاس خاص)">طول</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14" title="عرض (مقاس خاص)">عرض</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14" title="ارتفاع (مقاس خاص)">ارتفاع</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16" title="متر مربع = طول × عرض">م²</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">الوحدة (م/لوح)</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">سعر الوحدة</th>
@@ -351,6 +379,28 @@ export default function NewPurchaseInvoicePage() {
                     >
                       ص
                     </button>
+                  </td>
+                  {/* طول */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" step="0.01" value={line.customL}
+                      onChange={(e) => updateLine(idx, { customL: e.target.value })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* عرض */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" step="0.01" value={line.customW}
+                      onChange={(e) => updateLine(idx, { customW: e.target.value })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* ارتفاع */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" step="0.01" value={line.customH}
+                      onChange={(e) => updateLine(idx, { customH: e.target.value })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* م² — auto */}
+                  <td className="border border-border px-1 py-1 text-center text-xs text-primary font-semibold" dir="ltr">
+                    {line.sqm}
                   </td>
                   <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
                     {line.metersQuantity}
