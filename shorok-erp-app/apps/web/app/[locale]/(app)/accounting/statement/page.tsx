@@ -231,12 +231,12 @@ export default function StatementPage() {
               {isSupplierData(data) && (
                 <>
                   <div>
-                    <div className="text-xs text-textSecondary">إجمالي المشتريات (مدين)</div>
-                    <div className="font-semibold text-red-600">{fmt(data.totalDebit)} ج.م</div>
+                    <div className="text-xs text-textSecondary">إجمالي المشتريات (دائن)</div>
+                    <div className="font-semibold text-red-600">{fmt(data.totalCredit)} ج.م</div>
                   </div>
                   <div>
-                    <div className="text-xs text-textSecondary">إجمالي المدفوع (دائن)</div>
-                    <div className="font-semibold text-green-600">{fmt(data.totalCredit)} ج.م</div>
+                    <div className="text-xs text-textSecondary">إجمالي المدفوع (مدين)</div>
+                    <div className="font-semibold text-green-600">{fmt(data.totalDebit)} ج.م</div>
                   </div>
                   <div>
                     <div className="text-xs text-textSecondary">الرصيد المستحق</div>

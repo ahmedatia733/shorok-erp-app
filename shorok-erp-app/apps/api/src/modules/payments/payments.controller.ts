@@ -158,14 +158,16 @@ export class PaymentsController {
       }),
     ]);
 
+    // In a supplier statement: invoices go to Credit (دائن = you owe the supplier),
+    // payments go to Debit (مدين = you paid back). Balance = credit - debit = amount still owed.
     const entries: any[] = [
       ...invoices.map((inv) => ({
         date: inv.invoiceDate,
         type: "invoice",
         reference: inv.invoiceNumber,
         description: "فاتورة مشتريات",
-        debit: inv.grandTotal.toString(),
-        credit: "0.00",
+        debit: "0.00",
+        credit: inv.grandTotal.toString(),
       })),
       ...payments.map((p) => ({
         id: p.id,
@@ -173,14 +175,14 @@ export class PaymentsController {
         type: "payment",
         reference: p.referenceNumber ?? "—",
         description: `سداد — ${p.paymentAccount.name}${p.notes ? ` (${p.notes})` : ""}`,
-        debit: "0.00",
-        credit: p.amount.toString(),
+        debit: p.amount.toString(),
+        credit: "0.00",
       })),
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     let balance = 0;
     const entriesWithBalance = entries.map((e) => {
-      balance += parseFloat(e.debit) - parseFloat(e.credit);
+      balance += parseFloat(e.credit) - parseFloat(e.debit);
       return { ...e, balance: balance.toFixed(2) };
     });
 
@@ -192,7 +194,7 @@ export class PaymentsController {
       entries: entriesWithBalance,
       totalDebit: totalDebit.toFixed(2),
       totalCredit: totalCredit.toFixed(2),
-      closingBalance: (totalDebit - totalCredit).toFixed(2),
+      closingBalance: (totalCredit - totalDebit).toFixed(2),
     };
   }
 
