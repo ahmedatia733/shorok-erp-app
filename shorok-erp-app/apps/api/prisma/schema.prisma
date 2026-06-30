@@ -143,6 +143,7 @@ model User {
   journalEntries    JournalEntry[]       @relation("JournalEntryCreatedBy")
   purchaseInvoicesCreated PurchaseInvoice[] @relation("PurchaseInvoiceCreatedBy")
   payments                Payment[]
+  journalTemplates        JournalTemplate[]
 
   @@map("users")
 }
@@ -488,6 +489,7 @@ model Account {
   parent       Account?       @relation("AccountChildren", fields: [parentId], references: [id])
   children     Account[]      @relation("AccountChildren")
   journalLines JournalLine[]
+  templateLines JournalTemplateLine[]
 
   @@index([category])
   @@index([parentId])
@@ -584,4 +586,39 @@ model PurchaseInvoiceLine {
 
   @@index([invoiceId])
   @@map("purchase_invoice_lines")
+}
+
+// ========================= JournalTemplate ===========================
+
+model JournalTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(200)
+  description String?  @db.VarChar(500)
+  active      Boolean  @default(true)
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  creator User                  @relation(fields: [createdBy], references: [id])
+  lines   JournalTemplateLine[]
+
+  @@map("journal_templates")
+}
+
+// ======================= JournalTemplateLine =========================
+
+model JournalTemplateLine {
+  id         String   @id @default(uuid()) @db.Uuid
+  templateId String   @map("template_id") @db.Uuid
+  accountId  String   @map("account_id") @db.Uuid
+  type       String   @db.VarChar(10)
+  amount     Decimal? @db.Decimal(14, 2)
+  note       String?  @db.VarChar(300)
+  sortOrder  Int      @default(0) @map("sort_order")
+
+  template JournalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  account  Account         @relation(fields: [accountId], references: [id])
+
+  @@index([templateId])
+  @@map("journal_template_lines")
 }

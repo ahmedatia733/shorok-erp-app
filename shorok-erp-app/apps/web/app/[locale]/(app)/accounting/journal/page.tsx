@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
@@ -17,6 +17,10 @@ import {
   type JournalEntryRow,
 } from "../../../../../lib/journal-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import {
+  listTemplates,
+  type JournalTemplate,
+} from "../../../../../lib/journal-templates-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 
 interface LineInput {
@@ -60,6 +64,11 @@ export default function JournalPage() {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // Template picker state
+  const [templates, setTemplates] = useState<JournalTemplate[]>([]);
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  const templatePickerRef = useRef<HTMLDivElement>(null);
+
   const loadJournal = useCallback(
     async (cursor?: string | null) => {
       try {
@@ -84,6 +93,46 @@ export default function JournalPage() {
       void listAccounts().then((data) => setLeafAccounts(getAllLeafAccounts(data)));
     }
   }, [createOpen, leafAccounts.length]);
+
+  // Load templates when modal opens
+  useEffect(() => {
+    if (createOpen && templates.length === 0) {
+      void listTemplates().then(setTemplates).catch(() => {/* ignore */});
+    }
+  }, [createOpen, templates.length]);
+
+  // Close template picker when clicking outside
+  useEffect(() => {
+    if (!templatePickerOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (templatePickerRef.current && !templatePickerRef.current.contains(e.target as Node)) {
+        setTemplatePickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [templatePickerOpen]);
+
+  function applyTemplate(template: JournalTemplate) {
+    const newDebitLines = template.lines
+      .filter((l) => l.type === "debit")
+      .map((l) => ({
+        accountId: l.accountId,
+        amount: l.amount ?? "",
+        note: l.note ?? "",
+      }));
+    const newCreditLines = template.lines
+      .filter((l) => l.type === "credit")
+      .map((l) => ({
+        accountId: l.accountId,
+        amount: l.amount ?? "",
+        note: l.note ?? "",
+      }));
+
+    setDebitLines(newDebitLines.length > 0 ? newDebitLines : [emptyLine()]);
+    setCreditLines(newCreditLines.length > 0 ? newCreditLines : [emptyLine()]);
+    setTemplatePickerOpen(false);
+  }
 
   const totalDebit  = debitLines.reduce((s, l) => s + parseFloat(l.amount || "0"), 0);
   const totalCredit = creditLines.reduce((s, l) => s + parseFloat(l.amount || "0"), 0);
@@ -362,6 +411,50 @@ export default function JournalPage() {
                 maxLength={500}
               />
             </div>
+          </div>
+
+          {/* Template picker */}
+          <div className="flex items-center gap-2">
+            <div className="relative" ref={templatePickerRef}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setTemplatePickerOpen((v) => !v)}
+              >
+                استخدام قالب ▾
+              </Button>
+              {templatePickerOpen && (
+                <div className="absolute top-full mt-1 end-0 z-20 min-w-[220px] rounded border border-border bg-surface shadow-lg">
+                  {templates.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-textSecondary">
+                      لا توجد قوالب محفوظة
+                    </div>
+                  ) : (
+                    <ul>
+                      {templates.map((tpl) => (
+                        <li key={tpl.id}>
+                          <button
+                            type="button"
+                            className="w-full text-start px-3 py-2 text-sm hover:bg-background transition-colors"
+                            onClick={() => applyTemplate(tpl)}
+                          >
+                            <span className="font-medium">{tpl.name}</span>
+                            {tpl.description && (
+                              <span className="block text-xs text-textSecondary">{tpl.description}</span>
+                            )}
+                            <span className="block text-xs text-textSecondary">
+                              {tpl.lines.length} سطر
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+            <span className="text-xs text-textSecondary">يملأ الأسطر تلقائياً من القالب المختار</span>
           </div>
 
           {/* Two-column debit / credit layout */}

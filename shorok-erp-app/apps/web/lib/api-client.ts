@@ -45,7 +45,7 @@ export function getAccessToken(): string | null {
 }
 
 interface CallOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   locale?: AppLocale;
   /** Set false to skip the auto-refresh on 401 (used for the refresh call itself). */
