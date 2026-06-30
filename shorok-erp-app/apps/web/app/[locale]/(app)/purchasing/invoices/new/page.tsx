@@ -116,8 +116,6 @@ export default function NewPurchaseInvoicePage() {
     updateLine(idx, {
       productVariantId: vid,
       unitPrice: variant?.defaultPurchasePricePerMeter ?? "",
-      lengthM: "",
-      widthM: "",
     });
   }
 
