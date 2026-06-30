@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import type { AppLocale } from "../../../../../../i18n";
 import { Alert } from "../../../../../../components/ui/alert";
@@ -81,20 +81,13 @@ function recompute(line: InvoiceLine, variant?: VariantOption): Partial<InvoiceL
 
 export default function NewPurchaseInvoicePage() {
   const locale = useLocale() as AppLocale;
-  const t = useTranslations("purchaseInvoices");
-  const tCommon = useTranslations("common");
   const router = useRouter();
   const user = useCurrentUser();
   const canCreate = useHasRole("ACCOUNTANT");
 
   const [invoiceDate, setInvoiceDate] = useState(today());
-  const [dueDate, setDueDate] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [branchId, setBranchId] = useState("");
-  const [basedOn, setBasedOn] = useState("");
-  const [docDirection, setDocDirection] = useState("");
-  const [customsNumber, setCustomsNumber] = useState("");
-  const [notes, setNotes] = useState("");
 
   const [lines, setLines] = useState<InvoiceLine[]>([mkLine(), mkLine()]);
 
@@ -127,30 +120,36 @@ export default function NewPurchaseInvoicePage() {
 
   function onVariantChange(idx: number, vid: string) {
     const variant = variantMap.get(vid);
-    updateLine(idx, { productVariantId: vid, unitPrice: variant?.defaultPurchasePricePerMeter ?? "", lengthM: "", widthM: "" });
+    updateLine(idx, {
+      productVariantId: vid,
+      unitPrice: variant?.defaultPurchasePricePerMeter ?? "",
+      lengthM: "",
+      widthM: "",
+    });
   }
 
   const subtotal = lines.reduce((s, l) => s + (parseFloat(l.lineTotal) || 0), 0);
-  const totalTax = lines.reduce((s, l) => s + (parseFloat(l.taxAmount) || 0) + (parseFloat(l.taxAmount2) || 0), 0);
+  const totalTax = lines.reduce(
+    (s, l) => s + (parseFloat(l.taxAmount) || 0) + (parseFloat(l.taxAmount2) || 0),
+    0,
+  );
   const grandTotal = subtotal + totalTax;
 
-  const selectedBranch = branches.find((b) => b.id === branchId);
-
   async function save() {
-    const validLines = lines.filter((l) => l.productVariantId && parseFloat(l.boardsQuantity) > 0);
-    if (!supplierId || !branchId || validLines.length === 0) { setError(t("saveFailed")); return; }
+    const validLines = lines.filter(
+      (l) => l.productVariantId && parseFloat(l.boardsQuantity) > 0,
+    );
+    if (!supplierId || !branchId || validLines.length === 0) {
+      setError("يرجى اختيار المورد والفرع وإضافة بند واحد على الأقل");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
       const inv = await createPurchaseInvoice({
         invoiceDate,
-        dueDate: dueDate || undefined,
         supplierId,
         branchId,
-        basedOn: basedOn || undefined,
-        docDirection: docDirection || undefined,
-        customsNumber: customsNumber || undefined,
-        notes: notes || undefined,
         lines: validLines.map((l) => ({
           productVariantId: l.productVariantId,
           boardsQuantity: l.boardsQuantity || "1",
@@ -164,89 +163,99 @@ export default function NewPurchaseInvoicePage() {
       });
       router.push(`/${locale}/purchasing/invoices/${inv.id}`);
     } catch {
-      setError(t("saveFailed"));
+      setError("حدث خطأ أثناء الحفظ");
       setSaving(false);
     }
   }
+
+  const selectCls = "flex-1 h-7 rounded border border-border bg-surface px-2 text-sm";
 
   return (
     <div className="space-y-0 bg-background min-h-screen" dir="rtl">
       {/* Top action bar */}
       <div className="flex items-center justify-between bg-surface border-b border-border px-4 py-2">
-        <h1 className="font-bold text-base">{t("newInvoice")}</h1>
+        <h1 className="font-bold text-base">فاتورة جديدة</h1>
         <div className="flex gap-2">
           <Button size="sm" onClick={() => void save()} disabled={saving}>
-            {saving ? t("saving") : t("saveDraft")}
+            {saving ? "جارٍ الحفظ..." : "حفظ كمسودة"}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => router.back()}>
-            {tCommon("cancel")}
+            إلغاء
           </Button>
         </div>
       </div>
 
-      {error ? <Alert variant="error" className="mx-4 mt-2">{error}</Alert> : null}
+      {error ? (
+        <Alert variant="error" className="mx-4 mt-2">
+          {error}
+        </Alert>
+      ) : null}
 
-      {/* Header — two column form */}
+      {/* Header — two column */}
       <div className="bg-surface border-b border-border p-4">
         <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
           {/* Right column */}
           <div className="space-y-2">
-            <FieldRow label={t("invoiceNumber")}>
-              <span className="text-xs text-textSecondary italic">
-                {locale === "ar" ? "يُولَّد تلقائياً" : "Auto-generated"}
-              </span>
+            <FieldRow label="رقم الفاتورة">
+              <span className="text-xs text-textSecondary italic flex-1">يُولَّد تلقائياً</span>
             </FieldRow>
-            <FieldRow label={t("invoiceDate")}>
-              <Input type="date" dir="ltr" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className="h-7 text-sm flex-1" />
+            <FieldRow label="تاريخ الفاتورة">
+              <Input
+                type="date"
+                dir="ltr"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+                className="h-7 text-sm flex-1"
+              />
             </FieldRow>
-            <FieldRow label={t("dueDate")}>
-              <Input type="date" dir="ltr" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-7 text-sm flex-1" />
-            </FieldRow>
-            <FieldRow label={t("branch")}>
-              <select value={branchId} onChange={(e) => setBranchId(e.target.value)}
-                className="flex-1 h-7 rounded border border-border bg-surface px-2 text-sm">
-                <option value="">{t("selectBranch")}</option>
+            <FieldRow label="المخزن">
+              <select
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                className={selectCls}
+              >
+                <option value="">اختر المخزن</option>
                 {branches.filter((b) => b.active).map((b) => (
-                  <option key={b.id} value={b.id}>{locale === "ar" ? b.nameAr : b.nameEn}</option>
+                  <option key={b.id} value={b.id}>
+                    {locale === "ar" ? b.nameAr : b.nameEn}
+                  </option>
                 ))}
               </select>
             </FieldRow>
-            <FieldRow label={t("notes")}>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
-                className="flex-1 rounded border border-border bg-surface px-2 py-1 text-sm resize-none" />
-            </FieldRow>
-            <FieldRow label={t("customsNumber")}>
-              <Input dir="ltr" value={customsNumber} onChange={(e) => setCustomsNumber(e.target.value)} className="h-7 text-sm flex-1" />
-            </FieldRow>
-            <FieldRow label={t("createdBy")}>
+            <FieldRow label="منشئ السجل">
               <span className="flex-1 text-sm">{user?.name ?? ""}</span>
             </FieldRow>
           </div>
 
           {/* Left column */}
           <div className="space-y-2">
-            <FieldRow label={t("docDirection")}>
-              <Input value={docDirection} onChange={(e) => setDocDirection(e.target.value)} className="h-7 text-sm flex-1" />
-            </FieldRow>
-            <FieldRow label={t("actualDate")}>
-              <span className="flex-1 text-sm" dir="ltr">{invoiceDate}</span>
-            </FieldRow>
-            <FieldRow label={t("basedOn")}>
-              <Input value={basedOn} onChange={(e) => setBasedOn(e.target.value)} className="h-7 text-sm flex-1" />
-            </FieldRow>
-            <FieldRow label={t("supplier")}>
-              <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}
-                className="flex-1 h-7 rounded border border-border bg-surface px-2 text-sm">
-                <option value="">{t("selectSupplier")}</option>
+            <FieldRow label="المورد">
+              <select
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+                className={selectCls}
+              >
+                <option value="">اختر المورد</option>
                 {suppliers.filter((s) => s.active).map((s) => (
-                  <option key={s.id} value={s.id}>{locale === "ar" ? s.nameAr : s.nameEn}</option>
+                  <option key={s.id} value={s.id}>
+                    {locale === "ar" ? s.nameAr : s.nameEn}
+                  </option>
                 ))}
               </select>
             </FieldRow>
-            <FieldRow label={t("branchLabel")}>
-              <span className="flex-1 text-sm">
-                {selectedBranch ? (locale === "ar" ? selectedBranch.nameAr : selectedBranch.nameEn) : "—"}
-              </span>
+            <FieldRow label="الفرع">
+              <select
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                className={selectCls}
+              >
+                <option value="">اختر الفرع</option>
+                {branches.filter((b) => b.active).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {locale === "ar" ? b.nameAr : b.nameEn}
+                  </option>
+                ))}
+              </select>
             </FieldRow>
           </div>
         </div>
@@ -258,20 +267,20 @@ export default function NewPurchaseInvoicePage() {
           <thead>
             <tr className="bg-background text-textSecondary text-xs">
               <th className="border border-border px-2 py-1.5 text-center w-8">#</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">{t("lineCode")}</th>
-              <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">{t("lineProduct")}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">{locale === "ar" ? "عدد" : "Qty"}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">{locale === "ar" ? "ط" : "L"}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">{locale === "ar" ? "ع" : "W"}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">{t("lineMeters")}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">{t("lineUnit")}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">{t("lineUnitPrice")}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">{t("lineTotal")}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14">{t("lineFree")}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14">{t("lineTaxRate")} %</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">{t("lineTaxAmount")}</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14">{t("lineTaxRate")} 2%</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">{t("lineTaxAmount")} 2</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">الكود</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">الصنف</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16">عدد</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16">ط</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16">ع</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">الوحدة (م/لوح)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">سعر الوحدة</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">الإجمالي</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">مجاني</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة %</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة 2%</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة 2</th>
               <th className="border border-border px-2 py-1.5 w-8" />
             </tr>
           </thead>
@@ -280,71 +289,138 @@ export default function NewPurchaseInvoicePage() {
               const variant = variantMap.get(line.productVariantId);
               return (
                 <tr key={line._key} className="hover:bg-background/50">
-                  <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">{idx + 1}</td>
+                  <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">
+                    {idx + 1}
+                  </td>
                   <td className="border border-border px-1 py-1 text-center font-mono text-xs text-textSecondary">
                     {variant?.skuCode ?? ""}
                   </td>
                   <td className="border border-border px-1 py-1">
-                    <select value={line.productVariantId} onChange={(e) => onVariantChange(idx, e.target.value)}
-                      className="w-full bg-transparent text-sm focus:outline-none">
-                      <option value="">{t("selectVariant")}</option>
+                    <select
+                      value={line.productVariantId}
+                      onChange={(e) => onVariantChange(idx, e.target.value)}
+                      className="w-full bg-transparent text-sm focus:outline-none"
+                    >
+                      <option value="">اختر الصنف</option>
                       {variants.map((v) => (
                         <option key={v.id} value={v.id}>
-                          {v.skuCode} — {locale === "ar" ? v.skuNameAr : v.skuNameEn} ({v.sizeMetersPerBoard}م)
+                          {v.skuCode} — {locale === "ar" ? v.skuNameAr : v.skuNameEn} (
+                          {v.sizeMetersPerBoard}م)
                         </option>
                       ))}
                     </select>
                   </td>
                   <td className="border border-border px-1 py-1">
-                    <input type="number" min="0" step="1" value={line.boardsQuantity}
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={line.boardsQuantity}
                       onChange={(e) => updateLine(idx, { boardsQuantity: e.target.value })}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none" dir="ltr" />
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
+                      dir="ltr"
+                    />
                   </td>
                   <td className="border border-border px-1 py-1">
-                    <input type="number" min="0" step="0.01" value={line.lengthM}
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.lengthM}
                       onChange={(e) => updateLine(idx, { lengthM: e.target.value })}
                       placeholder={variant?.sizeMetersPerBoard ?? ""}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none" dir="ltr" />
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
+                      dir="ltr"
+                    />
                   </td>
                   <td className="border border-border px-1 py-1">
-                    <input type="number" min="0" step="0.01" value={line.widthM}
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.widthM}
                       onChange={(e) => updateLine(idx, { widthM: e.target.value })}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none" dir="ltr" />
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
+                      dir="ltr"
+                    />
                   </td>
-                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">{line.metersQuantity}</td>
+                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
+                    {line.metersQuantity}
+                  </td>
                   <td className="border border-border px-1 py-1">
-                    <input type="text" value={line.unitLabel}
+                    <input
+                      type="text"
+                      value={line.unitLabel}
                       onChange={(e) => updateLine(idx, { unitLabel: e.target.value })}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none" />
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
+                    />
                   </td>
                   <td className="border border-border px-1 py-1">
-                    <input type="number" min="0" step="0.01" value={line.unitPrice}
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.unitPrice}
                       onChange={(e) => updateLine(idx, { unitPrice: e.target.value })}
                       disabled={line.isFree}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50" dir="ltr" />
+                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50"
+                      dir="ltr"
+                    />
                   </td>
-                  <td className="border border-border px-1 py-1 text-center font-semibold text-xs" dir="ltr">{line.lineTotal}</td>
+                  <td
+                    className="border border-border px-1 py-1 text-center font-semibold text-xs"
+                    dir="ltr"
+                  >
+                    {line.lineTotal}
+                  </td>
                   <td className="border border-border px-1 py-1 text-center">
-                    <input type="checkbox" checked={line.isFree}
-                      onChange={(e) => updateLine(idx, { isFree: e.target.checked })} className="h-4 w-4" />
+                    <input
+                      type="checkbox"
+                      checked={line.isFree}
+                      onChange={(e) => updateLine(idx, { isFree: e.target.checked })}
+                      className="h-4 w-4"
+                    />
                   </td>
                   <td className="border border-border px-1 py-1">
-                    <input type="number" min="0" max="100" step="0.01" value={line.taxRate}
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={line.taxRate}
                       onChange={(e) => updateLine(idx, { taxRate: e.target.value })}
                       disabled={line.isFree}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50" dir="ltr" />
+                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50"
+                      dir="ltr"
+                    />
                   </td>
-                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">{line.taxAmount}</td>
+                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
+                    {line.taxAmount}
+                  </td>
                   <td className="border border-border px-1 py-1">
-                    <input type="number" min="0" max="100" step="0.01" value={line.taxRate2}
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={line.taxRate2}
                       onChange={(e) => updateLine(idx, { taxRate2: e.target.value })}
                       disabled={line.isFree}
-                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50" dir="ltr" />
+                      className="w-full text-center bg-transparent text-sm focus:outline-none disabled:opacity-50"
+                      dir="ltr"
+                    />
                   </td>
-                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">{line.taxAmount2}</td>
+                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
+                    {line.taxAmount2}
+                  </td>
                   <td className="border border-border px-1 py-1 text-center">
-                    <button type="button" onClick={() => setLines((p) => p.filter((_, i) => i !== idx))}
-                      className="text-textSecondary hover:text-danger text-xs">✕</button>
+                    <button
+                      type="button"
+                      onClick={() => setLines((p) => p.filter((_, i) => i !== idx))}
+                      className="text-textSecondary hover:text-danger text-xs"
+                    >
+                      ✕
+                    </button>
                   </td>
                 </tr>
               );
@@ -353,13 +429,21 @@ export default function NewPurchaseInvoicePage() {
         </table>
 
         <div className="border-t border-border p-3 flex items-center justify-between bg-surface">
-          <Button variant="secondary" size="sm" onClick={() => setLines((p) => [...p, mkLine()])}>
-            {t("addLine")}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setLines((p) => [...p, mkLine()])}
+          >
+            إضافة صنف
           </Button>
           <div className="flex gap-6 text-sm" dir="ltr">
-            <span className="text-textSecondary">{t("subtotal")}: <strong>{subtotal.toFixed(2)}</strong></span>
-            <span className="text-textSecondary">{t("taxAmount")}: <strong>{totalTax.toFixed(2)}</strong></span>
-            <span className="font-bold text-base">{t("grandTotal")}: {grandTotal.toFixed(2)}</span>
+            <span className="text-textSecondary">
+              المجموع: <strong>{subtotal.toFixed(2)}</strong>
+            </span>
+            <span className="text-textSecondary">
+              الضريبة: <strong>{totalTax.toFixed(2)}</strong>
+            </span>
+            <span className="font-bold text-base">الإجمالي: {grandTotal.toFixed(2)}</span>
           </div>
         </div>
       </div>
@@ -370,7 +454,7 @@ export default function NewPurchaseInvoicePage() {
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 border-b border-border pb-1.5">
-      <span className="w-36 text-textSecondary shrink-0 text-end text-xs">{label}</span>
+      <span className="w-28 text-textSecondary shrink-0 text-end text-xs">{label}</span>
       <div className="flex-1 flex items-center">{children}</div>
     </div>
   );
