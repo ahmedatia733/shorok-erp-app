@@ -1,0 +1,1466 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import { useLocale } from "next-intl";
+import type { AppLocale } from "../../../../../i18n";
+import { Alert } from "../../../../../components/ui/alert";
+import { Button } from "../../../../../components/ui/button";
+import { Card, CardBody, CardHeader, CardTitle } from "../../../../../components/ui/card";
+import { Input } from "../../../../../components/ui/input";
+import { Modal } from "../../../../../components/ui/modal";
+import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
+import { useHasRole } from "../../../../../lib/auth";
+import {
+  listSalesInvoices,
+  getSalesInvoice,
+  createSalesInvoice,
+  updateSalesInvoice,
+  confirmSalesInvoice,
+  cancelSalesInvoice,
+  deleteSalesInvoice,
+  type SalesInvoiceRow,
+  type SalesInvoiceDetail,
+} from "../../../../../lib/sales-invoices-client";
+import { listCustomers, type CustomerRow } from "../../../../../lib/customers-client";
+import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { apiCall } from "../../../../../lib/api-client";
+import { formatDate, formatCurrency } from "../../../../../lib/format";
+
+// ─── types ───────────────────────────────────────────────────────────────────
+
+interface BranchOption {
+  id: string;
+  nameAr: string;
+}
+
+interface VariantOption {
+  id: string;
+  label: string;
+  unitLabel: string;
+  defaultSalePrice: string;
+  defaultCostPrice: string;
+}
+
+interface LineFormState {
+  productVariantId: string;
+  quantity: string;
+  unitLabel: string;
+  unitPrice: string;
+  costPrice: string;
+  discountPct: string;
+  note: string;
+}
+
+// ─── StatusBadge ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const classes: Record<string, string> = {
+    DRAFT: "bg-gray-100 text-gray-700",
+    CONFIRMED: "bg-green-100 text-green-800",
+    CANCELLED: "bg-red-100 text-red-700",
+    PAID: "bg-blue-100 text-blue-800",
+  };
+  const labels: Record<string, string> = {
+    DRAFT: "مسودة",
+    CONFIRMED: "مؤكدة",
+    CANCELLED: "ملغاة",
+    PAID: "مدفوعة",
+  };
+  return (
+    <span className={"inline-flex rounded px-2 py-0.5 text-xs font-medium " + (classes[status] ?? "")}>
+      {labels[status] ?? status}
+    </span>
+  );
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+function computeLineTotal(qty: string, price: string, disc: string): number {
+  const q = parseFloat(qty) || 0;
+  const p = parseFloat(price) || 0;
+  const d = parseFloat(disc) || 0;
+  return q * p * (1 - d / 100);
+}
+
+function computeLineProfit(qty: string, price: string, cost: string, disc: string): number {
+  return computeLineTotal(qty, price, disc) - (parseFloat(qty) || 0) * (parseFloat(cost) || 0);
+}
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function emptyLine(): LineFormState {
+  return {
+    productVariantId: "",
+    quantity: "1",
+    unitLabel: "وحدة",
+    unitPrice: "0",
+    costPrice: "0",
+    discountPct: "0",
+    note: "",
+  };
+}
+
+// ─── ConfirmModal ─────────────────────────────────────────────────────────────
+
+interface ConfirmModalProps {
+  invoice: SalesInvoiceRow;
+  leafAccounts: AccountRow[];
+  onClose: () => void;
+  onConfirmed: (updated: SalesInvoiceDetail) => void;
+  locale: AppLocale;
+}
+
+function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: ConfirmModalProps) {
+  const [arAccountId, setArAccountId] = useState("");
+  const [revenueAccountId, setRevenueAccountId] = useState("");
+  const [taxAccountId, setTaxAccountId] = useState("");
+  const [postJournalEntry, setPostJournalEntry] = useState(true);
+  const [postCogs, setPostCogs] = useState(false);
+  const [cogsAccountId, setCogsAccountId] = useState("");
+  const [inventoryAccountId, setInventoryAccountId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const grandTotal = parseFloat(invoice.grandTotal);
+  const subtotal = parseFloat(invoice.subtotal);
+  const taxAmount = parseFloat(invoice.taxAmount);
+  const totalCost = parseFloat(invoice.totalCost);
+
+  const arAccount = leafAccounts.find((a) => a.id === arAccountId);
+  const revenueAccount = leafAccounts.find((a) => a.id === revenueAccountId);
+  const taxAccount = leafAccounts.find((a) => a.id === taxAccountId);
+  const cogsAccount = leafAccounts.find((a) => a.id === cogsAccountId);
+  const inventoryAccount = leafAccounts.find((a) => a.id === inventoryAccountId);
+
+  const hasTax = taxAmount > 0;
+  const canSubmit =
+    arAccountId &&
+    revenueAccountId &&
+    (!hasTax || !postJournalEntry || taxAccountId) &&
+    (!postCogs || (cogsAccountId && inventoryAccountId));
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await confirmSalesInvoice(invoice.id, {
+        arAccountId,
+        revenueAccountId,
+        taxAccountId: taxAccountId || undefined,
+        postJournalEntry,
+        postCogs,
+        cogsAccountId: cogsAccountId || undefined,
+        inventoryAccountId: inventoryAccountId || undefined,
+      });
+      onConfirmed(result);
+    } catch {
+      setError("فشل تأكيد الفاتورة. يرجى التحقق من البيانات والمحاولة مجدداً.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const assetAccounts = leafAccounts.filter((a) => a.category === "ASSET");
+  const revenueAccounts = leafAccounts.filter((a) => a.category === "REVENUE");
+  const liabilityAccounts = leafAccounts.filter((a) => a.category === "LIABILITY");
+  const cogsAccounts = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
+
+  return (
+    <Modal open={true} onClose={onClose} className="max-w-2xl w-full">
+      <div className="p-6 space-y-5" dir="rtl">
+        <h2 className="text-lg font-bold">
+          تأكيد الفاتورة — SI-{invoice.invoiceNumber}
+        </h2>
+
+        {/* Summary */}
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded bg-gray-50 p-3">
+            <div className="text-xs text-gray-500">العميل</div>
+            <div className="font-medium">{invoice.customer?.code} — {invoice.customer?.nameAr}</div>
+          </div>
+          <div className="rounded bg-gray-50 p-3">
+            <div className="text-xs text-gray-500">الإجمالي</div>
+            <div className="font-bold text-green-700">{formatCurrency(invoice.grandTotal, locale)}</div>
+          </div>
+          {totalCost > 0 && (
+            <>
+              <div className="rounded bg-gray-50 p-3">
+                <div className="text-xs text-gray-500">التكلفة</div>
+                <div className="font-medium">{formatCurrency(invoice.totalCost, locale)}</div>
+              </div>
+              <div className="rounded bg-gray-50 p-3">
+                <div className="text-xs text-gray-500">الربح</div>
+                <div className={"font-bold " + (grandTotal - totalCost >= 0 ? "text-green-700" : "text-red-600")}>
+                  {formatCurrency(grandTotal - totalCost, locale)}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Section 1 — Journal Entry 1 */}
+        <div className="space-y-3">
+          <div className="font-semibold text-sm border-b pb-1">الربط المحاسبي — القيد الأول (إيرادات وذمم)</div>
+
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="postJe"
+              checked={postJournalEntry}
+              onChange={(e) => setPostJournalEntry(e.target.checked)}
+              className="w-4 h-4"
+            />
+            <label htmlFor="postJe" className="text-sm">تسجيل قيد محاسبي</label>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">
+                حساب المدينين/العملاء (مدين) — مطلوب
+              </label>
+              <p className="text-xs text-gray-400 mb-1">يُقيَّد مدينًا بالإجمالي الكامل {formatCurrency(grandTotal, locale)}</p>
+              <select
+                value={arAccountId}
+                onChange={(e) => setArAccountId(e.target.value)}
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">— اختر الحساب —</option>
+                {assetAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                ))}
+                {leafAccounts
+                  .filter((a) => a.category !== "ASSET")
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                  ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">
+                حساب إيرادات المبيعات (دائن) — مطلوب
+              </label>
+              <p className="text-xs text-gray-400 mb-1">يُقيَّد دائنًا بصافي المبيعات {formatCurrency(subtotal, locale)}</p>
+              <select
+                value={revenueAccountId}
+                onChange={(e) => setRevenueAccountId(e.target.value)}
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">— اختر الحساب —</option>
+                {revenueAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                ))}
+                {leafAccounts
+                  .filter((a) => a.category !== "REVENUE")
+                  .map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                  ))}
+              </select>
+            </div>
+
+            {hasTax && (
+              <div>
+                <label className="block text-xs text-gray-600 mb-1">
+                  حساب الضريبة المستحقة (دائن) — {postJournalEntry ? "مطلوب" : "اختياري"}
+                </label>
+                <p className="text-xs text-gray-400 mb-1">ضريبة القيمة المضافة {formatCurrency(taxAmount, locale)}</p>
+                <select
+                  value={taxAccountId}
+                  onChange={(e) => setTaxAccountId(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                >
+                  <option value="">— اختر الحساب —</option>
+                  {liabilityAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                  ))}
+                  {leafAccounts
+                    .filter((a) => a.category !== "LIABILITY")
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                    ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Section 2 — COGS */}
+        {totalCost > 0 && (
+          <div className="space-y-3 border-t pt-3">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="postCogs"
+                checked={postCogs}
+                onChange={(e) => setPostCogs(e.target.checked)}
+                className="w-4 h-4"
+              />
+              <label htmlFor="postCogs" className="text-sm font-medium">
+                تسجيل تكلفة البضاعة المباعة (COGS)
+              </label>
+            </div>
+            <p className="text-xs text-gray-400 mr-7">
+              ينشئ قيد Dr تكلفة / Cr مخزون بمبلغ {formatCurrency(totalCost, locale)}
+            </p>
+
+            {postCogs && (
+              <div className="space-y-3 mr-7">
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    حساب تكلفة البضاعة المباعة (مدين)
+                  </label>
+                  <select
+                    value={cogsAccountId}
+                    onChange={(e) => setCogsAccountId(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                  >
+                    <option value="">— اختر الحساب —</option>
+                    {cogsAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                    ))}
+                    {leafAccounts
+                      .filter((a) => a.category !== "COST_OF_SALES")
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    حساب المخزون / البضاعة (دائن)
+                  </label>
+                  <select
+                    value={inventoryAccountId}
+                    onChange={(e) => setInventoryAccountId(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                  >
+                    <option value="">— اختر الحساب —</option>
+                    {assetAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                    ))}
+                    {leafAccounts
+                      .filter((a) => a.category !== "ASSET")
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Journal Entry Preview */}
+        <div className="rounded bg-gray-50 p-3 text-xs space-y-2 font-mono">
+          <div className="font-bold text-gray-600 mb-1">معاينة القيد 1 — الإيرادات والذمم</div>
+          <div className="flex justify-between">
+            <span>Dr  {arAccount?.nameAr ?? "—"}</span>
+            <span>{formatCurrency(grandTotal, locale)}</span>
+          </div>
+          <div className="flex justify-between text-gray-500">
+            <span>Cr  {revenueAccount?.nameAr ?? "—"}</span>
+            <span>{formatCurrency(subtotal, locale)}</span>
+          </div>
+          {hasTax && (
+            <div className="flex justify-between text-gray-500">
+              <span>Cr  {taxAccount?.nameAr ?? "—"}</span>
+              <span>{formatCurrency(taxAmount, locale)}</span>
+            </div>
+          )}
+          {postCogs && totalCost > 0 && (
+            <>
+              <div className="border-t mt-2 pt-2 font-bold text-gray-600">القيد 2 — تكلفة البضاعة</div>
+              <div className="flex justify-between">
+                <span>Dr  {cogsAccount?.nameAr ?? "—"}</span>
+                <span>{formatCurrency(totalCost, locale)}</span>
+              </div>
+              <div className="flex justify-between text-gray-500">
+                <span>Cr  {inventoryAccount?.nameAr ?? "—"}</span>
+                <span>{formatCurrency(totalCost, locale)}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <p className="text-xs text-blue-600">
+          سيتم إضافة حركة مدين تلقائياً في كشف حساب العميل
+        </p>
+
+        {error && <Alert variant="error">{error}</Alert>}
+
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
+            إلغاء
+          </Button>
+          <Button
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit || submitting}
+          >
+            {submitting ? "جاري التأكيد..." : "تأكيد الفاتورة"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── InvoiceForm ──────────────────────────────────────────────────────────────
+
+interface InvoiceFormProps {
+  editInvoice: SalesInvoiceDetail | null;
+  customers: CustomerRow[];
+  branches: BranchOption[];
+  variants: VariantOption[];
+  leafAccounts: AccountRow[];
+  onBack: () => void;
+  onSaved: (inv: SalesInvoiceDetail) => void;
+  onConfirmed: (inv: SalesInvoiceDetail) => void;
+  locale: AppLocale;
+}
+
+function InvoiceForm({
+  editInvoice,
+  customers,
+  branches,
+  variants,
+  leafAccounts,
+  onBack,
+  onSaved,
+  onConfirmed,
+  locale,
+}: InvoiceFormProps) {
+  const [customerId, setCustomerId] = useState(editInvoice?.customer?.id ?? "");
+  const [branchId, setBranchId] = useState(editInvoice?.branch?.id ?? "");
+  const [invoiceDate, setInvoiceDate] = useState(
+    editInvoice ? new Date(editInvoice.invoiceDate).toISOString().slice(0, 10) : todayStr(),
+  );
+  const [dueDate, setDueDate] = useState(
+    editInvoice?.dueDate
+      ? new Date(editInvoice.dueDate).toISOString().slice(0, 10)
+      : "",
+  );
+  const [taxRate, setTaxRate] = useState(editInvoice?.taxRate ?? "0");
+  const [notes, setNotes] = useState(editInvoice?.notes ?? "");
+  const [lines, setLines] = useState<LineFormState[]>(
+    editInvoice && editInvoice.lines && editInvoice.lines.length > 0
+      ? editInvoice.lines.map((l) => ({
+          productVariantId: l.productVariant?.id ?? "",
+          quantity: l.quantity,
+          unitLabel: l.unitLabel,
+          unitPrice: l.unitPrice,
+          costPrice: l.costPrice,
+          discountPct: l.discountPct,
+          note: l.note ?? "",
+        }))
+      : [emptyLine()],
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [savedInvoice, setSavedInvoice] = useState<SalesInvoiceDetail | null>(null);
+
+  function updateLine(idx: number, field: keyof LineFormState, value: string) {
+    setLines((prev) => {
+      const copy = [...prev];
+      const current = copy[idx];
+      if (!current) return copy;
+      copy[idx] = { ...current, [field]: value };
+      return copy;
+    });
+  }
+
+  function addLine() {
+    setLines((prev) => [...prev, emptyLine()]);
+  }
+
+  function removeLine(idx: number) {
+    if (lines.length <= 1) return;
+    setLines((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function onVariantChange(idx: number, variantId: string) {
+    const variant = variants.find((v) => v.id === variantId);
+    setLines((prev) => {
+      const copy = [...prev];
+      const current = copy[idx];
+      if (!current) return copy;
+      copy[idx] = {
+        ...current,
+        productVariantId: variantId,
+        unitLabel: variant?.unitLabel ?? "وحدة",
+        unitPrice: variant?.defaultSalePrice ?? "0",
+        costPrice: variant?.defaultCostPrice ?? "0",
+      };
+      return copy;
+    });
+  }
+
+  // Compute totals
+  const linesSummary = lines.map((l) => ({
+    lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.discountPct),
+    lineProfit: computeLineProfit(l.quantity, l.unitPrice, l.costPrice, l.discountPct),
+    lineCost:
+      (parseFloat(l.quantity) || 0) * (parseFloat(l.costPrice) || 0),
+  }));
+  const subtotal = linesSummary.reduce((a, l) => a + l.lineTotal, 0);
+  const discountTotal = lines.reduce(
+    (a, l) =>
+      a + (parseFloat(l.quantity) || 0) * (parseFloat(l.unitPrice) || 0) * ((parseFloat(l.discountPct) || 0) / 100),
+    0,
+  );
+  const tax = subtotal * ((parseFloat(taxRate) || 0) / 100);
+  const grandTotal = subtotal + tax;
+  const totalCost = linesSummary.reduce((a, l) => a + l.lineCost, 0);
+  const netProfit = grandTotal - totalCost;
+
+  async function handleSave(andConfirm = false) {
+    setSaving(true);
+    setError(null);
+    try {
+      if (!customerId || !branchId) {
+        setError("يرجى اختيار العميل والفرع");
+        setSaving(false);
+        return;
+      }
+      if (lines.some((l) => !l.productVariantId)) {
+        setError("يرجى اختيار المنتج في كل سطر");
+        setSaving(false);
+        return;
+      }
+
+      const payload = {
+        invoiceDate,
+        dueDate: dueDate || undefined,
+        customerId,
+        branchId,
+        taxRate: taxRate || "0",
+        notes: notes || undefined,
+        lines: lines.map((l) => ({
+          productVariantId: l.productVariantId,
+          quantity: l.quantity,
+          unitLabel: l.unitLabel || undefined,
+          unitPrice: l.unitPrice,
+          costPrice: l.costPrice || "0",
+          discountPct: l.discountPct || "0",
+          note: l.note || undefined,
+        })),
+      };
+
+      let inv: SalesInvoiceDetail;
+      if (editInvoice) {
+        inv = await updateSalesInvoice(editInvoice.id, payload);
+      } else {
+        inv = await createSalesInvoice(payload);
+      }
+      setSavedInvoice(inv);
+
+      if (andConfirm) {
+        setShowConfirmModal(true);
+      } else {
+        onSaved(inv);
+      }
+    } catch {
+      setError("فشل حفظ الفاتورة. يرجى التحقق من البيانات.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4" dir="rtl">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">
+          {editInvoice ? `تعديل فاتورة — SI-${editInvoice.invoiceNumber}` : "فاتورة مبيعات جديدة"}
+        </h1>
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-sm text-blue-600 hover:underline"
+        >
+          ← رجوع للقائمة
+        </button>
+      </div>
+
+      {error && <Alert variant="error">{error}</Alert>}
+
+      {/* Section 1 — Header */}
+      <Card>
+        <CardHeader>
+          <CardTitle>بيانات الفاتورة</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">العميل *</label>
+              <select
+                value={customerId}
+                onChange={(e) => setCustomerId(e.target.value)}
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">— اختر العميل —</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">الفرع *</label>
+              <select
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">— اختر الفرع —</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.nameAr}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">تاريخ الفاتورة *</label>
+              <Input
+                type="date"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">تاريخ الاستحقاق</label>
+              <Input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">نسبة الضريبة %</label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={taxRate}
+                onChange={(e) => setTaxRate(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">ملاحظات</label>
+              <Input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="ملاحظات اختيارية"
+              />
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Section 2 — Lines */}
+      <Card>
+        <CardHeader>
+          <CardTitle>بنود الفاتورة</CardTitle>
+        </CardHeader>
+        <CardBody className="overflow-x-auto p-0">
+          <Table>
+            <THead>
+              <TR>
+                <TH>#</TH>
+                <TH>المنتج</TH>
+                <TH>الوحدة</TH>
+                <TH>الكمية</TH>
+                <TH>سعر البيع</TH>
+                <TH>سعر التكلفة</TH>
+                <TH>خصم%</TH>
+                <TH>إجمالي</TH>
+                <TH>ربح</TH>
+                <TH>بيان</TH>
+                <TH>✕</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {lines.map((line, idx) => {
+                const lt = linesSummary[idx];
+                return (
+                  <TR key={idx}>
+                    <TD>{idx + 1}</TD>
+                    <TD>
+                      <select
+                        value={line.productVariantId}
+                        onChange={(e) => onVariantChange(idx, e.target.value)}
+                        className="border border-gray-300 rounded px-1 py-1 text-xs min-w-[180px]"
+                      >
+                        <option value="">— اختر —</option>
+                        {variants.map((v) => (
+                          <option key={v.id} value={v.id}>{v.label}</option>
+                        ))}
+                      </select>
+                    </TD>
+                    <TD>
+                      <Input
+                        type="text"
+                        value={line.unitLabel}
+                        onChange={(e) => updateLine(idx, "unitLabel", e.target.value)}
+                        className="w-20 text-xs"
+                      />
+                    </TD>
+                    <TD>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        value={line.quantity}
+                        onChange={(e) => updateLine(idx, "quantity", e.target.value)}
+                        className="w-20 text-xs"
+                      />
+                    </TD>
+                    <TD>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={line.unitPrice}
+                        onChange={(e) => updateLine(idx, "unitPrice", e.target.value)}
+                        className="w-24 text-xs"
+                      />
+                    </TD>
+                    <TD>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={line.costPrice}
+                        onChange={(e) => updateLine(idx, "costPrice", e.target.value)}
+                        className="w-24 text-xs"
+                      />
+                    </TD>
+                    <TD>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={line.discountPct}
+                        onChange={(e) => updateLine(idx, "discountPct", e.target.value)}
+                        className="w-16 text-xs"
+                      />
+                    </TD>
+                    <TD>
+                      <span className="text-xs font-medium">
+                        {lt?.lineTotal.toFixed(2) ?? "0.00"}
+                      </span>
+                    </TD>
+                    <TD>
+                      <span
+                        className={"text-xs font-medium " + ((lt?.lineProfit ?? 0) >= 0 ? "text-green-700" : "text-red-600")}
+                      >
+                        {lt?.lineProfit.toFixed(2) ?? "0.00"}
+                      </span>
+                    </TD>
+                    <TD>
+                      <Input
+                        type="text"
+                        value={line.note}
+                        onChange={(e) => updateLine(idx, "note", e.target.value)}
+                        className="w-28 text-xs"
+                        placeholder="ملاحظة"
+                      />
+                    </TD>
+                    <TD>
+                      <button
+                        type="button"
+                        onClick={() => removeLine(idx)}
+                        disabled={lines.length <= 1}
+                        className="text-red-500 disabled:opacity-30 hover:text-red-700"
+                      >
+                        ✕
+                      </button>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+          <div className="p-3">
+            <Button variant="ghost" size="sm" onClick={addLine}>
+              + إضافة منتج
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Section 3 — Totals */}
+      <Card>
+        <CardBody>
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-3">
+            <div className="flex justify-between">
+              <span className="text-gray-600">المجموع الفرعي:</span>
+              <span>{subtotal.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">إجمالي الخصم:</span>
+              <span>{discountTotal.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">ضريبة ({taxRate}%):</span>
+              <span>{tax.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between font-bold text-green-700">
+              <span>الإجمالي:</span>
+              <span>{formatCurrency(grandTotal, locale)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">إجمالي التكلفة:</span>
+              <span>{totalCost.toFixed(2)}</span>
+            </div>
+            <div className={"flex justify-between font-bold " + (netProfit >= 0 ? "text-green-700" : "text-red-600")}>
+              <span>صافي الربح المتوقع:</span>
+              <span>{formatCurrency(netProfit, locale)}</span>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Actions */}
+      <div className="flex gap-3 no-print">
+        <Button onClick={() => void handleSave(false)} disabled={saving}>
+          {saving ? "جاري الحفظ..." : "حفظ مسودة"}
+        </Button>
+        <Button onClick={() => void handleSave(true)} disabled={saving}>
+          حفظ وتأكيد
+        </Button>
+        <Button variant="ghost" onClick={onBack} disabled={saving}>
+          إلغاء
+        </Button>
+      </div>
+
+      {/* Confirm modal triggered after save-and-confirm */}
+      {showConfirmModal && savedInvoice && (
+        <ConfirmModal
+          invoice={savedInvoice}
+          leafAccounts={leafAccounts}
+          onClose={() => setShowConfirmModal(false)}
+          onConfirmed={(inv) => {
+            setShowConfirmModal(false);
+            onConfirmed(inv);
+          }}
+          locale={locale}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── ExpandedRow ──────────────────────────────────────────────────────────────
+
+function ExpandedRow({
+  invoice,
+  locale,
+}: {
+  invoice: SalesInvoiceDetail;
+  locale: AppLocale;
+}) {
+  const grandTotal = parseFloat(invoice.grandTotal);
+  const totalCost = parseFloat(invoice.totalCost);
+
+  return (
+    <div className="p-4 bg-gray-50 text-sm space-y-3" dir="rtl">
+      {/* Lines sub-table */}
+      <div className="overflow-x-auto">
+        <Table>
+          <THead>
+            <TR>
+              <TH>المنتج</TH>
+              <TH>الكمية</TH>
+              <TH>سعر البيع</TH>
+              <TH>التكلفة</TH>
+              <TH>خصم%</TH>
+              <TH>إجمالي</TH>
+              <TH>ربح السطر</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {invoice.lines.map((l) => {
+              const lineProfit = parseFloat(l.lineTotal) - parseFloat(l.lineCost);
+              return (
+                <TR key={l.id}>
+                  <TD>
+                    {l.productVariant?.sku?.code} — {l.productVariant?.sku?.colorNameAr}
+                  </TD>
+                  <TD>{l.quantity} {l.unitLabel}</TD>
+                  <TD>{l.unitPrice}</TD>
+                  <TD>{l.costPrice}</TD>
+                  <TD>{l.discountPct}%</TD>
+                  <TD>{l.lineTotal}</TD>
+                  <TD>
+                    <span className={lineProfit >= 0 ? "text-green-700" : "text-red-600"}>
+                      {lineProfit.toFixed(2)}
+                    </span>
+                  </TD>
+                </TR>
+              );
+            })}
+          </TBody>
+        </Table>
+      </div>
+
+      {/* Totals */}
+      <div className="grid grid-cols-3 gap-2 text-xs bg-white rounded p-3">
+        <div>المجموع: {invoice.subtotal}</div>
+        <div>الخصم: {invoice.discountAmount}</div>
+        <div>الضريبة: {invoice.taxAmount}</div>
+        <div className="font-bold text-green-700">الإجمالي: {invoice.grandTotal}</div>
+        <div>التكلفة: {invoice.totalCost}</div>
+        <div className={"font-bold " + (grandTotal - totalCost >= 0 ? "text-green-700" : "text-red-600")}>
+          الربح: {(grandTotal - totalCost).toFixed(2)}
+        </div>
+      </div>
+
+      {/* Accounting badges */}
+      {invoice.status === "CONFIRMED" && (
+        <div className="flex gap-2 flex-wrap">
+          {invoice.journalEntryId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 text-green-800 px-2 py-0.5 text-xs">
+              قيد #{invoice.journalEntryId.slice(0, 8)}
+            </span>
+          )}
+          {invoice.customerTxId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-xs">
+              حساب عميل ✓
+            </span>
+          )}
+          {invoice.cogsJournalEntryId && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 text-purple-800 px-2 py-0.5 text-xs">
+              قيد COGS #{invoice.cogsJournalEntryId.slice(0, 8)}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function SalesInvoicesPage() {
+  const locale = useLocale() as AppLocale;
+  const isOwner = useHasRole();
+  const canRecord = useHasRole("ACCOUNTANT");
+
+  // Data
+  const [invoices, setInvoices] = useState<SalesInvoiceRow[]>([]);
+  const [expandedDetails, setExpandedDetails] = useState<Record<string, SalesInvoiceDetail>>({});
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [variants, setVariants] = useState<VariantOption[]>([]);
+  const [leafAccounts, setLeafAccounts] = useState<AccountRow[]>([]);
+
+  // UI state
+  const [view, setView] = useState<"list" | "form">("list");
+  const [editInvoice, setEditInvoice] = useState<SalesInvoiceDetail | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<SalesInvoiceRow | null>(null);
+  const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Filters
+  const [filterCustomerId, setFilterCustomerId] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+
+  // Print state
+  const [printInvoice, setPrintInvoice] = useState<SalesInvoiceDetail | null>(null);
+
+  const loadInvoices = useCallback(
+    async (cursor?: string | null) => {
+      try {
+        const page = await listSalesInvoices({
+          limit: 20,
+          cursor,
+          customerId: filterCustomerId || undefined,
+          status: filterStatus || undefined,
+          from: filterFrom || undefined,
+          to: filterTo || undefined,
+        });
+        if (cursor) {
+          setInvoices((prev) => [...prev, ...page.data]);
+        } else {
+          setInvoices(page.data);
+        }
+        setNextCursor(page.nextCursor);
+      } catch {
+        setError("فشل تحميل الفواتير");
+      }
+    },
+    [filterCustomerId, filterStatus, filterFrom, filterTo],
+  );
+
+  useEffect(() => {
+    void loadInvoices();
+  }, [loadInvoices]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [custs, brs, accts, varRows] = await Promise.all([
+          listCustomers(),
+          apiCall<BranchOption[]>("/branches"),
+          listAccounts(),
+          apiCall<Array<{
+            id: string;
+            sizeMetersPerBoard: string;
+            defaultSalePricePerMeter: string;
+            defaultPurchasePricePerMeter: string;
+            sku: { code: string; colorNameAr: string };
+            sizeLabel?: string;
+          }>>("/products/variants"),
+        ]);
+        setCustomers(custs);
+        setBranches(brs);
+        setLeafAccounts(accts.filter((a) => a.isLeaf && a.active));
+        setVariants(
+          varRows.map((v) => ({
+            id: v.id,
+            label: `${v.sku.code} — ${v.sku.colorNameAr} (${v.sizeMetersPerBoard}م)`,
+            unitLabel: "وحدة",
+            defaultSalePrice: v.defaultSalePricePerMeter,
+            defaultCostPrice: v.defaultPurchasePricePerMeter,
+          })),
+        );
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
+  async function toggleExpand(inv: SalesInvoiceRow) {
+    if (expandedIds.has(inv.id)) {
+      setExpandedIds((prev) => { const s = new Set(prev); s.delete(inv.id); return s; });
+      return;
+    }
+    // Fetch detail if needed
+    if (!expandedDetails[inv.id]) {
+      try {
+        const detail = await getSalesInvoice(inv.id);
+        setExpandedDetails((prev) => ({ ...prev, [inv.id]: detail }));
+      } catch {
+        setError("فشل تحميل تفاصيل الفاتورة");
+        return;
+      }
+    }
+    setExpandedIds((prev) => new Set(prev).add(inv.id));
+  }
+
+  async function handleCancel(id: string) {
+    try {
+      await cancelSalesInvoice(id);
+      setCancelConfirmId(null);
+      await loadInvoices();
+    } catch {
+      setError("فشل إلغاء الفاتورة");
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteSalesInvoice(id);
+      setDeleteConfirmId(null);
+      setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+    } catch {
+      setError("فشل حذف الفاتورة");
+    }
+  }
+
+  async function handleEdit(inv: SalesInvoiceRow) {
+    try {
+      const detail = await getSalesInvoice(inv.id);
+      setEditInvoice(detail);
+      setView("form");
+    } catch {
+      setError("فشل تحميل بيانات الفاتورة");
+    }
+  }
+
+  function handleSaved(inv: SalesInvoiceDetail) {
+    setView("list");
+    setEditInvoice(null);
+    void loadInvoices();
+  }
+
+  function handleConfirmed(inv: SalesInvoiceDetail) {
+    setView("list");
+    setEditInvoice(null);
+    setConfirmTarget(null);
+    void loadInvoices();
+  }
+
+  if (view === "form") {
+    return (
+      <InvoiceForm
+        editInvoice={editInvoice}
+        customers={customers}
+        branches={branches}
+        variants={variants}
+        leafAccounts={leafAccounts}
+        onBack={() => { setView("list"); setEditInvoice(null); }}
+        onSaved={handleSaved}
+        onConfirmed={handleConfirmed}
+        locale={locale}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4" dir="rtl">
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { font-family: 'Cairo', Arial, sans-serif; }
+          .print-only { display: block !important; }
+        }
+        .print-only { display: none; }
+      `}</style>
+
+      <div className="flex items-center justify-between gap-3 no-print">
+        <h1 className="text-xl font-bold">فواتير المبيعات</h1>
+        {(isOwner || canRecord) && (
+          <Button onClick={() => { setEditInvoice(null); setView("form"); }}>
+            + فاتورة جديدة
+          </Button>
+        )}
+      </div>
+
+      {error && <Alert variant="error">{error}</Alert>}
+
+      {/* Filters */}
+      <Card className="no-print">
+        <CardBody>
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">العميل</label>
+              <select
+                value={filterCustomerId}
+                onChange={(e) => setFilterCustomerId(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">— الكل —</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">الحالة</label>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">— الكل —</option>
+                <option value="DRAFT">مسودة</option>
+                <option value="CONFIRMED">مؤكدة</option>
+                <option value="CANCELLED">ملغاة</option>
+                <option value="PAID">مدفوعة</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">من</label>
+              <Input
+                type="date"
+                value={filterFrom}
+                onChange={(e) => setFilterFrom(e.target.value)}
+                className="w-36"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">إلى</label>
+              <Input
+                type="date"
+                value={filterTo}
+                onChange={(e) => setFilterTo(e.target.value)}
+                className="w-36"
+              />
+            </div>
+            <Button onClick={() => void loadInvoices()}>بحث</Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      {/* Table */}
+      <Card>
+        <CardBody className="p-0 overflow-x-auto">
+          <Table>
+            <THead>
+              <TR>
+                <TH>#</TH>
+                <TH>رقم الفاتورة</TH>
+                <TH>التاريخ</TH>
+                <TH>الاستحقاق</TH>
+                <TH>العميل</TH>
+                <TH>الحالة</TH>
+                <TH>الإجمالي</TH>
+                <TH>الربح</TH>
+                <TH className="no-print">إجراءات</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {invoices.length === 0 ? (
+                <TR>
+                  <TD colSpan={9} className="text-center text-gray-400 py-8">
+                    لا توجد فواتير
+                  </TD>
+                </TR>
+              ) : (
+                invoices.map((inv, idx) => {
+                  const grandTotal = parseFloat(inv.grandTotal);
+                  const totalCost = parseFloat(inv.totalCost);
+                  const profit = grandTotal - totalCost;
+                  const isExpanded = expandedIds.has(inv.id);
+
+                  return (
+                    <>
+                      <TR key={inv.id}>
+                        <TD>{idx + 1}</TD>
+                        <TD className="font-mono">SI-{inv.invoiceNumber}</TD>
+                        <TD>{formatDate(inv.invoiceDate, locale)}</TD>
+                        <TD>{inv.dueDate ? formatDate(inv.dueDate, locale) : "—"}</TD>
+                        <TD>{inv.customer?.code} — {inv.customer?.nameAr}</TD>
+                        <TD><StatusBadge status={inv.status} /></TD>
+                        <TD className="font-medium text-green-700">{formatCurrency(inv.grandTotal, locale)}</TD>
+                        <TD>
+                          {totalCost > 0 ? (
+                            <span className={profit >= 0 ? "text-green-700" : "text-red-600"}>
+                              {formatCurrency(profit, locale)}
+                            </span>
+                          ) : "—"}
+                        </TD>
+                        <TD className="no-print">
+                          <div className="flex gap-1 flex-wrap text-xs">
+                            <button
+                              type="button"
+                              onClick={() => void toggleExpand(inv)}
+                              className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200"
+                            >
+                              {isExpanded ? "إخفاء" : "تفاصيل"}
+                            </button>
+                            {inv.status === "DRAFT" && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmTarget(inv)}
+                                  className="px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-800"
+                                >
+                                  تأكيد
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleEdit(inv)}
+                                  className="px-2 py-1 rounded bg-blue-100 hover:bg-blue-200 text-blue-800"
+                                >
+                                  تعديل
+                                </button>
+                              </>
+                            )}
+                            {(inv.status === "DRAFT" || inv.status === "CONFIRMED") && isOwner && (
+                              <button
+                                type="button"
+                                onClick={() => setCancelConfirmId(inv.id)}
+                                className="px-2 py-1 rounded bg-orange-100 hover:bg-orange-200 text-orange-800"
+                              >
+                                إلغاء
+                              </button>
+                            )}
+                            {inv.status === "DRAFT" && isOwner && (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteConfirmId(inv.id)}
+                                className="px-2 py-1 rounded bg-red-100 hover:bg-red-200 text-red-700"
+                              >
+                                حذف
+                              </button>
+                            )}
+                          </div>
+                        </TD>
+                      </TR>
+
+                      {/* Expanded detail row */}
+                      {(() => {
+                        const detail = isExpanded ? expandedDetails[inv.id] : undefined;
+                        if (!detail) return null;
+                        return (
+                          <TR key={inv.id + "-expanded"}>
+                            <TD colSpan={9} className="p-0">
+                              <div className="border-t">
+                                <ExpandedRow invoice={detail} locale={locale} />
+                                <div className="p-3 no-print">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setPrintInvoice(detail);
+                                      setTimeout(() => window.print(), 100);
+                                    }}
+                                    className="text-xs px-3 py-1 rounded border hover:bg-gray-50"
+                                  >
+                                    طباعة
+                                  </button>
+                                </div>
+                              </div>
+                            </TD>
+                          </TR>
+                        );
+                      })()}
+                    </>
+                  );
+                })
+              )}
+            </TBody>
+          </Table>
+        </CardBody>
+      </Card>
+
+      {/* Load More */}
+      {nextCursor && (
+        <div className="flex justify-center no-print">
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              setLoadingMore(true);
+              await loadInvoices(nextCursor);
+              setLoadingMore(false);
+            }}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "جاري التحميل..." : "تحميل المزيد"}
+          </Button>
+        </div>
+      )}
+
+      {/* Confirm Modal */}
+      {confirmTarget && (
+        <ConfirmModal
+          invoice={confirmTarget}
+          leafAccounts={leafAccounts}
+          onClose={() => setConfirmTarget(null)}
+          onConfirmed={(inv) => {
+            setConfirmTarget(null);
+            void loadInvoices();
+          }}
+          locale={locale}
+        />
+      )}
+
+      {/* Cancel confirm inline */}
+      {cancelConfirmId && (
+        <Modal open={true} onClose={() => setCancelConfirmId(null)} className="max-w-md w-full">
+          <div className="p-6 space-y-4" dir="rtl">
+            <h3 className="font-bold text-lg">تأكيد الإلغاء</h3>
+            <p className="text-sm text-gray-600">
+              هل أنت متأكد من إلغاء هذه الفاتورة؟
+              {invoices.find((i) => i.id === cancelConfirmId)?.status === "CONFIRMED" &&
+                " سيتم إنشاء قيد عكسي في كشف حساب العميل."}
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setCancelConfirmId(null)}>تراجع</Button>
+              <Button onClick={() => void handleCancel(cancelConfirmId)}>تأكيد الإلغاء</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete confirm inline */}
+      {deleteConfirmId && (
+        <Modal open={true} onClose={() => setDeleteConfirmId(null)} className="max-w-md w-full">
+          <div className="p-6 space-y-4" dir="rtl">
+            <h3 className="font-bold text-lg">تأكيد الحذف</h3>
+            <p className="text-sm text-gray-600">هل أنت متأكد من حذف هذه الفاتورة نهائياً؟ لا يمكن التراجع عن هذا الإجراء.</p>
+            <div className="flex justify-end gap-3">
+              <Button variant="ghost" onClick={() => setDeleteConfirmId(null)}>تراجع</Button>
+              <Button onClick={() => void handleDelete(deleteConfirmId)}>حذف نهائي</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Print Layout */}
+      {printInvoice && (
+        <div className="print-only fixed inset-0 bg-white p-8 text-sm" dir="rtl">
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-bold">شروق · Shorok — نظام إدارة المؤسسة</h1>
+            <h2 className="text-lg mt-2">فاتورة مبيعات رقم: SI-{printInvoice.invoiceNumber}</h2>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+            <div>
+              <strong>التاريخ:</strong> {formatDate(printInvoice.invoiceDate, locale)}
+            </div>
+            <div>
+              <strong>الاستحقاق:</strong>{" "}
+              {printInvoice.dueDate ? formatDate(printInvoice.dueDate, locale) : "—"}
+            </div>
+            <div>
+              <strong>الحالة:</strong>{" "}
+              {{DRAFT:"مسودة",CONFIRMED:"مؤكدة",CANCELLED:"ملغاة",PAID:"مدفوعة"}[printInvoice.status] ?? printInvoice.status}
+            </div>
+            <div>
+              <strong>العميل:</strong> {printInvoice.customer?.code} — {printInvoice.customer?.nameAr}
+            </div>
+            <div>
+              <strong>الفرع:</strong> {printInvoice.branch?.nameAr}
+            </div>
+          </div>
+
+          <table className="w-full border-collapse border border-gray-300 text-xs mb-4">
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 px-2 py-1">المنتج</th>
+                <th className="border border-gray-300 px-2 py-1">الكمية</th>
+                <th className="border border-gray-300 px-2 py-1">الوحدة</th>
+                <th className="border border-gray-300 px-2 py-1">السعر</th>
+                <th className="border border-gray-300 px-2 py-1">خصم%</th>
+                <th className="border border-gray-300 px-2 py-1">الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {printInvoice.lines.map((l) => (
+                <tr key={l.id}>
+                  <td className="border border-gray-300 px-2 py-1">
+                    {l.productVariant?.sku?.code} — {l.productVariant?.sku?.colorNameAr}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1 text-center">{l.quantity}</td>
+                  <td className="border border-gray-300 px-2 py-1 text-center">{l.unitLabel}</td>
+                  <td className="border border-gray-300 px-2 py-1 text-left">{l.unitPrice}</td>
+                  <td className="border border-gray-300 px-2 py-1 text-center">{l.discountPct}%</td>
+                  <td className="border border-gray-300 px-2 py-1 text-left font-medium">{l.lineTotal}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="text-left space-y-1 mb-4">
+            <div>المجموع: {printInvoice.subtotal}</div>
+            <div>الخصم: {printInvoice.discountAmount}</div>
+            <div>الضريبة: {printInvoice.taxAmount}</div>
+            <div className="font-bold text-lg">الإجمالي: {formatCurrency(printInvoice.grandTotal, locale)}</div>
+          </div>
+
+          {printInvoice.notes && (
+            <div className="mb-4">
+              <strong>ملاحظات:</strong> {printInvoice.notes}
+            </div>
+          )}
+
+          <div className="text-center text-xs text-gray-400 mt-8 border-t pt-4">
+            تم الإنشاء بواسطة نظام شروق ERP
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
