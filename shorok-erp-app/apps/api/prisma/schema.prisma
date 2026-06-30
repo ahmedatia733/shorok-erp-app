@@ -500,6 +500,9 @@ model Account {
 
 model JournalEntry {
   id            String    @id @default(uuid()) @db.Uuid
+  entryNumber   BigInt    @unique @default(autoincrement()) @map("entry_number")
+  entryType     String    @default("JOURNAL") @map("entry_type") @db.VarChar(30)
+  reference     String?   @map("reference") @db.VarChar(100)
   entryDate     DateTime  @map("entry_date") @db.Date
   description   String    @db.VarChar(500)
   referenceType String?   @map("reference_type") @db.VarChar(60)

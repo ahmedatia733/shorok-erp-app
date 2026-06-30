@@ -14,6 +14,9 @@ export interface JournalLineRow {
 
 export interface JournalEntryRow {
   id: string;
+  entryNumber: number;
+  entryType: string;
+  reference: string | null;
   entryDate: string;
   description: string;
   referenceType: string | null;
@@ -45,6 +48,8 @@ export const listJournal = (params: {
 };
 
 export const createJournalEntry = (body: {
+  entryType?: string;
+  reference?: string;
   entryDate: string;
   description: string;
   referenceType?: string;

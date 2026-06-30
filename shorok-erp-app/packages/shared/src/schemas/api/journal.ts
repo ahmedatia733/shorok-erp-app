@@ -8,7 +8,12 @@ export const JournalLineSchema = z.object({
 });
 export type JournalLine = z.infer<typeof JournalLineSchema>;
 
+export const JOURNAL_ENTRY_TYPES = ["JOURNAL", "RECEIPT", "PAYMENT", "ADJUSTMENT", "OPENING"] as const;
+export type JournalEntryType = (typeof JOURNAL_ENTRY_TYPES)[number];
+
 export const CreateJournalEntryRequestSchema = z.object({
+  entryType: z.enum(JOURNAL_ENTRY_TYPES).optional().default("JOURNAL"),
+  reference: z.string().max(100).optional(),
   entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   description: z.string().min(1).max(500),
   referenceType: z.string().max(60).optional(),

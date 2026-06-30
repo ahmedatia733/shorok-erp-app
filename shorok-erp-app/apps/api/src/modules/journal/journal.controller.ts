@@ -59,6 +59,8 @@ export class JournalController {
     return this.prisma.runInTransaction(async (tx) => {
       const entry = await tx.journalEntry.create({
         data: {
+          entryType: body.entryType ?? "JOURNAL",
+          reference: body.reference ?? null,
           entryDate: new Date(body.entryDate),
           description: body.description,
           referenceType: body.referenceType ?? null,
@@ -210,6 +212,9 @@ export class JournalController {
   private _formatEntry(
     entry: {
       id: string;
+      entryNumber: bigint;
+      entryType: string;
+      reference: string | null;
       entryDate: Date;
       description: string;
       referenceType: string | null;
@@ -228,6 +233,9 @@ export class JournalController {
   ) {
     return {
       id: entry.id,
+      entryNumber: Number(entry.entryNumber),
+      entryType: entry.entryType,
+      reference: entry.reference,
       entryDate: entry.entryDate,
       description: entry.description,
       referenceType: entry.referenceType,
