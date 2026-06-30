@@ -100,6 +100,10 @@ export default function ProtectedAppLayout({ children }: { children: React.React
               <NavLink href={`/${locale}/accounting/income-statement`} label={t("incomeStatement")} />
               <NavLink href={`/${locale}/accounting/statement`} label="كشف الحساب" />
               <NavLink href={`/${locale}/accounting/customers`} label="كشف حساب عميل" />
+              <NavLink href={`/${locale}/accounting/fixed-assets`} label="الأصول الثابتة" />
+              <NavLink href={`/${locale}/accounting/reports/trial-balance`} label="ميزان المراجعة" />
+              <NavLink href={`/${locale}/accounting/reports/balance-sheet`} label="الميزانية العمومية" />
+              <NavLink href={`/${locale}/accounting/reports/aging`} label="عمر الديون" />
             </NavSection>
           )}
 
