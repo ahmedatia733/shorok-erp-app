@@ -283,8 +283,8 @@ export default function NewPurchaseInvoicePage() {
               <th className="border border-border px-2 py-1.5 text-center min-w-[120px]">اسم الكود</th>
               <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">الصنف</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">عدد</th>
-              <th className="border border-border px-2 py-1.5 text-center w-12" title="كبير (5.25م)">ك</th>
-              <th className="border border-border px-2 py-1.5 text-center w-12" title="صغير (4م)">ص</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16">كبير</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16">صغير</th>
               <th className="border border-border px-2 py-1.5 text-center w-14" title="طول (مقاس خاص)">طول</th>
               <th className="border border-border px-2 py-1.5 text-center w-14" title="عرض (مقاس خاص)">عرض</th>
 
