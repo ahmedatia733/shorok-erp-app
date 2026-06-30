@@ -28,7 +28,6 @@ interface InvoiceLine {
   sizeChoice: "" | "K" | "S";
   customL: string;
   customW: string;
-  customH: string;
   unitLabel: string;
   unitPrice: string;
   taxRate: string;
@@ -51,7 +50,6 @@ function mkLine(): InvoiceLine {
     sizeChoice: "",
     customL: "",
     customW: "",
-    customH: "",
     unitLabel: "متر",
     unitPrice: "",
     taxRate: "0",
@@ -169,7 +167,6 @@ export default function NewPurchaseInvoicePage() {
           boardsQuantity: l.boardsQuantity || "1",
           lengthM: l.customL || (l.sizeChoice === "K" ? String(SIZE_K) : l.sizeChoice === "S" ? String(SIZE_S) : undefined),
           widthM: l.customW || undefined,
-          heightM: l.customH || undefined,
           unitLabel: l.unitLabel || undefined,
           unitPrice: l.unitPrice || "0",
           taxRate: l.taxRate || "0",
@@ -290,7 +287,7 @@ export default function NewPurchaseInvoicePage() {
               <th className="border border-border px-2 py-1.5 text-center w-12" title="صغير (4م)">ص</th>
               <th className="border border-border px-2 py-1.5 text-center w-14" title="طول (مقاس خاص)">طول</th>
               <th className="border border-border px-2 py-1.5 text-center w-14" title="عرض (مقاس خاص)">عرض</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14" title="ارتفاع (مقاس خاص)">ارتفاع</th>
+
               <th className="border border-border px-2 py-1.5 text-center w-16" title="متر مربع = طول × عرض">م²</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">الوحدة (م/لوح)</th>
@@ -392,12 +389,7 @@ export default function NewPurchaseInvoicePage() {
                       onChange={(e) => updateLine(idx, { customW: e.target.value })}
                       className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
                   </td>
-                  {/* ارتفاع */}
-                  <td className="border border-border px-1 py-1">
-                    <input type="number" min="0" step="0.01" value={line.customH}
-                      onChange={(e) => updateLine(idx, { customH: e.target.value })}
-                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
-                  </td>
+
                   {/* م² — auto */}
                   <td className="border border-border px-1 py-1 text-center text-xs text-primary font-semibold" dir="ltr">
                     {line.sqm}
