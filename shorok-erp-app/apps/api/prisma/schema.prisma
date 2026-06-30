@@ -152,11 +152,15 @@ model User {
 enum PaymentAccountType {
   CASH
   BANK
+
+  @@map("payment_account_type")
 }
 
 enum PaymentEntityType {
   SUPPLIER
   CUSTOMER
+
+  @@map("payment_entity_type")
 }
 
 model PaymentAccount {

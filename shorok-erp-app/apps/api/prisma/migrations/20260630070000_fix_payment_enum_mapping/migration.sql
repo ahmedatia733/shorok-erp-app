@@ -1,0 +1,3 @@
+-- No SQL needed. This migration documents that PaymentAccountType and PaymentEntityType
+-- Prisma enums map to the PostgreSQL types payment_account_type and payment_entity_type
+-- (already created with those names in migration 20260630040000).
