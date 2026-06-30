@@ -15,9 +15,11 @@ import {
   listVariantsForInvoice,
   type VariantOption,
 } from "../../../../../../lib/purchase-invoices-client";
+import { AP_COLORS, apColorMap } from "../../../../../../lib/ap-colors";
 
 interface InvoiceLine {
   _key: string;
+  colorCode: string;
   productVariantId: string;
   boardsQuantity: string;
   lengthM: string;
@@ -40,6 +42,7 @@ function today() {
 function mkLine(): InvoiceLine {
   return {
     _key: Math.random().toString(36).slice(2),
+    colorCode: "",
     productVariantId: "",
     boardsQuantity: "",
     lengthM: "",
@@ -152,6 +155,7 @@ export default function NewPurchaseInvoicePage() {
         branchId,
         lines: validLines.map((l) => ({
           productVariantId: l.productVariantId,
+          colorCode: l.colorCode || undefined,
           boardsQuantity: l.boardsQuantity || "1",
           lengthM: l.lengthM || undefined,
           widthM: l.widthM || undefined,
@@ -268,7 +272,8 @@ export default function NewPurchaseInvoicePage() {
             <tr className="bg-background text-textSecondary text-xs">
               <th className="border border-border px-2 py-1.5 text-center w-8">#</th>
               <th className="border border-border px-2 py-1.5 text-center w-28">الكود</th>
-              <th className="border border-border px-2 py-1.5 text-center min-w-[160px]">الصنف</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[120px]">اسم الكود</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">الصنف</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">عدد</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">ط</th>
               <th className="border border-border px-2 py-1.5 text-center w-16">ع</th>
@@ -292,20 +297,37 @@ export default function NewPurchaseInvoicePage() {
                   <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">
                     {idx + 1}
                   </td>
+                  {/* الكود — AP color select */}
+                  <td className="border border-border px-1 py-1">
+                    <select
+                      value={line.colorCode}
+                      onChange={(e) => updateLine(idx, { colorCode: e.target.value })}
+                      className="w-full bg-transparent text-sm focus:outline-none font-mono"
+                    >
+                      <option value="">—</option>
+                      {AP_COLORS.map((c) => (
+                        <option key={c.code} value={c.code}>{c.code}</option>
+                      ))}
+                    </select>
+                  </td>
+                  {/* اسم الكود — auto-fill */}
+                  <td className="border border-border px-1 py-1 text-sm pe-2 text-end">
+                    {line.colorCode ? (apColorMap.get(line.colorCode)?.nameAr ?? "") : ""}
+                  </td>
+                  {/* الصنف — product variant select */}
                   <td className="border border-border px-1 py-1">
                     <select
                       value={line.productVariantId}
                       onChange={(e) => onVariantChange(idx, e.target.value)}
-                      className="w-full bg-transparent text-sm focus:outline-none font-mono"
+                      className="w-full bg-transparent text-sm focus:outline-none"
                     >
-                      <option value="">اختر</option>
+                      <option value="">اختر الصنف</option>
                       {variants.map((v) => (
-                        <option key={v.id} value={v.id}>{v.skuCode}</option>
+                        <option key={v.id} value={v.id}>
+                          {v.skuCode} — {locale === "ar" ? v.skuNameAr : v.skuNameEn} ({v.sizeMetersPerBoard}م)
+                        </option>
                       ))}
                     </select>
-                  </td>
-                  <td className="border border-border px-1 py-1 text-sm text-end pe-2">
-                    {variant ? (locale === "ar" ? variant.skuNameAr : variant.skuNameEn) : ""}
                   </td>
                   <td className="border border-border px-1 py-1">
                     <input

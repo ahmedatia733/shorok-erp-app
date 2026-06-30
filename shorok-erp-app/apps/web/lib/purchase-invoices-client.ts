@@ -92,6 +92,7 @@ export const createPurchaseInvoice = (body: {
   notes?: string;
   lines: Array<{
     productVariantId: string;
+    colorCode?: string;
     boardsQuantity: string;
     lengthM?: string;
     widthM?: string;

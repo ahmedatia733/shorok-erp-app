@@ -7,6 +7,7 @@ const decimalStr = z.string().regex(/^\d+(\.\d{1,4})?$/);
 
 export const PurchaseInvoiceLineInputSchema = z.object({
   productVariantId: UuidSchema,
+  colorCode: z.string().max(20).optional(),
   boardsQuantity: decimalStr,
   lengthM: decimalStr.optional(),
   widthM: decimalStr.optional(),

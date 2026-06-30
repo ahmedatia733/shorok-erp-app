@@ -50,6 +50,7 @@ export class PurchaseInvoicesController {
         skuNameAr: l.productVariant?.sku?.colorNameAr ?? "",
         skuNameEn: l.productVariant?.sku?.colorNameEn ?? "",
         sizeMetersPerBoard: l.productVariant?.sizeMetersPerBoard?.toString() ?? "",
+        colorCode: l.colorCode ?? null,
         boardsQuantity: l.boardsQuantity.toString(),
         lengthM: l.lengthM?.toString() ?? null,
         widthM: l.widthM?.toString() ?? null,
@@ -156,6 +157,7 @@ export class PurchaseInvoicesController {
     // Validate all variants and compute line totals
     const lineData: Array<{
       productVariantId: string;
+      colorCode: string | null;
       boardsQuantity: Decimal;
       lengthM: Decimal | null;
       widthM: Decimal | null;
@@ -202,6 +204,7 @@ export class PurchaseInvoicesController {
 
       lineData.push({
         productVariantId: line.productVariantId,
+        colorCode: line.colorCode ?? null,
         boardsQuantity: boardsQty,
         lengthM,
         widthM,
@@ -242,6 +245,7 @@ export class PurchaseInvoicesController {
           lines: {
             create: lineData.map((l) => ({
               productVariantId: l.productVariantId,
+              colorCode: l.colorCode,
               boardsQuantity: l.boardsQuantity.toFixed(4),
               lengthM: l.lengthM ? l.lengthM.toFixed(4) : null,
               widthM: l.widthM ? l.widthM.toFixed(4) : null,

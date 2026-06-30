@@ -517,6 +517,7 @@ model PurchaseInvoiceLine {
   lengthM          Decimal? @map("length_m") @db.Decimal(14, 4)
   widthM           Decimal? @map("width_m") @db.Decimal(14, 4)
   metersQuantity   Decimal  @map("meters_quantity") @db.Decimal(14, 4)
+  colorCode        String?  @map("color_code") @db.VarChar(20)
   unitLabel        String?  @map("unit_label") @db.VarChar(30)
   unitPrice        Decimal  @map("unit_price") @db.Decimal(14, 2)
   lineTotal        Decimal  @map("line_total") @db.Decimal(14, 2)
