@@ -19,12 +19,13 @@ import {
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 
-interface JournalLineInput {
+interface LineInput {
   accountId: string;
-  type: "debit" | "credit";
   amount: string;
   note: string;
 }
+
+const emptyLine = (): LineInput => ({ accountId: "", amount: "", note: "" });
 
 function getAllLeafAccounts(accounts: AccountRow[]): AccountRow[] {
   const result: AccountRow[] = [];
@@ -52,10 +53,8 @@ export default function JournalPage() {
   // Create modal
   const [createOpen, setCreateOpen] = useState(false);
   const [leafAccounts, setLeafAccounts] = useState<AccountRow[]>([]);
-  const [lines, setLines] = useState<JournalLineInput[]>([
-    { accountId: "", type: "debit", amount: "0.00", note: "" },
-    { accountId: "", type: "credit", amount: "0.00", note: "" },
-  ]);
+  const [debitLines, setDebitLines] = useState<LineInput[]>([emptyLine()]);
+  const [creditLines, setCreditLines] = useState<LineInput[]>([emptyLine()]);
   const [entryDate, setEntryDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [description, setDescription] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
@@ -78,26 +77,21 @@ export default function JournalPage() {
     [t],
   );
 
-  useEffect(() => {
-    void loadJournal();
-  }, [loadJournal]);
+  useEffect(() => { void loadJournal(); }, [loadJournal]);
 
   useEffect(() => {
     if (createOpen && leafAccounts.length === 0) {
-      void listAccounts().then((data) => {
-        setLeafAccounts(getAllLeafAccounts(data));
-      });
+      void listAccounts().then((data) => setLeafAccounts(getAllLeafAccounts(data)));
     }
   }, [createOpen, leafAccounts.length]);
 
-  const totalDebitNum = lines.filter((l) => l.type === "debit").reduce((acc, l) => acc + parseFloat(l.amount || "0"), 0);
-  const totalCreditNum = lines.filter((l) => l.type === "credit").reduce((acc, l) => acc + parseFloat(l.amount || "0"), 0);
-  const isBalanced = Math.abs(totalDebitNum - totalCreditNum) < 0.005;
-  const canSubmit =
+  const totalDebit  = debitLines.reduce((s, l) => s + parseFloat(l.amount || "0"), 0);
+  const totalCredit = creditLines.reduce((s, l) => s + parseFloat(l.amount || "0"), 0);
+  const isBalanced  = totalDebit > 0 && Math.abs(totalDebit - totalCredit) < 0.005;
+  const canSubmit   =
     isBalanced &&
-    lines.some((l) => l.type === "debit") &&
-    lines.some((l) => l.type === "credit") &&
-    lines.every((l) => l.accountId && parseFloat(l.amount || "0") > 0);
+    debitLines.every((l) => l.accountId && parseFloat(l.amount || "0") > 0) &&
+    creditLines.every((l) => l.accountId && parseFloat(l.amount || "0") > 0);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -108,18 +102,24 @@ export default function JournalPage() {
       await createJournalEntry({
         entryDate,
         description,
-        lines: lines.map((l) => ({
-          accountId: l.accountId,
-          debit: l.type === "debit" ? parseFloat(l.amount || "0").toFixed(2) : "0.00",
-          credit: l.type === "credit" ? parseFloat(l.amount || "0").toFixed(2) : "0.00",
-          note: l.note || undefined,
-        })),
+        lines: [
+          ...debitLines.map((l) => ({
+            accountId: l.accountId,
+            debit: parseFloat(l.amount).toFixed(2),
+            credit: "0.00",
+            note: l.note || undefined,
+          })),
+          ...creditLines.map((l) => ({
+            accountId: l.accountId,
+            debit: "0.00",
+            credit: parseFloat(l.amount).toFixed(2),
+            note: l.note || undefined,
+          })),
+        ],
       });
       setCreateOpen(false);
-      setLines([
-        { accountId: "", type: "debit", amount: "0.00", note: "" },
-        { accountId: "", type: "credit", amount: "0.00", note: "" },
-      ]);
+      setDebitLines([emptyLine()]);
+      setCreditLines([emptyLine()]);
       setDescription("");
       await loadJournal();
     } catch {
@@ -139,23 +139,10 @@ export default function JournalPage() {
     }
   }
 
-  function addLine() {
-    setLines((prev) => [...prev, { accountId: "", type: "debit", amount: "0.00", note: "" }]);
-  }
-
-  function removeLine(idx: number) {
-    setLines((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  function updateLine(idx: number, field: keyof JournalLineInput, value: string | "debit" | "credit") {
-    setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
-  }
-
   function toggleExpand(id: string) {
     setExpandedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }
@@ -166,8 +153,91 @@ export default function JournalPage() {
     setLoadingMore(false);
   }
 
-  const totalDebitDisplay = totalDebitNum.toFixed(2);
-  const totalCreditDisplay = totalCreditNum.toFixed(2);
+  function updateDebit(idx: number, field: keyof LineInput, val: string) {
+    setDebitLines((prev) => prev.map((l, i) => i === idx ? { ...l, [field]: val } : l));
+  }
+  function updateCredit(idx: number, field: keyof LineInput, val: string) {
+    setCreditLines((prev) => prev.map((l, i) => i === idx ? { ...l, [field]: val } : l));
+  }
+
+  const selectCls = "w-full rounded border border-border bg-background px-2 py-1.5 text-sm";
+
+  function SideTable({
+    lines,
+    onUpdate,
+    onAdd,
+    onRemove,
+    total,
+    colorCls,
+    label,
+  }: {
+    lines: LineInput[];
+    onUpdate: (idx: number, field: keyof LineInput, val: string) => void;
+    onAdd: () => void;
+    onRemove: (idx: number) => void;
+    total: number;
+    colorCls: string;
+    label: string;
+  }) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className={`py-2 text-center font-bold text-base border-b border-border ${colorCls}`}>
+          {label}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {lines.map((line, idx) => (
+            <div key={idx} className="grid grid-cols-[1fr_auto_auto] gap-1 p-2 border-b border-border last:border-0 items-center">
+              <select
+                className={selectCls}
+                value={line.accountId}
+                onChange={(e) => onUpdate(idx, "accountId", e.target.value)}
+                required
+              >
+                <option value="">— الحساب —</option>
+                {leafAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code} — {locale === "ar" ? a.nameAr : a.nameEn}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="w-28 rounded border border-border bg-background px-2 py-1.5 text-sm text-end"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={line.amount}
+                onChange={(e) => onUpdate(idx, "amount", e.target.value)}
+                required
+              />
+              {lines.length > 1 ? (
+                <button
+                  type="button"
+                  className="text-danger text-sm px-1"
+                  onClick={() => onRemove(idx)}
+                >✕</button>
+              ) : (
+                <span className="w-5" />
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border">
+          <button
+            type="button"
+            onClick={onAdd}
+            className="w-full py-1.5 text-xs text-primary hover:bg-background transition-colors"
+          >
+            + إضافة سطر
+          </button>
+        </div>
+        <div className={`px-3 py-2 text-sm font-semibold flex justify-between border-t border-border ${colorCls}`}>
+          <span>الإجمالي</span>
+          <span>{total.toFixed(2)}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -206,27 +276,15 @@ export default function JournalPage() {
                     confirmingDelete ? (
                       <div className="flex items-center gap-1 text-sm">
                         <span>{t("deleteConfirm")}</span>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => void handleDelete(entry.id)}
-                        >
+                        <Button size="sm" variant="danger" onClick={() => void handleDelete(entry.id)}>
                           {tCommon("yes")}
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setDeleteConfirmId(null)}
-                        >
+                        <Button size="sm" variant="ghost" onClick={() => setDeleteConfirmId(null)}>
                           {tCommon("no")}
                         </Button>
                       </div>
                     ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setDeleteConfirmId(entry.id)}
-                      >
+                      <Button size="sm" variant="ghost" onClick={() => setDeleteConfirmId(entry.id)}>
                         {tCommon("delete")}
                       </Button>
                     )
@@ -253,8 +311,8 @@ export default function JournalPage() {
                             </span>
                             {locale === "ar" ? line.accountNameAr : line.accountNameEn}
                           </TD>
-                          <TD>{formatCurrency(line.debit, locale)}</TD>
-                          <TD>{formatCurrency(line.credit, locale)}</TD>
+                          <TD>{parseFloat(line.debit) > 0 ? formatCurrency(line.debit, locale) : "—"}</TD>
+                          <TD>{parseFloat(line.credit) > 0 ? formatCurrency(line.credit, locale) : "—"}</TD>
                           <TD>{line.note ?? "—"}</TD>
                         </TR>
                       ))}
@@ -282,7 +340,7 @@ export default function JournalPage() {
         title={t("newEntry")}
         className="max-w-5xl w-[95vw]"
       >
-        <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
+        <form onSubmit={(e) => void handleCreate(e)} className="space-y-4" dir="rtl">
           {createError && <Alert variant="error">{createError}</Alert>}
 
           <div className="grid grid-cols-2 gap-4">
@@ -306,117 +364,41 @@ export default function JournalPage() {
             </div>
           </div>
 
-          {/* Lines table */}
-          <div className="overflow-x-auto border border-border rounded">
-            <table className="w-full text-sm">
-              <thead className="border-b border-border bg-background">
-                <tr>
-                  <th className="px-3 py-2 text-start">{t("account")}</th>
-                  <th className="px-3 py-2 text-start w-24">النوع</th>
-                  <th className="px-3 py-2 text-start w-32">المبلغ</th>
-                  <th className="px-3 py-2 text-start">{t("note")}</th>
-                  <th className="px-3 py-2 w-8" />
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((line, idx) => (
-                  <tr
-                    key={idx}
-                    className={`border-b border-border last:border-0 ${
-                      line.type === "debit" ? "bg-red-50/30" : "bg-green-50/30"
-                    }`}
-                  >
-                    <td className="px-2 py-1">
-                      <select
-                        className="w-full rounded border border-border bg-background px-2 py-1 text-sm"
-                        value={line.accountId}
-                        onChange={(e) => updateLine(idx, "accountId", e.target.value)}
-                        required
-                      >
-                        <option value="">— اختر الحساب —</option>
-                        {leafAccounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.code} — {locale === "ar" ? a.nameAr : a.nameEn}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-2 py-1">
-                      <select
-                        className={`w-full rounded border border-border px-2 py-1 text-sm font-medium ${
-                          line.type === "debit"
-                            ? "bg-red-50 text-red-700"
-                            : "bg-green-50 text-green-700"
-                        }`}
-                        value={line.type}
-                        onChange={(e) => updateLine(idx, "type", e.target.value as "debit" | "credit")}
-                      >
-                        <option value="debit">مدين</option>
-                        <option value="credit">دائن</option>
-                      </select>
-                    </td>
-                    <td className="px-2 py-1">
-                      <Input
-                        className="w-full"
-                        value={line.amount}
-                        onChange={(e) => updateLine(idx, "amount", e.target.value)}
-                        inputMode="decimal"
-                      />
-                    </td>
-                    <td className="px-2 py-1">
-                      <Input
-                        className="w-full"
-                        value={line.note}
-                        onChange={(e) => updateLine(idx, "note", e.target.value)}
-                        maxLength={300}
-                      />
-                    </td>
-                    <td className="px-2 py-1 text-center">
-                      {lines.length > 2 && (
-                        <button
-                          type="button"
-                          className="text-danger text-sm"
-                          onClick={() => removeLine(idx)}
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="border-t-2 border-border bg-background">
-                <tr>
-                  <td className="px-3 py-2 font-medium text-sm" colSpan={2}>الإجمالي</td>
-                  <td className="px-3 py-2 text-sm">
-                    <div className={`font-medium ${!isBalanced ? "text-red-600" : "text-green-700"}`}>
-                      <span>مدين: {totalDebitDisplay}</span>
-                      <span className="mx-2">|</span>
-                      <span>دائن: {totalCreditDisplay}</span>
-                    </div>
-                  </td>
-                  <td colSpan={2} />
-                </tr>
-              </tfoot>
-            </table>
+          {/* Two-column debit / credit layout */}
+          <div className="grid grid-cols-2 border border-border rounded overflow-hidden divide-x divide-border">
+            {/* RIGHT: مدين */}
+            <SideTable
+              lines={debitLines}
+              onUpdate={updateDebit}
+              onAdd={() => setDebitLines((p) => [...p, emptyLine()])}
+              onRemove={(i) => setDebitLines((p) => p.filter((_, j) => j !== i))}
+              total={totalDebit}
+              colorCls="bg-red-50 text-red-700"
+              label="مدين"
+            />
+            {/* LEFT: دائن */}
+            <SideTable
+              lines={creditLines}
+              onUpdate={updateCredit}
+              onAdd={() => setCreditLines((p) => [...p, emptyLine()])}
+              onRemove={(i) => setCreditLines((p) => p.filter((_, j) => j !== i))}
+              total={totalCredit}
+              colorCls="bg-green-50 text-green-700"
+              label="دائن"
+            />
           </div>
 
-          {!isBalanced && (
+          {!isBalanced && totalDebit > 0 && (
             <Alert variant="warning">{t("unbalanced")}</Alert>
           )}
 
-          <div className="flex items-center justify-between pt-2">
-            <Button type="button" variant="ghost" onClick={addLine}>
-              {t("addLine")}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>
+              {tCommon("cancel")}
             </Button>
-            <div className="flex gap-2">
-              <Button type="button" variant="ghost" onClick={() => setCreateOpen(false)}>
-                {tCommon("cancel")}
-              </Button>
-              <Button type="submit" disabled={!canSubmit || createLoading}>
-                {createLoading ? tCommon("loading") : tCommon("save")}
-              </Button>
-            </div>
+            <Button type="submit" disabled={!canSubmit || createLoading}>
+              {createLoading ? tCommon("loading") : tCommon("save")}
+            </Button>
           </div>
         </form>
       </Modal>
