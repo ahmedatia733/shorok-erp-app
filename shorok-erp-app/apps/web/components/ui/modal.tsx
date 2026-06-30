@@ -32,8 +32,8 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
     >
       <div
         className={cn(
-          "w-full max-w-md rounded-lg border border-border bg-surface shadow-xl flex flex-col max-h-[90vh]",
-          className,
+          "rounded-lg border border-border bg-surface shadow-xl flex flex-col max-h-[90vh]",
+          className || "w-full max-w-md",
         )}
       >
         {title && (
