@@ -548,23 +548,27 @@ model JournalLine {
 // ========================= PurchaseInvoice ===========================
 
 model PurchaseInvoice {
-  id             String                @id @default(uuid()) @db.Uuid
-  invoiceNumber  String                @unique @map("invoice_number") @db.VarChar(30)
-  invoiceDate    DateTime              @map("invoice_date") @db.Date
-  dueDate        DateTime?             @map("due_date") @db.Date
-  supplierId     String                @map("supplier_id") @db.Uuid
-  branchId       String                @map("branch_id") @db.Uuid
-  basedOn        String?               @map("based_on") @db.VarChar(300)
-  docDirection   String?               @map("doc_direction") @db.VarChar(100)
-  customsNumber  String?               @map("customs_number") @db.VarChar(100)
-  notes          String?               @db.VarChar(1000)
-  status         PurchaseInvoiceStatus @default(DRAFT)
-  subtotal       Decimal               @default(0) @db.Decimal(14, 2)
-  taxAmount      Decimal               @default(0) @map("tax_amount") @db.Decimal(14, 2)
-  grandTotal     Decimal               @default(0) @map("grand_total") @db.Decimal(14, 2)
-  createdBy      String                @map("created_by") @db.Uuid
-  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                 String                @id @default(uuid()) @db.Uuid
+  invoiceNumber      String                @unique @map("invoice_number") @db.VarChar(30)
+  invoiceDate        DateTime              @map("invoice_date") @db.Date
+  dueDate            DateTime?             @map("due_date") @db.Date
+  supplierId         String                @map("supplier_id") @db.Uuid
+  branchId           String                @map("branch_id") @db.Uuid
+  basedOn            String?               @map("based_on") @db.VarChar(300)
+  docDirection       String?               @map("doc_direction") @db.VarChar(100)
+  customsNumber      String?               @map("customs_number") @db.VarChar(100)
+  notes              String?               @db.VarChar(1000)
+  status             PurchaseInvoiceStatus @default(DRAFT)
+  subtotal           Decimal               @default(0) @db.Decimal(14, 2)
+  taxAmount          Decimal               @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  grandTotal         Decimal               @default(0) @map("grand_total") @db.Decimal(14, 2)
+  apAccountId        String?               @map("ap_account_id") @db.Uuid
+  taxAccountId       String?               @map("tax_account_id") @db.Uuid
+  inventoryAccountId String?               @map("inventory_account_id") @db.Uuid
+  journalEntryId     String?               @map("journal_entry_id") @db.Uuid
+  createdBy          String                @map("created_by") @db.Uuid
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   branch   Branch   @relation("PurchaseInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)

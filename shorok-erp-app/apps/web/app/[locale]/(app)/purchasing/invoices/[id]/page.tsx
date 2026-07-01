@@ -15,7 +15,15 @@ import {
   deletePurchaseInvoice,
   type PurchaseInvoiceRow,
 } from "../../../../../../lib/purchase-invoices-client";
+import { listAccounts } from "../../../../../../lib/accounts-client";
 import { formatDate, formatCurrency } from "../../../../../../lib/format";
+
+function autoSelectId(accounts: Awaited<ReturnType<typeof listAccounts>>, ...kws: string[]) {
+  const lower = kws.map((k) => k.toLowerCase());
+  return accounts.find((a) =>
+    a.isLeaf && a.active && lower.some((k) => a.nameAr.toLowerCase().includes(k) || (a.nameEn ?? "").toLowerCase().includes(k)),
+  )?.id;
+}
 
 function StatusBadge({ status, t }: { status: string; t: ReturnType<typeof useTranslations> }) {
   const classes: Record<string, string> = {
@@ -59,7 +67,24 @@ export default function PurchaseInvoiceDetailPage() {
   async function handleConfirm() {
     setActionLoading(true);
     try {
-      const updated = await confirmPurchaseInvoice(id);
+      const allAccounts = await listAccounts();
+      const leaf = allAccounts.filter((a) => a.isLeaf && a.active);
+      const liab = leaf.filter((a) => a.category === "LIABILITY");
+      const asset = leaf.filter((a) => a.category === "ASSET");
+      const apAccountId =
+        autoSelectId(liab, "موردون", "دائنون", "payable", "creditor") ??
+        autoSelectId(leaf, "موردون", "دائنون", "payable", "creditor") ??
+        (liab[0]?.id ?? leaf[0]?.id ?? "");
+      const taxAccountId =
+        autoSelectId(leaf, "ضريبة", "ضرائب", "vat", "tax");
+      const inventoryAccountId =
+        autoSelectId(asset, "مخزون", "بضاعة", "inventory", "stock") ??
+        autoSelectId(leaf, "مخزون", "بضاعة", "inventory", "stock");
+      const updated = await confirmPurchaseInvoice(id, {
+        apAccountId,
+        taxAccountId,
+        inventoryAccountId,
+      });
       setInvoice(updated);
       setConfirmOpen(false);
     } catch {

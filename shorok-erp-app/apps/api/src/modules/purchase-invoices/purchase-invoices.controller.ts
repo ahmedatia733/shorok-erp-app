@@ -3,8 +3,10 @@ import { Decimal } from "decimal.js";
 import {
   CreatePurchaseInvoiceRequestSchema,
   PurchaseInvoiceQuerySchema,
+  ConfirmPurchaseInvoiceSchema,
   type CreatePurchaseInvoiceRequest,
   type PurchaseInvoiceQuery,
+  type ConfirmPurchaseInvoice,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -38,9 +40,13 @@ export class PurchaseInvoicesController {
       customsNumber: inv.customsNumber ?? null,
       notes: inv.notes ?? null,
       status: inv.status,
-      subtotal: inv.subtotal.toString(),
-      taxAmount: inv.taxAmount.toString(),
-      grandTotal: inv.grandTotal.toString(),
+      subtotal: inv.subtotal.toFixed(2),
+      taxAmount: inv.taxAmount.toFixed(2),
+      grandTotal: inv.grandTotal.toFixed(2),
+      apAccountId:        inv.apAccountId        ?? null,
+      taxAccountId:       inv.taxAccountId       ?? null,
+      inventoryAccountId: inv.inventoryAccountId ?? null,
+      journalEntryId:     inv.journalEntryId     ?? null,
       createdAt: inv.createdAt,
       createdByName: inv.creator?.name ?? "",
       lines: (inv.lines ?? []).map((l: any) => ({
@@ -293,9 +299,13 @@ export class PurchaseInvoicesController {
     });
   }
 
-  @Patch(":id/confirm")
+  @Post(":id/confirm")
   @Roles("OWNER")
-  async confirm(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+  async confirm(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(ConfirmPurchaseInvoiceSchema)) body: ConfirmPurchaseInvoice,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
     const existing = await this.prisma.purchaseInvoice.findUnique({
       where: { id },
       include: { lines: true },
@@ -306,47 +316,156 @@ export class PurchaseInvoicesController {
     }
 
     return this.prisma.runInTransaction(async (tx) => {
-      const invoice = await tx.purchaseInvoice.update({
-        where: { id },
-        data: { status: "CONFIRMED" },
-        include: {
-          supplier: { select: { id: true, nameAr: true, nameEn: true } },
-          branch: { select: { id: true, nameAr: true, nameEn: true } },
-          lines: {
-            include: { productVariant: { include: { sku: true } } },
-          },
+      // ── 1. Journal entry: DR Inventory + DR Tax / CR AP ──────────────────
+      const subtotal   = new Decimal(existing.subtotal.toString());
+      const taxAmount  = new Decimal(existing.taxAmount.toString());
+      const grandTotal = new Decimal(existing.grandTotal.toString());
+      const invoiceNumber = existing.invoiceNumber;
+
+      const journalLines: Array<{ accountId: string; debit: string; credit: string; note: string }> = [];
+
+      if (body.inventoryAccountId) {
+        journalLines.push({
+          accountId: body.inventoryAccountId,
+          debit:  subtotal.toFixed(2),
+          credit: "0",
+          note: `مخزون — فاتورة مشتريات ${invoiceNumber}`,
+        });
+      }
+
+      if (body.taxAccountId && taxAmount.gt(0)) {
+        journalLines.push({
+          accountId: body.taxAccountId,
+          debit:  taxAmount.toFixed(2),
+          credit: "0",
+          note: `ضريبة مدخلات — فاتورة مشتريات ${invoiceNumber}`,
+        });
+      }
+
+      journalLines.push({
+        accountId: body.apAccountId,
+        debit:  "0",
+        credit: grandTotal.toFixed(2),
+        note: `ذمة للمورد — فاتورة مشتريات ${invoiceNumber}`,
+      });
+
+      const journalEntry = await tx.journalEntry.create({
+        data: {
+          entryType:     "PURCHASE_INVOICE",
+          entryDate:     existing.invoiceDate,
+          description:   `فاتورة مشتريات ${invoiceNumber}`,
+          referenceType: "purchase_invoice",
+          referenceId:   existing.id,
+          createdBy:     user.id,
+          lines: { create: journalLines },
         },
       });
 
-      // Create inventory movements for each line
+      // ── 2. Inventory movements ────────────────────────────────────────────
       for (const line of existing.lines) {
         await tx.inventoryMovement.create({
           data: {
-            branchId: existing.branchId,
+            branchId:        existing.branchId,
             productVariantId: line.productVariantId,
-            movementType: "RECEIPT",
-            boardsQuantity: line.boardsQuantity,
-            metersQuantity: line.metersQuantity,
-            referenceType: "purchase_invoice",
-            referenceId: existing.id,
-            createdBy: user.id,
-            humanReadableNote: `فاتورة مشتريات ${existing.invoiceNumber}`,
+            movementType:    "RECEIPT",
+            boardsQuantity:  line.boardsQuantity,
+            metersQuantity:  line.metersQuantity,
+            referenceType:   "purchase_invoice",
+            referenceId:     existing.id,
+            createdBy:       user.id,
+            humanReadableNote: `فاتورة مشتريات ${invoiceNumber}`,
           },
         });
       }
 
+      // ── 3. Update invoice status + save account links ─────────────────────
+      const invoice = await tx.purchaseInvoice.update({
+        where: { id },
+        data: {
+          status:             "CONFIRMED",
+          apAccountId:        body.apAccountId,
+          taxAccountId:       body.taxAccountId       ?? null,
+          inventoryAccountId: body.inventoryAccountId ?? null,
+          journalEntryId:     journalEntry.id,
+        },
+        include: {
+          supplier: { select: { id: true, nameAr: true, nameEn: true } },
+          branch:   { select: { id: true, nameAr: true, nameEn: true } },
+          lines: { include: { productVariant: { include: { sku: true } } } },
+        },
+      });
+
       await this.audit.write({
         tx,
         actorId: user.id,
-        action: "CONFIRM",
+        action:  "CONFIRM",
         entityType: "purchase_invoice",
         entityId: id,
-        afterSnapshot: { status: "CONFIRMED", invoiceNumber: existing.invoiceNumber },
-        summaryAr: `${user.name} أكّد فاتورة المشتريات رقم ${existing.invoiceNumber} وتم تحديث المخزون`,
-        summaryEn: `${user.name} confirmed purchase invoice ${existing.invoiceNumber} and inventory was updated`,
+        afterSnapshot: {
+          status: "CONFIRMED",
+          invoiceNumber,
+          journalEntryId: journalEntry.id,
+          apAccountId:        body.apAccountId,
+          taxAccountId:       body.taxAccountId       ?? null,
+          inventoryAccountId: body.inventoryAccountId ?? null,
+        },
+        summaryAr: `${user.name} أكّد فاتورة المشتريات رقم ${invoiceNumber} وتم إنشاء القيد المحاسبي وتحديث المخزون`,
+        summaryEn: `${user.name} confirmed purchase invoice ${invoiceNumber} — journal entry and inventory updated`,
       });
 
       return this.formatInvoice(invoice);
+    });
+  }
+
+  // ─── POST /purchase-invoices/:id/cancel ───────────────────────────────
+
+  @Post(":id/cancel")
+  @Roles("OWNER")
+  async cancel(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    const existing = await this.prisma.purchaseInvoice.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundError({ id });
+    if (existing.status !== "DRAFT" && existing.status !== "CONFIRMED") {
+      throw new ValidationError({ reason: "cannot_cancel", status: existing.status });
+    }
+
+    return this.prisma.runInTransaction(async (tx) => {
+      const invoiceNumber = existing.invoiceNumber;
+
+      if (existing.status === "CONFIRMED") {
+        // Delete journal entry (lines cascade via onDelete: Cascade)
+        if (existing.journalEntryId) {
+          await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
+        }
+
+        // Delete inventory movements
+        await tx.inventoryMovement.deleteMany({
+          where: { referenceType: "purchase_invoice", referenceId: id },
+        });
+      }
+
+      await tx.purchaseInvoice.update({
+        where: { id },
+        data: {
+          status:             "CANCELLED",
+          journalEntryId:     null,
+          apAccountId:        null,
+          taxAccountId:       null,
+          inventoryAccountId: null,
+        },
+      });
+
+      await this.audit.write({
+        tx,
+        actorId: user.id,
+        action:  "CANCEL",
+        entityType: "purchase_invoice",
+        entityId: id,
+        afterSnapshot: { status: "CANCELLED", invoiceNumber, wasConfirmed: existing.status === "CONFIRMED" },
+        summaryAr: `${user.name} ألغى فاتورة المشتريات رقم ${invoiceNumber} وتم حذف القيود المحاسبية والمخزون`,
+        summaryEn: `${user.name} cancelled purchase invoice ${invoiceNumber} and deleted all accounting + inventory entries`,
+      });
+
+      return { success: true };
     });
   }
 

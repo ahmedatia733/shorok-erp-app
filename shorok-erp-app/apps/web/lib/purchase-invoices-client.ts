@@ -7,6 +7,7 @@ export interface PurchaseInvoiceLineRow {
   skuCode: string;
   skuNameAr: string;
   skuNameEn: string;
+  colorCode: string | null;
   sizeMetersPerBoard: string;
   boardsQuantity: string;
   lengthM: string | null;
@@ -39,6 +40,10 @@ export interface PurchaseInvoiceRow {
   subtotal: string;
   taxAmount: string;
   grandTotal: string;
+  apAccountId: string | null;
+  taxAccountId: string | null;
+  inventoryAccountId: string | null;
+  journalEntryId: string | null;
   createdAt: string;
   createdByName: string;
   lines: PurchaseInvoiceLineRow[];
@@ -104,8 +109,13 @@ export const createPurchaseInvoice = (body: {
   }>;
 }) => apiCall<PurchaseInvoiceRow>("/purchase-invoices", { method: "POST", body });
 
-export const confirmPurchaseInvoice = (id: string) =>
-  apiCall<PurchaseInvoiceRow>(`/purchase-invoices/${id}/confirm`, { method: "PATCH" });
+export const confirmPurchaseInvoice = (
+  id: string,
+  body: { apAccountId: string; taxAccountId?: string; inventoryAccountId?: string },
+) => apiCall<PurchaseInvoiceRow>(`/purchase-invoices/${id}/confirm`, { method: "POST", body });
+
+export const cancelPurchaseInvoice = (id: string) =>
+  apiCall<{ success: boolean }>(`/purchase-invoices/${id}/cancel`, { method: "POST" });
 
 export const deletePurchaseInvoice = (id: string) =>
   apiCall<void>(`/purchase-invoices/${id}`, { method: "DELETE" });

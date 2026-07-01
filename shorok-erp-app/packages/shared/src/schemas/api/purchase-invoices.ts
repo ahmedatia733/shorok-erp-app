@@ -42,3 +42,10 @@ export const PurchaseInvoiceQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 export type PurchaseInvoiceQuery = z.infer<typeof PurchaseInvoiceQuerySchema>;
+
+export const ConfirmPurchaseInvoiceSchema = z.object({
+  apAccountId:        z.string().uuid(),
+  taxAccountId:       z.string().uuid().optional(),
+  inventoryAccountId: z.string().uuid().optional(),
+});
+export type ConfirmPurchaseInvoice = z.infer<typeof ConfirmPurchaseInvoiceSchema>;
