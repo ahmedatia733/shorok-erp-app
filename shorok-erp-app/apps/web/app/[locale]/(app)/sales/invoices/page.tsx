@@ -301,12 +301,12 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
                 تسجيل تكلفة البضاعة المباعة (COGS)
               </label>
             </div>
-            <p className="text-xs text-gray-400 mr-7">
+            <p className="text-xs text-gray-400 me-7">
               ينشئ قيد Dr تكلفة / Cr مخزون بمبلغ {formatCurrency(totalCost, locale)}
             </p>
 
             {postCogs && (
-              <div className="space-y-3 mr-7">
+              <div className="space-y-3 me-7">
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
                     حساب تكلفة البضاعة المباعة (مدين)
