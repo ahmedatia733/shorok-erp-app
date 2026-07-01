@@ -78,7 +78,7 @@ function mkLine(): LineFormState {
     unitLabel: "متر",
     unitPrice: "0",
     costPrice: "0",
-    taxRate: "0",
+    taxRate: "14",
     sqm: "",
     metersQuantity: "",
     lineTotal: "",
@@ -237,9 +237,9 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
                 <div className="font-medium">{formatCurrency(invoice.totalCost, locale)}</div>
               </div>
               <div className="rounded bg-gray-50 p-3">
-                <div className="text-xs text-gray-500">الربح</div>
-                <div className={"font-bold " + (grandTotal - totalCost >= 0 ? "text-green-700" : "text-red-600")}>
-                  {formatCurrency(grandTotal - totalCost, locale)}
+                <div className="text-xs text-gray-500">صافي الربح (بدون ضريبة)</div>
+                <div className={"font-bold " + (subtotal - totalCost >= 0 ? "text-green-700" : "text-red-600")}>
+                  {formatCurrency(subtotal - totalCost, locale)}
                 </div>
               </div>
             </>
@@ -519,7 +519,7 @@ function InvoiceForm({
   const totalTax     = lines.reduce((s, l) => s + (parseFloat(l.taxAmount)  || 0), 0);
   const totalCost    = lines.reduce((s, l) => s + (parseFloat(l.lineCost)   || 0), 0);
   const grandTotal   = subtotal + totalTax;
-  const netProfit    = grandTotal - totalCost;
+  const netProfit    = subtotal - totalCost;   // tax is pass-through; profit = revenue(ex-tax) - cost
   const effectiveTaxRate = subtotal > 0 ? (totalTax / subtotal * 100) : 0;
 
   async function handleSave(andConfirm = false) {
@@ -967,13 +967,12 @@ function ExpandedRow({
 
       {/* Totals */}
       <div className="grid grid-cols-3 gap-2 text-xs bg-white rounded p-3">
-        <div>المجموع: {invoice.subtotal}</div>
-        <div>الخصم: {invoice.discountAmount}</div>
+        <div>المجموع (قبل ض): {invoice.subtotal}</div>
         <div>الضريبة: {invoice.taxAmount}</div>
         <div className="font-bold text-green-700">الإجمالي: {invoice.grandTotal}</div>
         <div>التكلفة: {invoice.totalCost}</div>
-        <div className={"font-bold " + (grandTotal - totalCost >= 0 ? "text-green-700" : "text-red-600")}>
-          الربح: {(grandTotal - totalCost).toFixed(2)}
+        <div className={"font-bold col-span-2 " + (parseFloat(invoice.subtotal) - totalCost >= 0 ? "text-green-700" : "text-red-600")}>
+          صافي الربح: {(parseFloat(invoice.subtotal) - totalCost).toFixed(2)}
         </div>
       </div>
 
