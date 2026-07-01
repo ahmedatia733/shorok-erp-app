@@ -101,13 +101,37 @@ export class ExpensesController {
     }
 
     return this.prisma.runInTransaction(async (tx) => {
+      // Auto-post to GL if both GL accounts provided
+      let journalEntryId: string | null = null;
+      if (body.glAccountId && body.paymentGlAccountId) {
+        const je = await tx.journalEntry.create({
+          data: {
+            entryType:     "EXPENSE",
+            entryDate:     new Date(body.expenseDate),
+            description:   body.description,
+            referenceType: "expense",
+            createdBy:     user.id,
+            lines: {
+              create: [
+                { accountId: body.glAccountId,        debit: amount.toFixed(2), credit: "0" },
+                { accountId: body.paymentGlAccountId, debit: "0", credit: amount.toFixed(2) },
+              ],
+            },
+          },
+        });
+        journalEntryId = je.id;
+      }
+
       const expense = await tx.expense.create({
         data: {
-          branchId: body.branchId,
-          expenseDate: new Date(body.expenseDate),
-          description: body.description,
-          amount: amount.toFixed(2),
-          paidFromAccount: body.paidFromAccount,
+          branchId:           body.branchId,
+          expenseDate:        new Date(body.expenseDate),
+          description:        body.description,
+          amount:             amount.toFixed(2),
+          paidFromAccount:    body.paidFromAccount,
+          glAccountId:        body.glAccountId        ?? null,
+          paymentGlAccountId: body.paymentGlAccountId ?? null,
+          journalEntryId,
           createdBy: user.id,
         },
       });
@@ -153,6 +177,9 @@ export class ExpensesController {
         description: expense.description,
         amount: expense.amount.toString(),
         paidFromAccount: expense.paidFromAccount,
+        glAccountId: expense.glAccountId ?? null,
+        paymentGlAccountId: expense.paymentGlAccountId ?? null,
+        journalEntryId: expense.journalEntryId ?? null,
         createdAt: expense.createdAt,
       };
     });
@@ -232,7 +259,13 @@ export class ExpensesController {
       const expense = await tx.expense.findUnique({ where: { id } });
       if (!expense) throw new NotFoundError({ id });
 
+      // Clear FK reference before deleting journal entry (avoid FK constraint violation)
+      const journalEntryId = expense.journalEntryId;
+      await tx.expense.update({ where: { id }, data: { journalEntryId: null } });
       await tx.expense.delete({ where: { id } });
+      if (journalEntryId) {
+        await tx.journalEntry.delete({ where: { id: journalEntryId } });
+      }
 
       await this.audit.write({
         tx,

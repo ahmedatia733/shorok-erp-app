@@ -1,9 +1,13 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from "@nestjs/common";
 import {
+  CreateCustomerRequestSchema,
   CreateCustomerTransactionSchema,
   CustomerStatementQuerySchema,
+  UpdateCustomerRequestSchema,
+  type CreateCustomerRequest,
   type CreateCustomerTransaction,
   type CustomerStatementQuery,
+  type UpdateCustomerRequest,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -20,18 +24,84 @@ export class CustomersController {
     private readonly audit: AuditService,
   ) {}
 
+  private formatCustomer(c: { id: string; code: string; nameAr: string; phone: string | null; active: boolean; createdAt: Date }) {
+    return { id: c.id, code: c.code, nameAr: c.nameAr, phone: c.phone ?? null, active: c.active, createdAt: c.createdAt };
+  }
+
+  private async nextCode(): Promise<string> {
+    const result = await this.prisma.$queryRaw<Array<{ max_code: string | null }>>`
+      SELECT MAX(code) as max_code FROM customers WHERE code ~ '^C-[0-9]+$'
+    `;
+    const max = result[0]?.max_code;
+    const next = max ? parseInt(max.split("-")[1]!, 10) + 1 : 1;
+    return `C-${String(next).padStart(4, "0")}`;
+  }
+
   @Get()
   async list() {
     const customers = await this.prisma.customer.findMany({
-      where: { active: true },
       orderBy: { code: "asc" },
     });
-    return customers.map((c) => ({
-      id: c.id,
-      code: c.code,
-      nameAr: c.nameAr,
-      active: c.active,
-    }));
+    return customers.map((c) => this.formatCustomer(c));
+  }
+
+  @Get(":id")
+  async getOne(@Param("id") id: string) {
+    const c = await this.prisma.customer.findUnique({ where: { id } });
+    if (!c) throw new NotFoundError({ id });
+    return this.formatCustomer(c);
+  }
+
+  @Post()
+  @Roles("OWNER", "ACCOUNTANT")
+  async create(
+    @Body(new ZodValidationPipe(CreateCustomerRequestSchema)) body: CreateCustomerRequest,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.prisma.runInTransaction(async (tx) => {
+      const code = await this.nextCode();
+      const customer = await tx.customer.create({
+        data: { code, nameAr: body.nameAr, phone: body.phone ?? null },
+      });
+      await this.audit.write({
+        tx, actorId: user.id, action: "CREATE",
+        entityType: "customer", entityId: customer.id,
+        afterSnapshot: { code: customer.code, nameAr: customer.nameAr },
+        summaryAr: `${user.name} أنشأ العميل «${customer.nameAr}» برقم ${customer.code}`,
+        summaryEn: `${user.name} created customer "${customer.nameAr}" code ${customer.code}`,
+      });
+      return this.formatCustomer(customer);
+    });
+  }
+
+  @Patch(":id")
+  @Roles("OWNER", "ACCOUNTANT")
+  async update(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(UpdateCustomerRequestSchema)) body: UpdateCustomerRequest,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.prisma.runInTransaction(async (tx) => {
+      const before = await tx.customer.findUnique({ where: { id } });
+      if (!before) throw new NotFoundError({ id });
+      const after = await tx.customer.update({
+        where: { id },
+        data: {
+          ...(body.nameAr !== undefined ? { nameAr: body.nameAr } : {}),
+          ...(body.phone !== undefined ? { phone: body.phone } : {}),
+          ...(body.active !== undefined ? { active: body.active } : {}),
+        },
+      });
+      await this.audit.write({
+        tx, actorId: user.id, action: "UPDATE",
+        entityType: "customer", entityId: id,
+        beforeSnapshot: { nameAr: before.nameAr, phone: before.phone, active: before.active },
+        afterSnapshot: { nameAr: after.nameAr, phone: after.phone, active: after.active },
+        summaryAr: `${user.name} حدّث بيانات العميل «${after.nameAr}»`,
+        summaryEn: `${user.name} updated customer "${after.nameAr}"`,
+      });
+      return this.formatCustomer(after);
+    });
   }
 
   @Get("statement/:id")

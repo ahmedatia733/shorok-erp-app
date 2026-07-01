@@ -7,6 +7,8 @@ export const CreateExpenseRequestSchema = z.object({
   description: z.string().min(1).max(240),
   amount: DecimalStringSchema,
   paidFromAccount: z.string().min(1).max(120),
+  glAccountId: UuidSchema.optional(),
+  paymentGlAccountId: UuidSchema.optional(),
 });
 export type CreateExpenseRequest = z.infer<typeof CreateExpenseRequestSchema>;
 
@@ -15,6 +17,8 @@ export const UpdateExpenseRequestSchema = z.object({
   description: z.string().min(1).max(240).optional(),
   amount: DecimalStringSchema.optional(),
   paidFromAccount: z.string().min(1).max(120).optional(),
+  glAccountId: UuidSchema.optional().nullable(),
+  paymentGlAccountId: UuidSchema.optional().nullable(),
 });
 export type UpdateExpenseRequest = z.infer<typeof UpdateExpenseRequestSchema>;
 

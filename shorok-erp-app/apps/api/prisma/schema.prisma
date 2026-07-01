@@ -389,17 +389,23 @@ model OrderCollection {
 // =============================== Expense =============================
 
 model Expense {
-  id              String   @id @default(uuid()) @db.Uuid
-  branchId        String   @map("branch_id") @db.Uuid
-  expenseDate     DateTime @map("expense_date") @db.Date
-  description     String   @db.VarChar(240)
-  amount          Decimal  @db.Decimal(14, 2)
-  paidFromAccount String   @map("paid_from_account") @db.VarChar(120)
-  createdBy       String   @map("created_by") @db.Uuid
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                 String   @id @default(uuid()) @db.Uuid
+  branchId           String   @map("branch_id") @db.Uuid
+  expenseDate        DateTime @map("expense_date") @db.Date
+  description        String   @db.VarChar(240)
+  amount             Decimal  @db.Decimal(14, 2)
+  paidFromAccount    String   @map("paid_from_account") @db.VarChar(120)
+  glAccountId        String?  @map("gl_account_id") @db.Uuid
+  paymentGlAccountId String?  @map("payment_gl_account_id") @db.Uuid
+  journalEntryId     String?  @map("journal_entry_id") @db.Uuid
+  createdBy          String   @map("created_by") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  branch  Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  creator User   @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  branch           Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  creator          User          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  glAccount        Account?      @relation("ExpenseGlAccount",        fields: [glAccountId],        references: [id])
+  paymentGlAccount Account?      @relation("ExpensePaymentGlAccount", fields: [paymentGlAccountId], references: [id])
+  journalEntry     JournalEntry? @relation(fields: [journalEntryId], references: [id])
 
   @@index([branchId, expenseDate(sort: Desc)])
   @@map("expenses")
@@ -500,6 +506,8 @@ model Account {
   fixedAssetsAsAsset      FixedAsset[] @relation("AssetAccount")
   fixedAssetsAsAccumDep   FixedAsset[] @relation("AccumulatedDepAccount")
   fixedAssetsAsDepExpense FixedAsset[] @relation("DepreciationExpenseAccount")
+  expensesAsGl            Expense[]    @relation("ExpenseGlAccount")
+  expensesAsPaymentGl     Expense[]    @relation("ExpensePaymentGlAccount")
 
   @@index([category])
   @@index([parentId])
@@ -520,8 +528,9 @@ model JournalEntry {
   createdBy     String    @map("created_by") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  creator User          @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
-  lines   JournalLine[]
+  creator  User          @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
+  lines    JournalLine[]
+  expenses Expense[]
 
   @@index([entryDate(sort: Desc)])
   @@map("journal_entries")

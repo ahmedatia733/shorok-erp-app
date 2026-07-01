@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+export const CreateCustomerRequestSchema = z.object({
+  nameAr: z.string().min(1).max(200),
+  phone: z.string().max(30).optional(),
+});
+export type CreateCustomerRequest = z.infer<typeof CreateCustomerRequestSchema>;
+
+export const UpdateCustomerRequestSchema = z.object({
+  nameAr: z.string().min(1).max(200).optional(),
+  phone: z.string().max(30).optional().nullable(),
+  active: z.boolean().optional(),
+});
+export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequestSchema>;
+
 export const CUSTOMER_TX_TYPES = ["INVOICE", "RECEIPT", "RETURN", "ADJUSTMENT", "OPENING"] as const;
 export type CustomerTxType = (typeof CUSTOMER_TX_TYPES)[number];
 

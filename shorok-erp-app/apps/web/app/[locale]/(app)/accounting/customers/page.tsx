@@ -10,6 +10,9 @@ import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/ta
 import { useHasRole } from "../../../../../lib/auth";
 import {
   listCustomers,
+  getCustomer,
+  createCustomer,
+  updateCustomer,
   getCustomerStatement,
   createCustomerTransaction,
   deleteCustomerTransaction,
@@ -65,6 +68,54 @@ export default function CustomerStatementPage() {
   const [data, setData] = useState<CustomerStatement | null>(null);
 
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // ─── Customer create/edit modal ───────────────────────────────────────────
+  const [custModalOpen,  setCustModalOpen]  = useState(false);
+  const [custEditId,     setCustEditId]     = useState<string | null>(null);
+  const [custNameAr,     setCustNameAr]     = useState("");
+  const [custPhone,      setCustPhone]      = useState("");
+  const [custActive,     setCustActive]     = useState(true);
+  const [custSaving,     setCustSaving]     = useState(false);
+  const [custError,      setCustError]      = useState<string | null>(null);
+
+  function openCreateCustomer() {
+    setCustEditId(null); setCustNameAr(""); setCustPhone(""); setCustActive(true);
+    setCustError(null); setCustModalOpen(true);
+  }
+
+  async function openEditCustomer(id: string) {
+    const c = await getCustomer(id);
+    setCustEditId(id); setCustNameAr(c.nameAr); setCustPhone(c.phone ?? "");
+    setCustActive(c.active); setCustError(null); setCustModalOpen(true);
+  }
+
+  async function handleSaveCustomer(e: React.FormEvent) {
+    e.preventDefault();
+    if (!custNameAr.trim()) return;
+    setCustSaving(true); setCustError(null);
+    try {
+      if (custEditId) {
+        const updated = await updateCustomer(custEditId, {
+          nameAr: custNameAr.trim(),
+          phone: custPhone.trim() || null,
+          active: custActive,
+        });
+        setCustomers((prev) => prev.map((c) => c.id === custEditId ? updated : c));
+      } else {
+        const created = await createCustomer({
+          nameAr: custNameAr.trim(),
+          phone: custPhone.trim() || undefined,
+        });
+        setCustomers((prev) => [...prev, created].sort((a, b) => a.code.localeCompare(b.code)));
+        setSelectedId(created.id);
+      }
+      setCustModalOpen(false);
+    } catch {
+      setCustError("فشل حفظ بيانات العميل");
+    } finally {
+      setCustSaving(false);
+    }
+  }
 
   // Transaction modal state
   const [txModalOpen, setTxModalOpen] = useState(false);
@@ -165,14 +216,30 @@ export default function CustomerStatementPage() {
     <div className="space-y-6" dir="rtl">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-2xl font-bold">كشف حساب عميل</h1>
-        {canRecord && <Button onClick={openTxModal}>+ تسجيل حركة</Button>}
+        <div className="flex gap-2">
+          {canRecord && <Button variant="ghost" onClick={openTxModal}>+ تسجيل حركة</Button>}
+          {canRecord && (
+            <Button onClick={openCreateCustomer}>+ عميل جديد</Button>
+          )}
+        </div>
       </div>
 
       {/* Filters toolbar */}
       <div className="bg-surface border border-border rounded-lg p-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
-            <label className="block text-xs text-textSecondary mb-1">اختر العميل</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-textSecondary">اختر العميل</label>
+              {selectedId && canRecord && (
+                <button
+                  type="button"
+                  className="text-xs text-blue-600 hover:underline"
+                  onClick={() => void openEditCustomer(selectedId)}
+                >
+                  تعديل
+                </button>
+              )}
+            </div>
             <select
               className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
               value={selectedId}
@@ -181,7 +248,7 @@ export default function CustomerStatementPage() {
               <option value="">— اختر —</option>
               {customers.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.code} — {c.nameAr}
+                  {c.code} — {c.nameAr}{c.active ? "" : " (غير نشط)"}
                 </option>
               ))}
             </select>
@@ -341,6 +408,59 @@ export default function CustomerStatementPage() {
           </Table>
         </div>
       )}
+
+      {/* Create / Edit customer modal */}
+      <Modal
+        open={custModalOpen}
+        onClose={() => setCustModalOpen(false)}
+        title={custEditId ? "تعديل بيانات العميل" : "إضافة عميل جديد"}
+      >
+        <form onSubmit={(e) => void handleSaveCustomer(e)} className="space-y-4" dir="rtl">
+          {custError && <Alert variant="error">{custError}</Alert>}
+
+          <div>
+            <label className="block text-sm font-medium mb-1">الاسم بالعربي <span className="text-red-500">*</span></label>
+            <Input
+              value={custNameAr}
+              onChange={(e) => setCustNameAr(e.target.value)}
+              required
+              maxLength={200}
+              placeholder="مثال: شركة النيل للتجارة"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">رقم الهاتف (اختياري)</label>
+            <Input
+              value={custPhone}
+              onChange={(e) => setCustPhone(e.target.value)}
+              maxLength={30}
+              placeholder="مثال: 01012345678"
+              dir="ltr"
+            />
+          </div>
+
+          {custEditId && (
+            <div className="flex items-center gap-2">
+              <input
+                id="custActive"
+                type="checkbox"
+                checked={custActive}
+                onChange={(e) => setCustActive(e.target.checked)}
+                className="h-4 w-4 rounded border-border"
+              />
+              <label htmlFor="custActive" className="text-sm">نشط</label>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="ghost" onClick={() => setCustModalOpen(false)}>إلغاء</Button>
+            <Button type="submit" disabled={custSaving || !custNameAr.trim()}>
+              {custSaving ? "جار الحفظ..." : custEditId ? "حفظ التعديلات" : "إضافة العميل"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Record transaction modal */}
       <Modal

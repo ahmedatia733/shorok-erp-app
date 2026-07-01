@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
 import { Badge } from "../../../../../components/ui/badge";
@@ -23,6 +23,8 @@ import {
   getOrder,
   type OrderDetail,
 } from "../../../../../lib/orders-client";
+import { listCustomers, type CustomerRow } from "../../../../../lib/customers-client";
+import { createSalesInvoice } from "../../../../../lib/sales-invoices-client";
 import { formatCurrency, formatDate, formatDateTime } from "../../../../../lib/format";
 import { useAuth } from "../../../../../lib/auth";
 
@@ -46,6 +48,7 @@ export default function OrderDetailPage() {
   const tDetail = useTranslations("orders.detail");
   const tCommon = useTranslations("common");
   const locale = useLocale() as AppLocale;
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const orderId = params.id;
   const { user } = useAuth();
@@ -58,6 +61,13 @@ export default function OrderDetailPage() {
   const [showCollection, setShowCollection] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+
+  // Sales invoice creation from order
+  const [showCreateSI, setShowCreateSI] = useState(false);
+  const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  const [siCustomerId, setSiCustomerId] = useState("");
+  const [siCreating, setSiCreating] = useState(false);
+  const [siError, setSiError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,6 +107,52 @@ export default function OrderDetailPage() {
     order.status !== "PAID" &&
     user?.role &&
     ["OWNER", "BRANCH_MANAGER", "ACCOUNTANT"].includes(user.role);
+
+  const canCreateSalesInvoice =
+    !!order &&
+    ["CONFIRMED", "PARTIALLY_COLLECTED", "PAID"].includes(order.status) &&
+    isOwner;
+
+  async function openCreateSIModal() {
+    setSiError(null);
+    setSiCustomerId("");
+    const all = await listCustomers().catch(() => []);
+    const active = all.filter((c) => c.active);
+    setCustomers(active);
+    // Try to pre-select by name match
+    const name = order?.customerName.trim().toLowerCase() ?? "";
+    const match = active.find((c) => c.nameAr.trim().toLowerCase() === name);
+    if (match) setSiCustomerId(match.id);
+    setShowCreateSI(true);
+  }
+
+  async function handleCreateSI() {
+    if (!order || !siCustomerId) return;
+    setSiCreating(true);
+    setSiError(null);
+    try {
+      const si = await createSalesInvoice({
+        invoiceDate: order.orderDate,
+        customerId: siCustomerId,
+        branchId: order.branchId,
+        lines: [
+          {
+            productVariantId: order.productVariantId,
+            quantity: order.metersQuantity,
+            unitLabel: "متر",
+            unitPrice: order.salePricePerMeter,
+          },
+        ],
+      });
+      setShowCreateSI(false);
+      router.push(`/${locale}/sales/invoices?highlight=${si.id}`);
+    } catch (err) {
+      if (err instanceof ApiClientError) setSiError(err.localizedMessage(locale));
+      else setSiError("حدث خطأ غير متوقع");
+    } finally {
+      setSiCreating(false);
+    }
+  }
 
   async function handleAction(fn: () => Promise<unknown>) {
     setActing(true);
@@ -260,6 +316,11 @@ export default function OrderDetailPage() {
                 {tDetail("cancel")}
               </Button>
             ) : null}
+            {canCreateSalesInvoice ? (
+              <Button variant="secondary" onClick={() => void openCreateSIModal()}>
+                إنشاء فاتورة مبيعات
+              </Button>
+            ) : null}
           </div>
         </CardBody>
       </Card>
@@ -318,6 +379,60 @@ export default function OrderDetailPage() {
           void load();
         }}
       />
+
+      {showCreateSI ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setShowCreateSI(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-md bg-surface p-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-section-title">إنشاء فاتورة مبيعات</h2>
+            <p className="text-sm text-textSecondary">
+              سيتم إنشاء فاتورة مبيعات بناءً على بيانات الطلبية:{" "}
+              <strong>{order.customerName}</strong> —{" "}
+              {order.metersQuantity} م × {order.salePricePerMeter} ج.م/م
+            </p>
+
+            {siError && <Alert variant="error">{siError}</Alert>}
+
+            <div>
+              <Label htmlFor="si-customer">اختر العميل</Label>
+              <select
+                id="si-customer"
+                value={siCustomerId}
+                onChange={(e) => setSiCustomerId(e.target.value)}
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background mt-1"
+                disabled={siCreating}
+              >
+                <option value="">— اختر العميل —</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} — {c.nameAr}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 pt-2">
+              <Button variant="ghost" onClick={() => setShowCreateSI(false)} disabled={siCreating}>
+                {tCommon("cancel")}
+              </Button>
+              <Button
+                variant="primary"
+                disabled={siCreating || !siCustomerId}
+                onClick={() => void handleCreateSI()}
+              >
+                {siCreating ? "جاري الإنشاء..." : "إنشاء الفاتورة"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showCancel ? (
         <div

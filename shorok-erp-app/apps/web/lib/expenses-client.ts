@@ -9,6 +9,9 @@ export interface ExpenseRow {
   description: string;
   amount: string;
   paidFromAccount: string;
+  glAccountId:        string | null;
+  paymentGlAccountId: string | null;
+  journalEntryId:     string | null;
   createdAt: string;
   creator: { id: string; name: string };
 }
@@ -41,11 +44,20 @@ export const createExpense = (body: {
   description: string;
   amount: string;
   paidFromAccount: string;
+  glAccountId?: string;
+  paymentGlAccountId?: string;
 }) => apiCall<ExpenseRow>("/expenses", { method: "POST", body });
 
 export const updateExpense = (
   id: string,
-  body: Partial<{ expenseDate: string; description: string; amount: string; paidFromAccount: string }>,
+  body: Partial<{
+    expenseDate: string;
+    description: string;
+    amount: string;
+    paidFromAccount: string;
+    glAccountId: string | null;
+    paymentGlAccountId: string | null;
+  }>,
 ) => apiCall<ExpenseRow>(`/expenses/${id}`, { method: "PATCH", body });
 
 export const deleteExpense = (id: string) =>

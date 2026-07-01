@@ -6,7 +6,9 @@ export interface CustomerRow {
   id: string;
   code: string;
   nameAr: string;
+  phone: string | null;
   active: boolean;
+  createdAt: string;
 }
 
 export interface CustomerStatementEntry {
@@ -32,6 +34,14 @@ export interface CustomerStatement {
 }
 
 export const listCustomers = () => apiCall<CustomerRow[]>("/customers");
+
+export const getCustomer = (id: string) => apiCall<CustomerRow>(`/customers/${id}`);
+
+export const createCustomer = (body: { nameAr: string; phone?: string }) =>
+  apiCall<CustomerRow>("/customers", { method: "POST", body });
+
+export const updateCustomer = (id: string, body: { nameAr?: string; phone?: string | null; active?: boolean }) =>
+  apiCall<CustomerRow>(`/customers/${id}`, { method: "PATCH", body });
 
 export const getCustomerStatement = (id: string, from?: string, to?: string) => {
   const p = new URLSearchParams();
