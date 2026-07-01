@@ -251,13 +251,21 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
 
   // ── Auto-select accounts on mount ──────────────────────────────────────────
   useEffect(() => {
-    const assetAccs   = leafAccounts.filter((a) => a.category === "ASSET");
-    const revenueAccs = leafAccounts.filter((a) => a.category === "REVENUE");
-    const cogAccs     = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
+    const assetAccs     = leafAccounts.filter((a) => a.category === "ASSET");
+    const revenueAccs   = leafAccounts.filter((a) => a.category === "REVENUE");
+    const cogAccs       = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
+    const liabilityAccs = leafAccounts.filter((a) => a.category === "LIABILITY");
 
     setArAccountId(autoSelect(assetAccs,   "ذمم", "مدينين", "receivable", "ar"));
     setRevenueAccountId(autoSelect(revenueAccs, "مبيعات", "إيرادات", "revenue", "sales"));
-    setTaxAccountId(autoSelect(leafAccounts, "ضريبة", "ضرائب", "vat", "tax"));
+
+    // Tax: try keywords across ALL accounts, then fall back to first LIABILITY account
+    const taxById =
+      autoSelect(leafAccounts, "ضريبة", "ضرائب", "vat", "tax") ||
+      autoSelect(liabilityAccs, "ضريبة", "ضرائب", "vat", "tax") ||
+      (liabilityAccs[0]?.id ?? "");
+    setTaxAccountId(taxById);
+
     setCogsAccountId(autoSelect(cogAccs,   "تكلفة", "cogs", "cost of sales"));
     setInventoryAccountId(autoSelect(assetAccs, "مخزون", "بضاعة", "inventory", "stock"));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -302,16 +310,23 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
     }
   }
 
-  const assetAccounts   = leafAccounts.filter((a) => a.category === "ASSET");
-  const revenueAccounts = leafAccounts.filter((a) => a.category === "REVENUE");
-  const cogsAccounts    = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
+  const assetAccounts     = leafAccounts.filter((a) => a.category === "ASSET");
+  const revenueAccounts   = leafAccounts.filter((a) => a.category === "REVENUE");
+  const liabilityAccounts = leafAccounts.filter((a) => a.category === "LIABILITY");
+  const cogsAccounts      = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
 
-  // Smart-filtered primary lists for each field
-  const arPrimary      = assetAccounts.filter((a) => /ذمم|مدينين|receivable|ar/i.test(a.nameAr + a.nameEn));
-  const revPrimary     = revenueAccounts.filter((a) => /مبيعات|إيراد|revenue|sales/i.test(a.nameAr + a.nameEn));
-  const taxPrimary     = leafAccounts.filter((a) => /ضريبة|ضرائب|vat|tax/i.test(a.nameAr + (a.nameEn ?? "")));
-  const cogsPrimary    = cogsAccounts.filter((a) => /تكلفة|cogs|cost/i.test(a.nameAr + (a.nameEn ?? "")));
-  const invPrimary     = assetAccounts.filter((a) => /مخزون|بضاعة|inventory|stock/i.test(a.nameAr + (a.nameEn ?? "")));
+  // Smart-filtered primary lists
+  const arPrimary   = assetAccounts.filter((a) => /ذمم|مدينين|receivable/i.test(a.nameAr + (a.nameEn ?? "")));
+  const revPrimary  = revenueAccounts.filter((a) => /مبيعات|إيراد|revenue|sales/i.test(a.nameAr + (a.nameEn ?? "")));
+  const cogsPrimary = cogsAccounts.filter((a) => /تكلفة|cogs|cost/i.test(a.nameAr + (a.nameEn ?? "")));
+  const invPrimary  = assetAccounts.filter((a) => /مخزون|بضاعة|inventory|stock/i.test(a.nameAr + (a.nameEn ?? "")));
+
+  // Tax: keyword-matched accounts first, then ALL liability accounts, then rest
+  const taxKeyword  = leafAccounts.filter((a) => /ضريبة|ضرائب|vat|tax/i.test(a.nameAr + (a.nameEn ?? "")));
+  const taxPrimary  = taxKeyword.length > 0
+    ? taxKeyword
+    : liabilityAccounts;  // fallback: all liabilities if no keyword match
+  const taxFallback = leafAccounts.filter((a) => !taxPrimary.includes(a));
 
   return (
     <Modal open={true} onClose={onClose} className="max-w-2xl w-full">
@@ -420,7 +435,7 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
             value={taxAccountId}
             onChange={setTaxAccountId}
             primary={taxPrimary}
-            fallback={leafAccounts.filter((a) => !taxPrimary.includes(a))}
+            fallback={taxFallback}
             locale={locale}
             required={postJournalEntry}
           />
