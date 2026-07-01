@@ -15,10 +15,12 @@ export class MovementsController {
     @Query(new ZodValidationPipe(InventoryMovementsQuerySchema))
     query: InventoryMovementsQuery,
   ) {
-    const where = {
-      branchId: query.branchId,
+    const where: Record<string, unknown> = {
+      ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(query.productVariantId ? { productVariantId: query.productVariantId } : {}),
       ...(query.movementType ? { movementType: query.movementType } : {}),
+      ...(query.referenceId ? { referenceId: query.referenceId } : {}),
+      ...(query.referenceType ? { referenceType: query.referenceType } : {}),
       ...(query.from || query.to
         ? {
             createdAt: {

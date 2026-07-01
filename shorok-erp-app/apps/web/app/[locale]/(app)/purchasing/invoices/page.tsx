@@ -272,7 +272,7 @@ function ConfirmModal({
             options={leafAccounts}
             locale={locale}
             linkPath="accounting/statement"
-            linkLabel="عرض كشف الحساب"
+            linkLabel="عرض كشف الحساب المحاسبي"
           />
         </div>
 
@@ -388,14 +388,14 @@ function ExpandedRow({
                 ← عرض حساب ضريبة المدخلات
               </a>
             )}
-            {invoice.inventoryAccountId && (
+            {invoice.branchId && (
               <a
-                href={`/${locale}/accounting/statement?accountId=${invoice.inventoryAccountId}`}
+                href={`/${locale}/inventory/movements?branchId=${invoice.branchId}&referenceId=${invoice.id}&referenceType=purchase_invoice`}
                 target="_blank"
                 rel="noreferrer"
                 className="text-xs text-blue-600 hover:underline"
               >
-                ← عرض كشف المخزون
+                ← عرض حركات المخزون
               </a>
             )}
           </div>

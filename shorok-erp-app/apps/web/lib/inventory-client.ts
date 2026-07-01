@@ -85,18 +85,20 @@ export const listBalances = (branchId: string, cursor?: string | null) => {
 };
 
 export const listMovements = (filters: {
-  branchId: string;
+  branchId?: string;
   movementType?: MovementType;
   productVariantId?: string;
+  referenceId?: string;
+  referenceType?: string;
   cursor?: string | null;
   limit?: number;
 }) => {
-  const params = new URLSearchParams({
-    branchId: filters.branchId,
-    limit: String(filters.limit ?? 50),
-  });
+  const params = new URLSearchParams({ limit: String(filters.limit ?? 50) });
+  if (filters.branchId) params.set("branchId", filters.branchId);
   if (filters.movementType) params.set("movementType", filters.movementType);
   if (filters.productVariantId) params.set("productVariantId", filters.productVariantId);
+  if (filters.referenceId) params.set("referenceId", filters.referenceId);
+  if (filters.referenceType) params.set("referenceType", filters.referenceType);
   if (filters.cursor) params.set("cursor", filters.cursor);
   return apiCall<Page<MovementRow>>(`/inventory/movements?${params.toString()}`);
 };

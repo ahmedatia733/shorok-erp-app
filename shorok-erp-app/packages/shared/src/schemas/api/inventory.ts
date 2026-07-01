@@ -31,9 +31,11 @@ export const CountRequestSchema = z.object({
 export type CountRequest = z.infer<typeof CountRequestSchema>;
 
 export const InventoryMovementsQuerySchema = z.object({
-  branchId: UuidSchema,
+  branchId: UuidSchema.optional(),
   productVariantId: UuidSchema.optional(),
   movementType: MovementTypeEnum.optional(),
+  referenceId: z.string().uuid().optional(),
+  referenceType: z.string().max(50).optional(),
   from: IsoDateTimeSchema.optional(),
   to: IsoDateTimeSchema.optional(),
   cursor: z.string().nullish(),

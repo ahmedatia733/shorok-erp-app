@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { useSearchParams } from "next/navigation";
 import type { MovementType } from "@shorok/shared";
 import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
@@ -32,14 +31,22 @@ const typeBadge: Record<MovementType, "info" | "success" | "warning" | "neutral"
   COUNT_CORRECTION: "neutral",
 };
 
+const typeLabel: Record<MovementType, string> = {
+  RECEIPT: "إيراد مخزون",
+  SALE: "بيع",
+  ADJUSTMENT: "تسوية",
+  COUNT_CORRECTION: "تصحيح جرد",
+};
+
 export default function MovementsPage() {
   const t = useTranslations("inventory.movementsPage");
   const tInv = useTranslations("inventory");
   const tCommon = useTranslations("common");
   const locale = useLocale() as AppLocale;
-  const params = useSearchParams();
 
-  const [branchId, setBranchId] = useState<string | null>(params.get("branchId"));
+  const [branchId,     setBranchId]     = useState<string | null>(null);
+  const [referenceId,  setReferenceId]  = useState<string | null>(null);
+  const [referenceType,setReferenceType]= useState<string | null>(null);
   const [type, setType] = useState<MovementType | "ALL">("ALL");
   const [rows, setRows] = useState<MovementRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -47,8 +54,21 @@ export default function MovementsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Read URL params on mount (avoids SSR hydration mismatch)
   useEffect(() => {
-    if (!branchId) {
+    const p = new URLSearchParams(window.location.search);
+    const bid = p.get("branchId");
+    const rid = p.get("referenceId");
+    const rtype = p.get("referenceType");
+    if (bid)   setBranchId(bid);
+    if (rid)   setReferenceId(rid);
+    if (rtype) setReferenceType(rtype);
+  }, []);
+
+  const canLoad = !!(branchId || referenceId);
+
+  useEffect(() => {
+    if (!canLoad) {
       setRows([]);
       return;
     }
@@ -56,8 +76,10 @@ export default function MovementsPage() {
     setLoading(true);
     setError(null);
     void listMovements({
-      branchId,
-      movementType: type === "ALL" ? undefined : type,
+      branchId:      branchId    ?? undefined,
+      referenceId:   referenceId  ?? undefined,
+      referenceType: referenceType ?? undefined,
+      movementType:  type === "ALL" ? undefined : type,
     })
       .then((page) => {
         if (!alive) return;
@@ -68,18 +90,18 @@ export default function MovementsPage() {
         if (alive && err instanceof ApiClientError) setError(err.localizedMessage(locale));
       })
       .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [branchId, type, locale]);
+    return () => { alive = false; };
+  }, [branchId, referenceId, referenceType, type, locale, canLoad]);
 
   async function loadMore() {
-    if (!branchId || !cursor) return;
+    if (!canLoad || !cursor) return;
     setLoadingMore(true);
     try {
       const page = await listMovements({
-        branchId,
-        movementType: type === "ALL" ? undefined : type,
+        branchId:      branchId    ?? undefined,
+        referenceId:   referenceId  ?? undefined,
+        referenceType: referenceType ?? undefined,
+        movementType:  type === "ALL" ? undefined : type,
         cursor,
       });
       setRows((prev) => [...prev, ...page.data]);
@@ -89,11 +111,28 @@ export default function MovementsPage() {
     }
   }
 
+  function clearReferenceFilter() {
+    setReferenceId(null);
+    setReferenceType(null);
+    // Remove from URL without navigation
+    const url = new URL(window.location.href);
+    url.searchParams.delete("referenceId");
+    url.searchParams.delete("referenceType");
+    window.history.replaceState(null, "", url.toString());
+  }
+
+  const isFiltered = !!referenceId;
+  const refLabel = referenceType === "purchase_invoice"
+    ? "فاتورة مشتريات"
+    : referenceType === "sales_invoice"
+    ? "فاتورة مبيعات"
+    : referenceType ?? "";
+
   return (
-    <div className="space-y-section">
+    <div className="space-y-section" dir="rtl">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-page-title">{t("title")}</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <BranchPicker value={branchId} onChange={setBranchId} />
           <select
             aria-label={t("filters.type")}
@@ -103,12 +142,32 @@ export default function MovementsPage() {
           >
             {TYPES.map((opt) => (
               <option key={opt} value={opt}>
-                {opt === "ALL" ? t("filters.all") : opt}
+                {opt === "ALL" ? t("filters.all") : (typeLabel[opt as MovementType] ?? opt)}
               </option>
             ))}
           </select>
         </div>
       </div>
+
+      {/* Reference filter banner */}
+      {isFiltered && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm" dir="rtl">
+          <span className="text-blue-800">
+            عرض حركات مخزون مرتبطة بـ <strong>{refLabel}</strong>
+            {referenceId && (
+              <span className="ms-2 font-mono text-xs text-blue-500">#{referenceId.slice(0, 8)}</span>
+            )}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={clearReferenceFilter}
+            className="text-blue-700 hover:text-blue-900 shrink-0"
+          >
+            عرض كل الحركات ×
+          </Button>
+        </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -116,12 +175,12 @@ export default function MovementsPage() {
         </CardHeader>
         <CardBody>
           {error ? (
-            <Alert variant="error" className="mb-3">
-              {error}
-            </Alert>
+            <Alert variant="error" className="mb-3">{error}</Alert>
           ) : null}
 
-          {loading ? (
+          {!canLoad ? (
+            <EmptyState title="اختر فرعاً لعرض الحركات" />
+          ) : loading ? (
             <div className="space-y-2">
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
@@ -135,16 +194,12 @@ export default function MovementsPage() {
                 <THead>
                   <TR>
                     <TH dir="ltr">{t("columns.date")}</TH>
-                    <TH>{t("columns.type")}</TH>
+                    <TH>النوع</TH>
                     <TH>{tInv("color")}</TH>
                     <TH dir="ltr">{tInv("code")}</TH>
                     <TH dir="ltr">{tInv("size")}</TH>
-                    <TH dir="ltr" className="text-end">
-                      {t("columns.boards")}
-                    </TH>
-                    <TH dir="ltr" className="text-end">
-                      {t("columns.meters")}
-                    </TH>
+                    <TH dir="ltr" className="text-end">{t("columns.boards")}</TH>
+                    <TH dir="ltr" className="text-end">{t("columns.meters")}</TH>
                     <TH>{t("columns.actor")}</TH>
                     <TH>{t("columns.note")}</TH>
                   </TR>
@@ -154,7 +209,9 @@ export default function MovementsPage() {
                     <TR key={m.id}>
                       <TD dir="ltr">{formatDateTime(m.createdAt, locale)}</TD>
                       <TD>
-                        <Badge variant={typeBadge[m.movementType]}>{m.movementType}</Badge>
+                        <Badge variant={typeBadge[m.movementType]}>
+                          {typeLabel[m.movementType] ?? m.movementType}
+                        </Badge>
                       </TD>
                       <TD>
                         {locale === "ar"
@@ -162,7 +219,7 @@ export default function MovementsPage() {
                           : m.productVariant.sku.colorNameEn}
                       </TD>
                       <TD dir="ltr">{m.productVariant.sku.code}</TD>
-                      <TD dir="ltr">{m.productVariant.sizeMetersPerBoard} m</TD>
+                      <TD dir="ltr">{m.productVariant.sizeMetersPerBoard} م²</TD>
                       <TD dir="ltr" className="text-end font-medium">
                         {formatNumber(m.boardsQuantity, locale)}
                       </TD>
@@ -178,7 +235,7 @@ export default function MovementsPage() {
 
               {cursor ? (
                 <div className="mt-4 flex justify-center">
-                  <Button variant="ghost" size="sm" onClick={loadMore} disabled={loadingMore}>
+                  <Button variant="ghost" size="sm" onClick={() => void loadMore()} disabled={loadingMore}>
                     {loadingMore ? tCommon("loading") : tCommon("loadMore")}
                   </Button>
                 </div>
