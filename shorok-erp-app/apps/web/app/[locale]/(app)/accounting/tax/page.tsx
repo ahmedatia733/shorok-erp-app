@@ -325,15 +325,9 @@ function BalanceChip({ value }: { value: string }) {
 export default function TaxLedgerPage() {
   const range = thisMonthRange();
 
-  // Pre-select account if ?accountId= is in the URL (e.g., from confirm modal link)
-  const initAccountId =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("accountId") ?? ""
-      : "";
-
   const [taxAccounts, setTaxAccounts] = useState<TaxAccount[]>([]);
   const [allAccounts, setAllAccounts] = useState<AccountRow[]>([]);
-  const [accountId, setAccountId] = useState<string>(initAccountId);
+  const [accountId, setAccountId] = useState<string>("");
   const [from, setFrom] = useState(range.from);
   const [to,   setTo]   = useState(range.to);
 
@@ -342,21 +336,38 @@ export default function TaxLedgerPage() {
   const [error, setError]     = useState<string | null>(null);
 
   useEffect(() => {
+    // Read URL param client-side (avoids SSR/hydration mismatch)
+    const urlAccountId = new URLSearchParams(window.location.search).get("accountId") ?? "";
+
     void Promise.all([listTaxAccounts(), listAccounts()]).then(([tax, all]) => {
       setTaxAccounts(tax);
-      setAllAccounts(all.filter((a) => a.isLeaf && a.active));
-      // Auto-select: prefer URL param → then first tax account
-      if (!initAccountId && tax.length > 0) setAccountId(tax[0]!.id);
+      const leafActive = all.filter((a) => a.isLeaf && a.active);
+      setAllAccounts(leafActive);
+
+      // Priority: URL param → account matching "موردون/دائنون" → first tax account
+      const chosen =
+        urlAccountId ||
+        tax.find((a) => /موردون|دائنون/i.test(a.nameAr))?.id ||
+        leafActive.find((a) => /موردون|دائنون/i.test(a.nameAr))?.id ||
+        tax[0]?.id ||
+        "";
+
+      if (chosen) {
+        setAccountId(chosen);
+        void loadWithId(chosen);
+      } else {
+        void loadWithId("");
+      }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function load() {
+  async function loadWithId(id: string) {
     setLoading(true);
     setError(null);
     try {
       const data = await getTaxLedger({
-        accountId: accountId || undefined,
+        accountId: id || undefined,
         from: from || undefined,
         to:   to   || undefined,
       });
@@ -368,10 +379,9 @@ export default function TaxLedgerPage() {
     }
   }
 
-  useEffect(() => {
-    void load();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  async function load() {
+    await loadWithId(accountId);
+  }
 
   return (
     <div className="space-y-5" dir="rtl">
