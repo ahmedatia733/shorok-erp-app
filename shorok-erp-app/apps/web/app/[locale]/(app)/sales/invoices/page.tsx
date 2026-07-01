@@ -91,35 +91,31 @@ function recomputeLine(line: LineFormState, variant?: VariantOption): Partial<Li
   const boards = parseFloat(line.boardsQuantity) || 0;
   const L = parseFloat(line.customL) || 0;
   const W = parseFloat(line.customW) || 0;
-  const sqm = L > 0 && W > 0 ? L * W : 0;
 
-  let meters = 0;
-  if (sqm > 0) {
-    meters = boards * sqm;
-  } else {
-    const sizeM =
-      line.sizeChoice === "K" ? SIZE_K :
-      line.sizeChoice === "S" ? SIZE_S :
-      (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
-    meters = boards * sizeM;
-  }
+  // م² = حجم اللوح الواحد فقط (not multiplied by count)
+  const singleBoardSqm =
+    L > 0 && W > 0 ? L * W :
+    line.sizeChoice === "K" ? SIZE_K :
+    line.sizeChoice === "S" ? SIZE_S :
+    (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
 
-  // If no size dimension is set, treat boards count as the direct quantity
-  const qty = meters > 0 ? meters : boards;
+  // الكمية (م) = مجموع الأمتار — معلومة فقط، لا تؤثر على الإجمالي
+  const totalMeters = singleBoardSqm > 0 ? boards * singleBoardSqm : 0;
 
-  const price = parseFloat(line.unitPrice) || 0;
-  const cost  = parseFloat(line.costPrice) || 0;
-  const lineTotal = qty * price;
-  const lineCost  = qty * cost;
+  // الإجمالي = العدد × سعر الوحدة (العدد فقط هو الذي يؤثر)
+  const price     = parseFloat(line.unitPrice) || 0;
+  const cost      = parseFloat(line.costPrice) || 0;
+  const lineTotal = boards * price;
+  const lineCost  = boards * cost;
   const taxRate   = parseFloat(line.taxRate) || 0;
   const taxAmount = lineTotal * taxRate / 100;
 
   return {
-    sqm:            sqm > 0      ? sqm.toFixed(4)        : "",
-    metersQuantity: meters > 0   ? meters.toFixed(4)     : boards > 0 ? String(boards) : "",
-    lineTotal:      lineTotal > 0 ? lineTotal.toFixed(2)  : "",
-    lineCost:       lineCost > 0  ? lineCost.toFixed(2)   : "",
-    taxAmount:      taxAmount > 0 ? taxAmount.toFixed(2)  : "",
+    sqm:            singleBoardSqm > 0 ? singleBoardSqm.toFixed(4) : "",
+    metersQuantity: totalMeters > 0    ? totalMeters.toFixed(4)     : "",
+    lineTotal:      lineTotal > 0      ? lineTotal.toFixed(2)        : "",
+    lineCost:       lineCost > 0       ? lineCost.toFixed(2)         : "",
+    taxAmount:      taxAmount > 0      ? taxAmount.toFixed(2)        : "",
   };
 }
 
@@ -552,7 +548,7 @@ function InvoiceForm({
         notes: notes || undefined,
         lines: validLines.map((l) => ({
           productVariantId: l.productVariantId,
-          quantity: l.metersQuantity || l.boardsQuantity || "1",
+          quantity: l.boardsQuantity || "1",
           unitLabel: l.unitLabel || "متر",
           unitPrice: l.unitPrice || "0",
           costPrice: l.costPrice || "0",
