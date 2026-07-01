@@ -104,19 +104,22 @@ function recomputeLine(line: LineFormState, variant?: VariantOption): Partial<Li
     meters = boards * sizeM;
   }
 
+  // If no size dimension is set, treat boards count as the direct quantity
+  const qty = meters > 0 ? meters : boards;
+
   const price = parseFloat(line.unitPrice) || 0;
   const cost  = parseFloat(line.costPrice) || 0;
-  const lineTotal = meters * price;
-  const lineCost  = meters * cost;
+  const lineTotal = qty * price;
+  const lineCost  = qty * cost;
   const taxRate   = parseFloat(line.taxRate) || 0;
   const taxAmount = lineTotal * taxRate / 100;
 
   return {
-    sqm:            sqm > 0      ? sqm.toFixed(4)       : "",
-    metersQuantity: meters > 0   ? meters.toFixed(4)    : "",
-    lineTotal:      lineTotal > 0 ? lineTotal.toFixed(2) : "",
-    lineCost:       lineCost > 0  ? lineCost.toFixed(2)  : "",
-    taxAmount:      taxAmount > 0 ? taxAmount.toFixed(2) : "",
+    sqm:            sqm > 0      ? sqm.toFixed(4)        : "",
+    metersQuantity: meters > 0   ? meters.toFixed(4)     : boards > 0 ? String(boards) : "",
+    lineTotal:      lineTotal > 0 ? lineTotal.toFixed(2)  : "",
+    lineCost:       lineCost > 0  ? lineCost.toFixed(2)   : "",
+    taxAmount:      taxAmount > 0 ? taxAmount.toFixed(2)  : "",
   };
 }
 
