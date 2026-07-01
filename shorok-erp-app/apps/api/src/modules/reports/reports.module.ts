@@ -5,6 +5,7 @@ import { IncomeStatementController } from "./income-statement.controller";
 import { TrialBalanceController } from "./trial-balance.controller";
 import { BalanceSheetController } from "./balance-sheet.controller";
 import { AgingController } from "./aging.controller";
+import { TaxLedgerController } from "./tax-ledger.controller";
 
 @Module({
   controllers: [
@@ -13,6 +14,7 @@ import { AgingController } from "./aging.controller";
     TrialBalanceController,
     BalanceSheetController,
     AgingController,
+    TaxLedgerController,
   ],
   providers: [DashboardService],
 })
