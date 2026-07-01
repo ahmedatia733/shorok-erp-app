@@ -36,6 +36,7 @@ interface TemplateLine {
 
 const CATEGORIES = [
   { id: "banks",     label: "البنوك",               special: false },
+  { id: "vaults",    label: "الخزن",                special: false },
   { id: "cash",      label: "الصندوق والنقدية",      special: false },
   { id: "ar",        label: "الذمم المدينة",         special: false },
   { id: "ap",        label: "الذمم الدائنة",         special: false },
@@ -53,18 +54,19 @@ const CATEGORIES = [
 
 function filterAccounts(cat: string, accounts: AccountRow[]): AccountRow[] {
   if (cat === "customers" || cat === "suppliers") return [];
-  const n = (a: AccountRow) => a.nameAr;
+  const both = (a: AccountRow) => (a.nameAr + " " + a.nameEn).toLowerCase();
   const tests: Record<string, (a: AccountRow) => boolean> = {
-    banks:     (a) => /بنك/.test(n(a)),
-    cash:      (a) => /صندوق|نقد/.test(n(a)),
-    ar:        (a) => a.category === "ASSET" && /مدين|ذمم|عميل/.test(n(a)),
-    ap:        (a) => a.category === "LIABILITY" && /دائن|مورد|ذمم/.test(n(a)),
+    banks:     (a) => a.category === "ASSET" && /بنك|مصرف|bank|cib|nbe|qnb|hsbc|abc/i.test(both(a)),
+    vaults:    (a) => a.category === "ASSET" && /خزن|خزينة|خزان|vault|safe/i.test(both(a)),
+    cash:      (a) => a.category === "ASSET" && /صندوق|نقد|كاش|cash|petty/i.test(both(a)),
+    ar:        (a) => a.category === "ASSET" && /مدين|ذمم|عميل|receivabl/i.test(both(a)),
+    ap:        (a) => a.category === "LIABILITY" && /دائن|مورد|ذمم|payabl/i.test(both(a)),
     revenue:   (a) => a.category === "REVENUE",
     cogs:      (a) => a.category === "COST_OF_SALES",
     expense:   (a) => a.category === "EXPENSE",
     fixed:     (a) => a.accountType === "FIXED_ASSET",
-    inventory: (a) => /مخزون|بضاع|سلع/.test(n(a)),
-    tax:       (a) => /ضريب/.test(n(a)),
+    inventory: (a) => /مخزون|بضاع|سلع|stock|inventor/i.test(both(a)),
+    tax:       (a) => /ضريب|tax|vat/i.test(both(a)),
     equity:    (a) => a.category === "EQUITY",
     all:       () => true,
   };
@@ -203,15 +205,18 @@ export default function TemplatesPage() {
   }
 
   function handleDebitChange(idx: number, val: string) {
-    setLines((prev) =>
-      prev.map((l, i) => (i === idx ? { ...l, debit: val, credit: val ? "" : l.credit } : l)),
-    );
+    updateLine(idx, { debit: val });
   }
 
   function handleCreditChange(idx: number, val: string) {
-    setLines((prev) =>
-      prev.map((l, i) => (i === idx ? { ...l, credit: val, debit: val ? "" : l.debit } : l)),
-    );
+    updateLine(idx, { credit: val });
+  }
+
+  function lineNet(l: TemplateLine): { type: "debit" | "credit"; net: number } {
+    const d = parseFloat(l.debit) || 0;
+    const c = parseFloat(l.credit) || 0;
+    const net = d - c;
+    return { type: net >= 0 ? "debit" : "credit", net: Math.abs(net) };
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -225,16 +230,19 @@ export default function TemplatesPage() {
       // allow lines without amount
     }
 
-    // Lines without amount are allowed (filled at use-time)
+    // Net each line: debit − credit → final type and amount
     const submitLines = lines
       .filter((l) => l.accountId)
-      .map((l, idx) => ({
-        accountId: l.accountId,
-        type: l.credit ? ("credit" as const) : ("debit" as const),
-        amount: (l.debit || l.credit) || undefined,
-        note: l.note || undefined,
-        sortOrder: idx,
-      }));
+      .map((l, idx) => {
+        const { type, net } = lineNet(l);
+        return {
+          accountId: l.accountId,
+          type,
+          amount: net > 0 ? net.toFixed(2) : undefined,
+          note: l.note || undefined,
+          sortOrder: idx,
+        };
+      });
 
     if (submitLines.length === 0) {
       setFormError("أضف سطراً واحداً على الأقل وحدد الحساب");
@@ -283,9 +291,15 @@ export default function TemplatesPage() {
     });
   }
 
-  // Live totals
-  const totalDebit = lines.reduce((s, l) => s + (parseFloat(l.debit) || 0), 0);
-  const totalCredit = lines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0);
+  // Live totals — net approach: debit − credit per line
+  const totalDebit = lines.reduce((s, l) => {
+    const { type, net } = lineNet(l);
+    return type === "debit" ? s + net : s;
+  }, 0);
+  const totalCredit = lines.reduce((s, l) => {
+    const { type, net } = lineNet(l);
+    return type === "credit" ? s + net : s;
+  }, 0);
   const diff = Math.abs(totalDebit - totalCredit);
   const isBalanced = diff < 0.005;
 
@@ -599,6 +613,15 @@ export default function TemplatesPage() {
                           value={line.credit}
                           onChange={(e) => handleCreditChange(idx, e.target.value)}
                         />
+                        {/* Net indicator when both are filled */}
+                        {line.debit && line.credit && (() => {
+                          const { type, net } = lineNet(line);
+                          return (
+                            <div className="text-xs text-center mt-0.5 font-mono text-amber-700">
+                              صافي {net.toFixed(2)} {type === "debit" ? "م" : "د"}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* Delete */}
