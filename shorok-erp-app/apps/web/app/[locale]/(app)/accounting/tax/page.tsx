@@ -324,9 +324,16 @@ function BalanceChip({ value }: { value: string }) {
 
 export default function TaxLedgerPage() {
   const range = thisMonthRange();
+
+  // Pre-select account if ?accountId= is in the URL (e.g., from confirm modal link)
+  const initAccountId =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("accountId") ?? ""
+      : "";
+
   const [taxAccounts, setTaxAccounts] = useState<TaxAccount[]>([]);
   const [allAccounts, setAllAccounts] = useState<AccountRow[]>([]);
-  const [accountId, setAccountId] = useState<string>("");
+  const [accountId, setAccountId] = useState<string>(initAccountId);
   const [from, setFrom] = useState(range.from);
   const [to,   setTo]   = useState(range.to);
 
@@ -338,7 +345,8 @@ export default function TaxLedgerPage() {
     void Promise.all([listTaxAccounts(), listAccounts()]).then(([tax, all]) => {
       setTaxAccounts(tax);
       setAllAccounts(all.filter((a) => a.isLeaf && a.active));
-      if (tax.length > 0 && !accountId) setAccountId(tax[0]!.id);
+      // Auto-select: prefer URL param → then first tax account
+      if (!initAccountId && tax.length > 0) setAccountId(tax[0]!.id);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

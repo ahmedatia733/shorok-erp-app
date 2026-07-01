@@ -166,14 +166,27 @@ function autoSelect(accounts: AccountRow[], ...keywords: string[]): string {
   return match?.id ?? "";
 }
 
-function AccountLink({ locale, accountId, label }: { locale: AppLocale; accountId: string; label?: string }) {
+function AccountLink({
+  locale,
+  accountId,
+  label,
+  path,
+}: {
+  locale: AppLocale;
+  accountId: string;
+  label?: string;
+  path?: string;           // override destination page
+}) {
   if (!accountId) return null;
+  const href = path
+    ? `/${locale}/${path}?accountId=${accountId}`
+    : `/${locale}/accounting/statement?accountId=${accountId}`;
   return (
     <a
-      href={`/${locale}/accounting/statement?accountId=${accountId}`}
+      href={href}
       target="_blank"
       rel="noreferrer"
-      className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+      className="text-xs text-blue-600 hover:underline flex items-center gap-1 whitespace-nowrap"
     >
       {label ?? "عرض كشف الحساب"} ↗
     </a>
@@ -190,6 +203,8 @@ function AccountSelector({
   fallback,
   locale,
   required,
+  linkPath,
+  linkLabel,
 }: {
   label: string;
   hint: string;
@@ -200,6 +215,8 @@ function AccountSelector({
   fallback: AccountRow[];
   locale: AppLocale;
   required?: boolean;
+  linkPath?: string;       // custom statement page path
+  linkLabel?: string;      // custom link label
 }) {
   return (
     <div className="rounded-lg border border-border p-3 space-y-2">
@@ -211,7 +228,7 @@ function AccountSelector({
           </div>
           <div className="text-xs text-textSecondary">{hint} — <strong>{amountLabel}</strong></div>
         </div>
-        <AccountLink locale={locale} accountId={value} />
+        <AccountLink locale={locale} accountId={value} path={linkPath} label={linkLabel} />
       </div>
       <select
         value={value}
@@ -438,6 +455,8 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
             fallback={taxFallback}
             locale={locale}
             required={postJournalEntry}
+            linkPath="accounting/tax"
+            linkLabel="عرض حساب الضريبة (VAT)"
           />
         )}
 
