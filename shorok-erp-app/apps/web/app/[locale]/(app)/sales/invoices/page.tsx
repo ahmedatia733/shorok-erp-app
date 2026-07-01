@@ -25,8 +25,12 @@ import { listCustomers, type CustomerRow } from "../../../../../lib/customers-cl
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 import { apiCall } from "../../../../../lib/api-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
+import { AP_COLORS, apColorMap } from "../../../../../lib/ap-colors";
 
 // ─── types ───────────────────────────────────────────────────────────────────
+
+const SIZE_K = 5.25;
+const SIZE_S = 4.0;
 
 interface BranchOption {
   id: string;
@@ -35,20 +39,85 @@ interface BranchOption {
 
 interface VariantOption {
   id: string;
-  label: string;
-  unitLabel: string;
+  skuCode: string;
+  skuNameAr: string;
+  sizeMetersPerBoard: string;
   defaultSalePrice: string;
   defaultCostPrice: string;
 }
 
 interface LineFormState {
+  _key: string;
+  colorCode: string;
   productVariantId: string;
-  quantity: string;
+  boardsQuantity: string;
+  sizeChoice: "" | "K" | "S";
+  customL: string;
+  customW: string;
   unitLabel: string;
   unitPrice: string;
   costPrice: string;
-  discountPct: string;
-  note: string;
+  taxRate: string;
+  // computed
+  sqm: string;
+  metersQuantity: string;
+  lineTotal: string;
+  taxAmount: string;
+  lineCost: string;
+}
+
+function mkLine(): LineFormState {
+  return {
+    _key: Math.random().toString(36).slice(2),
+    colorCode: "",
+    productVariantId: "",
+    boardsQuantity: "",
+    sizeChoice: "",
+    customL: "",
+    customW: "",
+    unitLabel: "متر",
+    unitPrice: "0",
+    costPrice: "0",
+    taxRate: "0",
+    sqm: "",
+    metersQuantity: "",
+    lineTotal: "",
+    taxAmount: "",
+    lineCost: "",
+  };
+}
+
+function recomputeLine(line: LineFormState, variant?: VariantOption): Partial<LineFormState> {
+  const boards = parseFloat(line.boardsQuantity) || 0;
+  const L = parseFloat(line.customL) || 0;
+  const W = parseFloat(line.customW) || 0;
+  const sqm = L > 0 && W > 0 ? L * W : 0;
+
+  let meters = 0;
+  if (sqm > 0) {
+    meters = boards * sqm;
+  } else {
+    const sizeM =
+      line.sizeChoice === "K" ? SIZE_K :
+      line.sizeChoice === "S" ? SIZE_S :
+      (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
+    meters = boards * sizeM;
+  }
+
+  const price = parseFloat(line.unitPrice) || 0;
+  const cost  = parseFloat(line.costPrice) || 0;
+  const lineTotal = meters * price;
+  const lineCost  = meters * cost;
+  const taxRate   = parseFloat(line.taxRate) || 0;
+  const taxAmount = lineTotal * taxRate / 100;
+
+  return {
+    sqm:            sqm > 0      ? sqm.toFixed(4)       : "",
+    metersQuantity: meters > 0   ? meters.toFixed(4)    : "",
+    lineTotal:      lineTotal > 0 ? lineTotal.toFixed(2) : "",
+    lineCost:       lineCost > 0  ? lineCost.toFixed(2)  : "",
+    taxAmount:      taxAmount > 0 ? taxAmount.toFixed(2) : "",
+  };
 }
 
 // ─── StatusBadge ─────────────────────────────────────────────────────────────
@@ -75,31 +144,8 @@ function StatusBadge({ status }: { status: string }) {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function computeLineTotal(qty: string, price: string, disc: string): number {
-  const q = parseFloat(qty) || 0;
-  const p = parseFloat(price) || 0;
-  const d = parseFloat(disc) || 0;
-  return q * p * (1 - d / 100);
-}
-
-function computeLineProfit(qty: string, price: string, cost: string, disc: string): number {
-  return computeLineTotal(qty, price, disc) - (parseFloat(qty) || 0) * (parseFloat(cost) || 0);
-}
-
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function emptyLine(): LineFormState {
-  return {
-    productVariantId: "",
-    quantity: "1",
-    unitLabel: "وحدة",
-    unitPrice: "0",
-    costPrice: "0",
-    discountPct: "0",
-    note: "",
-  };
 }
 
 // ─── ConfirmModal ─────────────────────────────────────────────────────────────
@@ -441,91 +487,55 @@ function InvoiceForm({
       ? new Date(editInvoice.dueDate).toISOString().slice(0, 10)
       : "",
   );
-  const [taxRate, setTaxRate] = useState(editInvoice?.taxRate ?? "0");
   const [notes, setNotes] = useState(editInvoice?.notes ?? "");
-  const [lines, setLines] = useState<LineFormState[]>(
-    editInvoice && editInvoice.lines && editInvoice.lines.length > 0
-      ? editInvoice.lines.map((l) => ({
-          productVariantId: l.productVariant?.id ?? "",
-          quantity: l.quantity,
-          unitLabel: l.unitLabel,
-          unitPrice: l.unitPrice,
-          costPrice: l.costPrice,
-          discountPct: l.discountPct,
-          note: l.note ?? "",
-        }))
-      : [emptyLine()],
-  );
+  const [lines, setLines] = useState<LineFormState[]>([mkLine(), mkLine()]);
+  const variantMap = new Map(variants.map((v) => [v.id, v]));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [savedInvoice, setSavedInvoice] = useState<SalesInvoiceDetail | null>(null);
 
-  function updateLine(idx: number, field: keyof LineFormState, value: string) {
+  function updateLine(idx: number, patch: Partial<LineFormState>) {
     setLines((prev) => {
-      const copy = [...prev];
-      const current = copy[idx];
-      if (!current) return copy;
-      copy[idx] = { ...current, [field]: value };
-      return copy;
+      const next = [...prev];
+      const merged = { ...next[idx]!, ...patch };
+      const variant = variantMap.get(merged.productVariantId);
+      next[idx] = { ...merged, ...recomputeLine(merged, variant) };
+      return next;
     });
-  }
-
-  function addLine() {
-    setLines((prev) => [...prev, emptyLine()]);
-  }
-
-  function removeLine(idx: number) {
-    if (lines.length <= 1) return;
-    setLines((prev) => prev.filter((_, i) => i !== idx));
   }
 
   function onVariantChange(idx: number, variantId: string) {
-    const variant = variants.find((v) => v.id === variantId);
-    setLines((prev) => {
-      const copy = [...prev];
-      const current = copy[idx];
-      if (!current) return copy;
-      copy[idx] = {
-        ...current,
-        productVariantId: variantId,
-        unitLabel: variant?.unitLabel ?? "وحدة",
-        unitPrice: variant?.defaultSalePrice ?? "0",
-        costPrice: variant?.defaultCostPrice ?? "0",
-      };
-      return copy;
+    const variant = variantMap.get(variantId);
+    updateLine(idx, {
+      productVariantId: variantId,
+      unitPrice: variant?.defaultSalePrice ?? "0",
+      costPrice: variant?.defaultCostPrice ?? "0",
     });
   }
 
-  // Compute totals
-  const linesSummary = lines.map((l) => ({
-    lineTotal: computeLineTotal(l.quantity, l.unitPrice, l.discountPct),
-    lineProfit: computeLineProfit(l.quantity, l.unitPrice, l.costPrice, l.discountPct),
-    lineCost:
-      (parseFloat(l.quantity) || 0) * (parseFloat(l.costPrice) || 0),
-  }));
-  const subtotal = linesSummary.reduce((a, l) => a + l.lineTotal, 0);
-  const discountTotal = lines.reduce(
-    (a, l) =>
-      a + (parseFloat(l.quantity) || 0) * (parseFloat(l.unitPrice) || 0) * ((parseFloat(l.discountPct) || 0) / 100),
-    0,
-  );
-  const tax = subtotal * ((parseFloat(taxRate) || 0) / 100);
-  const grandTotal = subtotal + tax;
-  const totalCost = linesSummary.reduce((a, l) => a + l.lineCost, 0);
-  const netProfit = grandTotal - totalCost;
+  // Totals
+  const subtotal     = lines.reduce((s, l) => s + (parseFloat(l.lineTotal)  || 0), 0);
+  const totalTax     = lines.reduce((s, l) => s + (parseFloat(l.taxAmount)  || 0), 0);
+  const totalCost    = lines.reduce((s, l) => s + (parseFloat(l.lineCost)   || 0), 0);
+  const grandTotal   = subtotal + totalTax;
+  const netProfit    = grandTotal - totalCost;
+  const effectiveTaxRate = subtotal > 0 ? (totalTax / subtotal * 100) : 0;
 
   async function handleSave(andConfirm = false) {
     setSaving(true);
     setError(null);
     try {
+      const validLines = lines.filter(
+        (l) => l.productVariantId && parseFloat(l.boardsQuantity) > 0,
+      );
       if (!customerId || !branchId) {
         setError("يرجى اختيار العميل والفرع");
         setSaving(false);
         return;
       }
-      if (lines.some((l) => !l.productVariantId)) {
-        setError("يرجى اختيار المنتج في كل سطر");
+      if (validLines.length === 0) {
+        setError("أضف بنداً واحداً على الأقل وأدخل الكمية");
         setSaving(false);
         return;
       }
@@ -535,16 +545,16 @@ function InvoiceForm({
         dueDate: dueDate || undefined,
         customerId,
         branchId,
-        taxRate: taxRate || "0",
+        taxRate: effectiveTaxRate.toFixed(2),
         notes: notes || undefined,
-        lines: lines.map((l) => ({
+        lines: validLines.map((l) => ({
           productVariantId: l.productVariantId,
-          quantity: l.quantity,
-          unitLabel: l.unitLabel || undefined,
-          unitPrice: l.unitPrice,
+          quantity: l.metersQuantity || l.boardsQuantity || "1",
+          unitLabel: l.unitLabel || "متر",
+          unitPrice: l.unitPrice || "0",
           costPrice: l.costPrice || "0",
-          discountPct: l.discountPct || "0",
-          note: l.note || undefined,
+          discountPct: "0",
+          note: l.colorCode ? `كود: ${l.colorCode}` : undefined,
         })),
       };
 
@@ -636,17 +646,6 @@ function InvoiceForm({
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-600 mb-1">نسبة الضريبة %</label>
-              <Input
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={taxRate}
-                onChange={(e) => setTaxRate(e.target.value)}
-              />
-            </div>
-            <div>
               <label className="block text-xs text-gray-600 mb-1">ملاحظات</label>
               <Input
                 type="text"
@@ -659,138 +658,201 @@ function InvoiceForm({
         </CardBody>
       </Card>
 
-      {/* Section 2 — Lines */}
-      <Card>
-        <CardHeader>
-          <CardTitle>بنود الفاتورة</CardTitle>
-        </CardHeader>
-        <CardBody className="overflow-x-auto p-0">
-          <Table>
-            <THead>
-              <TR>
-                <TH>#</TH>
-                <TH>المنتج</TH>
-                <TH>الوحدة</TH>
-                <TH>الكمية</TH>
-                <TH>سعر البيع</TH>
-                <TH>سعر التكلفة</TH>
-                <TH>خصم%</TH>
-                <TH>إجمالي</TH>
-                <TH>ربح</TH>
-                <TH>بيان</TH>
-                <TH>✕</TH>
-              </TR>
-            </THead>
-            <TBody>
-              {lines.map((line, idx) => {
-                const lt = linesSummary[idx];
-                return (
-                  <TR key={idx}>
-                    <TD>{idx + 1}</TD>
-                    <TD>
-                      <select
-                        value={line.productVariantId}
-                        onChange={(e) => onVariantChange(idx, e.target.value)}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs min-w-[180px]"
-                      >
-                        <option value="">— اختر —</option>
-                        {variants.map((v) => (
-                          <option key={v.id} value={v.id}>{v.label}</option>
-                        ))}
-                      </select>
-                    </TD>
-                    <TD>
-                      <Input
-                        type="text"
-                        value={line.unitLabel}
-                        onChange={(e) => updateLine(idx, "unitLabel", e.target.value)}
-                        className="w-20 text-xs"
-                      />
-                    </TD>
-                    <TD>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.0001"
-                        value={line.quantity}
-                        onChange={(e) => updateLine(idx, "quantity", e.target.value)}
-                        className="w-20 text-xs"
-                      />
-                    </TD>
-                    <TD>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={line.unitPrice}
-                        onChange={(e) => updateLine(idx, "unitPrice", e.target.value)}
-                        className="w-24 text-xs"
-                      />
-                    </TD>
-                    <TD>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={line.costPrice}
-                        onChange={(e) => updateLine(idx, "costPrice", e.target.value)}
-                        className="w-24 text-xs"
-                      />
-                    </TD>
-                    <TD>
-                      <Input
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={line.discountPct}
-                        onChange={(e) => updateLine(idx, "discountPct", e.target.value)}
-                        className="w-16 text-xs"
-                      />
-                    </TD>
-                    <TD>
-                      <span className="text-xs font-medium">
-                        {lt?.lineTotal.toFixed(2) ?? "0.00"}
+      {/* Section 2 — Lines (purchase-invoice style) */}
+      <div className="overflow-x-auto border border-border rounded">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-surface text-textSecondary text-xs">
+              <th className="border border-border px-2 py-1.5 text-center w-8">#</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">الكود</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[110px]">اسم الكود</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[170px]">الصنف</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">عدد</th>
+              <th className="border border-border px-2 py-1.5 text-center w-12">كبير</th>
+              <th className="border border-border px-2 py-1.5 text-center w-12">صغير</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">طول</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">عرض</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">م²</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">الوحدة</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">سعر البيع</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">سعر التكلفة</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">الإجمالي</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة%</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20 text-green-700">ربح السطر</th>
+              <th className="border border-border px-2 py-1.5 w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((line, idx) => {
+              const lineProfit =
+                (parseFloat(line.lineTotal) || 0) - (parseFloat(line.lineCost) || 0);
+              const profitPct =
+                parseFloat(line.lineTotal) > 0
+                  ? (lineProfit / parseFloat(line.lineTotal)) * 100
+                  : 0;
+              return (
+                <tr key={line._key} className="hover:bg-surface/50">
+                  <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">
+                    {idx + 1}
+                  </td>
+                  {/* الكود */}
+                  <td className="border border-border px-1 py-1">
+                    <select
+                      value={line.colorCode}
+                      onChange={(e) => updateLine(idx, { colorCode: e.target.value })}
+                      className="w-full bg-transparent text-sm focus:outline-none font-mono"
+                    >
+                      <option value="">—</option>
+                      {AP_COLORS.map((c) => (
+                        <option key={c.code} value={c.code}>{c.code}</option>
+                      ))}
+                    </select>
+                  </td>
+                  {/* اسم الكود */}
+                  <td className="border border-border px-1 py-1 text-xs text-end pe-2">
+                    {line.colorCode ? (apColorMap.get(line.colorCode)?.nameAr ?? "") : ""}
+                  </td>
+                  {/* الصنف */}
+                  <td className="border border-border px-1 py-1">
+                    <select
+                      value={line.productVariantId}
+                      onChange={(e) => onVariantChange(idx, e.target.value)}
+                      className="w-full bg-transparent text-sm focus:outline-none"
+                    >
+                      <option value="">اختر الصنف</option>
+                      {variants.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.skuCode} — {v.skuNameAr} ({v.sizeMetersPerBoard}م)
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  {/* عدد */}
+                  <td className="border border-border px-1 py-1">
+                    <input
+                      type="number" min="0" step="1"
+                      value={line.boardsQuantity}
+                      onChange={(e) => updateLine(idx, { boardsQuantity: e.target.value })}
+                      className="w-full text-center bg-transparent text-sm focus:outline-none"
+                      dir="ltr"
+                    />
+                  </td>
+                  {/* ك */}
+                  <td className="border border-border px-1 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => updateLine(idx, { sizeChoice: line.sizeChoice === "K" ? "" : "K", customL: "", customW: "" })}
+                      className={"w-7 h-7 rounded text-xs font-bold border transition-colors " + (
+                        line.sizeChoice === "K"
+                          ? "bg-primary text-white border-primary"
+                          : "border-border text-textSecondary hover:border-primary"
+                      )}
+                    >ك</button>
+                  </td>
+                  {/* ص */}
+                  <td className="border border-border px-1 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => updateLine(idx, { sizeChoice: line.sizeChoice === "S" ? "" : "S", customL: "", customW: "" })}
+                      className={"w-7 h-7 rounded text-xs font-bold border transition-colors " + (
+                        line.sizeChoice === "S"
+                          ? "bg-primary text-white border-primary"
+                          : "border-border text-textSecondary hover:border-primary"
+                      )}
+                    >ص</button>
+                  </td>
+                  {/* طول */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" step="0.01" value={line.customL}
+                      onChange={(e) => updateLine(idx, { customL: e.target.value, sizeChoice: "" })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* عرض */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" step="0.01" value={line.customW}
+                      onChange={(e) => updateLine(idx, { customW: e.target.value, sizeChoice: "" })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* م² */}
+                  <td className="border border-border px-1 py-1 text-center text-xs text-primary font-semibold" dir="ltr">
+                    {line.sqm}
+                  </td>
+                  {/* الكمية (م) */}
+                  <td className="border border-border px-1 py-1 text-center text-xs font-semibold" dir="ltr">
+                    {line.metersQuantity}
+                  </td>
+                  {/* الوحدة */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="text" value={line.unitLabel}
+                      onChange={(e) => updateLine(idx, { unitLabel: e.target.value })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" />
+                  </td>
+                  {/* سعر البيع */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" step="0.01" value={line.unitPrice}
+                      onChange={(e) => updateLine(idx, { unitPrice: e.target.value })}
+                      className="w-full text-center bg-transparent text-sm focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* سعر التكلفة */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" step="0.01" value={line.costPrice}
+                      onChange={(e) => updateLine(idx, { costPrice: e.target.value })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* الإجمالي */}
+                  <td className="border border-border px-1 py-1 text-center font-semibold text-xs" dir="ltr">
+                    {line.lineTotal}
+                  </td>
+                  {/* ضريبة% */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" max="100" step="0.01" value={line.taxRate}
+                      onChange={(e) => updateLine(idx, { taxRate: e.target.value })}
+                      className="w-full text-center bg-transparent text-sm focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* قيمة الضريبة */}
+                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
+                    {line.taxAmount}
+                  </td>
+                  {/* ربح السطر */}
+                  <td className={"border border-border px-1 py-1 text-center text-xs font-semibold " + (lineProfit >= 0 ? "text-green-700" : "text-red-600")} dir="ltr">
+                    {line.lineTotal ? (
+                      <span title={`هامش ${profitPct.toFixed(1)}%`}>
+                        {lineProfit.toFixed(2)}
                       </span>
-                    </TD>
-                    <TD>
-                      <span
-                        className={"text-xs font-medium " + ((lt?.lineProfit ?? 0) >= 0 ? "text-green-700" : "text-red-600")}
-                      >
-                        {lt?.lineProfit.toFixed(2) ?? "0.00"}
-                      </span>
-                    </TD>
-                    <TD>
-                      <Input
-                        type="text"
-                        value={line.note}
-                        onChange={(e) => updateLine(idx, "note", e.target.value)}
-                        className="w-28 text-xs"
-                        placeholder="ملاحظة"
-                      />
-                    </TD>
-                    <TD>
-                      <button
-                        type="button"
-                        onClick={() => removeLine(idx)}
-                        disabled={lines.length <= 1}
-                        className="text-red-500 disabled:opacity-30 hover:text-red-700"
-                      >
-                        ✕
-                      </button>
-                    </TD>
-                  </TR>
-                );
-              })}
-            </TBody>
-          </Table>
-          <div className="p-3">
-            <Button variant="ghost" size="sm" onClick={addLine}>
-              + إضافة منتج
-            </Button>
+                    ) : ""}
+                  </td>
+                  {/* ✕ */}
+                  <td className="border border-border px-1 py-1 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setLines((p) => p.filter((_, i) => i !== idx))}
+                      className="text-textSecondary hover:text-danger text-xs"
+                    >✕</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="border-t border-border p-3 flex items-center justify-between bg-surface">
+          <Button variant="ghost" size="sm" onClick={() => setLines((p) => [...p, mkLine()])}>
+            + إضافة صنف
+          </Button>
+          <div className="flex gap-6 text-xs text-textSecondary" dir="ltr">
+            <span>المجموع: <strong>{subtotal.toFixed(2)}</strong></span>
+            <span>الضريبة: <strong>{totalTax.toFixed(2)}</strong></span>
+            <span>التكلفة: <strong>{totalCost.toFixed(2)}</strong></span>
+            <span className={"font-bold " + (netProfit >= 0 ? "text-green-700" : "text-red-600")}>
+              الربح: {netProfit.toFixed(2)}
+            </span>
+            <span className="font-bold text-base text-foreground">
+              الإجمالي: {grandTotal.toFixed(2)}
+            </span>
           </div>
-        </CardBody>
-      </Card>
+        </div>
+      </div>
 
       {/* Section 3 — Totals */}
       <Card>
@@ -801,12 +863,8 @@ function InvoiceForm({
               <span>{subtotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-gray-600">إجمالي الخصم:</span>
-              <span>{discountTotal.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-600">ضريبة ({taxRate}%):</span>
-              <span>{tax.toFixed(2)}</span>
+              <span className="text-gray-600">الضريبة ({effectiveTaxRate.toFixed(1)}%):</span>
+              <span>{totalTax.toFixed(2)}</span>
             </div>
             <div className="flex justify-between font-bold text-green-700">
               <span>الإجمالي:</span>
@@ -1028,8 +1086,9 @@ export default function SalesInvoicesPage() {
         setVariants(
           varRows.map((v) => ({
             id: v.id,
-            label: `${v.sku.code} — ${v.sku.colorNameAr} (${v.sizeMetersPerBoard}م)`,
-            unitLabel: "وحدة",
+            skuCode: v.sku.code,
+            skuNameAr: v.sku.colorNameAr,
+            sizeMetersPerBoard: v.sizeMetersPerBoard,
             defaultSalePrice: v.defaultSalePricePerMeter,
             defaultCostPrice: v.defaultPurchasePricePerMeter,
           })),
