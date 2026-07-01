@@ -431,6 +431,18 @@ export class PurchaseInvoicesController {
     return this.prisma.runInTransaction(async (tx) => {
       const invoiceNumber = existing.invoiceNumber;
 
+      // Clear FK references first so we can safely delete journal entry
+      await tx.purchaseInvoice.update({
+        where: { id },
+        data: {
+          status:             "CANCELLED",
+          journalEntryId:     null,
+          apAccountId:        null,
+          taxAccountId:       null,
+          inventoryAccountId: null,
+        },
+      });
+
       if (existing.status === "CONFIRMED") {
         // Delete journal entry (lines cascade via onDelete: Cascade)
         if (existing.journalEntryId) {
@@ -442,17 +454,6 @@ export class PurchaseInvoicesController {
           where: { referenceType: "purchase_invoice", referenceId: id },
         });
       }
-
-      await tx.purchaseInvoice.update({
-        where: { id },
-        data: {
-          status:             "CANCELLED",
-          journalEntryId:     null,
-          apAccountId:        null,
-          taxAccountId:       null,
-          inventoryAccountId: null,
-        },
-      });
 
       await this.audit.write({
         tx,
