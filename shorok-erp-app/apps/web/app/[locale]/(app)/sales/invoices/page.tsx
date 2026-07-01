@@ -1086,24 +1086,74 @@ function ExpandedRow({
         </div>
       </div>
 
-      {/* Accounting badges */}
+      {/* Accounting links */}
       {invoice.status === "CONFIRMED" && (
-        <div className="flex gap-2 flex-wrap">
-          {invoice.journalEntryId && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 text-green-800 px-2 py-0.5 text-xs">
-              قيد #{invoice.journalEntryId.slice(0, 8)}
-            </span>
-          )}
-          {invoice.customerTxId && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 text-xs">
-              حساب عميل ✓
-            </span>
-          )}
-          {invoice.cogsJournalEntryId && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 text-purple-800 px-2 py-0.5 text-xs">
-              قيد COGS #{invoice.cogsJournalEntryId.slice(0, 8)}
-            </span>
-          )}
+        <div className="bg-white rounded border border-border p-3 space-y-2">
+          <div className="text-xs font-semibold text-textSecondary">كشوف الحسابات المرتبطة</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            {invoice.customer && (
+              <a
+                href={`/${locale}/accounting/customers?customerId=${invoice.customer.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                ← عرض كشف العميل
+              </a>
+            )}
+            {invoice.arAccountId && (
+              <a
+                href={`/${locale}/accounting/statement?accountId=${invoice.arAccountId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                ← عرض كشف الذمم المدينة
+              </a>
+            )}
+            {invoice.revenueAccountId && (
+              <a
+                href={`/${locale}/accounting/statement?accountId=${invoice.revenueAccountId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                ← عرض كشف الإيرادات
+              </a>
+            )}
+            {invoice.taxAccountId && (
+              <a
+                href={`/${locale}/accounting/tax?accountId=${invoice.taxAccountId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                ← عرض حساب الضريبة (VAT)
+              </a>
+            )}
+            {invoice.cogsAccountId && (
+              <a
+                href={`/${locale}/accounting/statement?accountId=${invoice.cogsAccountId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-600 hover:underline"
+              >
+                ← عرض كشف تكلفة المبيعات
+              </a>
+            )}
+          </div>
+          <div className="flex gap-2 flex-wrap pt-1">
+            {invoice.journalEntryId && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 text-green-800 px-2 py-0.5 text-xs">
+                قيد #{invoice.journalEntryId.slice(0, 8)}
+              </span>
+            )}
+            {invoice.cogsJournalEntryId && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 text-purple-800 px-2 py-0.5 text-xs">
+                قيد COGS #{invoice.cogsJournalEntryId.slice(0, 8)}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>

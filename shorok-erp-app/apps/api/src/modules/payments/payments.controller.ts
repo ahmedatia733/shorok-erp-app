@@ -204,63 +204,108 @@ export class PaymentsController {
     @Param("id") accountId: string,
     @Query(new ZodValidationPipe(StatementQuerySchema)) query: StatementQuery,
   ) {
-    const account = await this.prisma.paymentAccount.findUnique({ where: { id: accountId } });
-    if (!account) throw new NotFoundError({ accountId });
-
     const dateFilter: any = {};
     if (query.from) dateFilter.gte = new Date(query.from);
     if (query.to) dateFilter.lte = new Date(query.to);
 
-    // Payments OUT (supplier payments)
-    const payments = await this.prisma.payment.findMany({
-      where: { paymentAccountId: accountId, ...(Object.keys(dateFilter).length ? { paymentDate: dateFilter } : {}) },
-      orderBy: { paymentDate: "asc" },
-    });
+    // ── Payment account (bank / cash) ─────────────────────────────────────
+    const paymentAccount = await this.prisma.paymentAccount.findUnique({ where: { id: accountId } });
 
-    // Collections IN (customer order collections that mention this account by name)
-    const collections = await this.prisma.orderCollection.findMany({
+    if (paymentAccount) {
+      const payments = await this.prisma.payment.findMany({
+        where: { paymentAccountId: accountId, ...(Object.keys(dateFilter).length ? { paymentDate: dateFilter } : {}) },
+        orderBy: { paymentDate: "asc" },
+      });
+
+      const collections = await this.prisma.orderCollection.findMany({
+        where: {
+          paidToAccount: paymentAccount.name,
+          ...(Object.keys(dateFilter).length ? { collectedAt: dateFilter } : {}),
+        },
+        include: { order: { select: { id: true, customerName: true } } },
+        orderBy: { collectedAt: "asc" },
+      });
+
+      const entries: any[] = [
+        ...payments.map((p) => ({
+          date: p.paymentDate,
+          type: "payment_out",
+          reference: p.referenceNumber ?? "—",
+          description: `دفعة لمورد${p.notes ? ` — ${p.notes}` : ""}`,
+          debit: p.amount.toString(),
+          credit: "0.00",
+        })),
+        ...collections.map((c) => ({
+          date: c.collectedAt,
+          type: "collection_in",
+          reference: c.id.slice(0, 8),
+          description: `تحصيل من ${c.order.customerName}`,
+          debit: "0.00",
+          credit: c.amount.toString(),
+        })),
+      ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+      let balance = 0;
+      const entriesWithBalance = entries.map((e) => {
+        balance += parseFloat(e.credit) - parseFloat(e.debit);
+        return { ...e, balance: balance.toFixed(2) };
+      });
+
+      const totalIn = entries.reduce((s, e) => s + parseFloat(e.credit), 0);
+      const totalOut = entries.reduce((s, e) => s + parseFloat(e.debit), 0);
+
+      return {
+        entity: { id: paymentAccount.id, name: paymentAccount.name, type: paymentAccount.type },
+        entries: entriesWithBalance,
+        totalIn: totalIn.toFixed(2),
+        totalOut: totalOut.toFixed(2),
+        closingBalance: (totalIn - totalOut).toFixed(2),
+      };
+    }
+
+    // ── General ledger account (AR, Revenue, Tax, COGS, …) ────────────────
+    const glAccount = await this.prisma.account.findUnique({ where: { id: accountId } });
+    if (!glAccount) throw new NotFoundError({ accountId });
+
+    const lines = await this.prisma.journalLine.findMany({
       where: {
-        paidToAccount: account.name,
-        ...(Object.keys(dateFilter).length ? { collectedAt: dateFilter } : {}),
+        accountId,
+        ...(Object.keys(dateFilter).length ? { journalEntry: { entryDate: dateFilter } } : {}),
       },
-      include: { order: { select: { id: true, customerName: true } } },
-      orderBy: { collectedAt: "asc" },
+      include: {
+        journalEntry: {
+          select: { entryNumber: true, entryDate: true, reference: true, description: true },
+        },
+      },
+      orderBy: [{ journalEntry: { entryDate: "asc" } }, { id: "asc" }],
     });
 
-    const entries: any[] = [
-      ...payments.map((p) => ({
-        date: p.paymentDate,
-        type: "payment_out",
-        reference: p.referenceNumber ?? "—",
-        description: `دفعة لمورد${p.notes ? ` — ${p.notes}` : ""}`,
-        debit: p.amount.toString(),
-        credit: "0.00",
-      })),
-      ...collections.map((c) => ({
-        date: c.collectedAt,
-        type: "collection_in",
-        reference: c.id.slice(0, 8),
-        description: `تحصيل من ${c.order.customerName}`,
-        debit: "0.00",
-        credit: c.amount.toString(),
-      })),
-    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    let balance = 0;
-    const entriesWithBalance = entries.map((e) => {
-      balance += parseFloat(e.credit) - parseFloat(e.debit);
-      return { ...e, balance: balance.toFixed(2) };
+    let glBalance = 0;
+    const glEntries = lines.map((l) => {
+      const dr = parseFloat(l.debit.toString());
+      const cr = parseFloat(l.credit.toString());
+      glBalance += dr - cr;
+      return {
+        id: l.id,
+        date: l.journalEntry.entryDate,
+        type: "journal",
+        reference: `قيد #${l.journalEntry.entryNumber}${l.journalEntry.reference ? ` — ${l.journalEntry.reference}` : ""}`,
+        description: l.note ?? l.journalEntry.description,
+        debit: l.debit.toString(),
+        credit: l.credit.toString(),
+        balance: glBalance.toFixed(2),
+      };
     });
 
-    const totalIn = entries.reduce((s, e) => s + parseFloat(e.credit), 0);
-    const totalOut = entries.reduce((s, e) => s + parseFloat(e.debit), 0);
+    const totalIn = lines.reduce((s, l) => s + parseFloat(l.debit.toString()), 0);
+    const totalOut = lines.reduce((s, l) => s + parseFloat(l.credit.toString()), 0);
 
     return {
-      entity: { id: account.id, name: account.name, type: account.type },
-      entries: entriesWithBalance,
+      entity: { id: glAccount.id, name: glAccount.nameAr, type: "gl_account" },
+      entries: glEntries,
       totalIn: totalIn.toFixed(2),
       totalOut: totalOut.toFixed(2),
-      closingBalance: (totalIn - totalOut).toFixed(2),
+      closingBalance: glBalance.toFixed(2),
     };
   }
 

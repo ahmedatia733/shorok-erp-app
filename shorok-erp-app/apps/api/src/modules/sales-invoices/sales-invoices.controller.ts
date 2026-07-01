@@ -643,27 +643,33 @@ export class SalesInvoicesController {
 
     return this.prisma.runInTransaction(async (tx) => {
       const invoiceNumber = existing.invoiceNumber.toString();
-      const grandTotal = new Decimal(existing.grandTotal.toString());
 
-      // If CONFIRMED, create reversal CustomerTransaction
       if (existing.status === "CONFIRMED") {
-        await tx.customerTransaction.create({
-          data: {
-            customerId: existing.customerId,
-            type: "ADJUSTMENT",
-            direction: "CR",
-            amount: grandTotal.toFixed(2),
-            date: new Date(),
-            reference: `SI-${invoiceNumber}-REV`,
-            description: `إلغاء فاتورة مبيعات رقم ${invoiceNumber}`,
-            createdBy: user.id,
-          },
-        });
+        // Delete CustomerTransaction (DR) — leaves no accounting trace
+        if (existing.customerTxId) {
+          await tx.customerTransaction.delete({ where: { id: existing.customerTxId } });
+        }
+
+        // Delete journal entry + its lines (lines cascade via onDelete: Cascade)
+        if (existing.journalEntryId) {
+          await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
+        }
+
+        // Delete COGS journal entry + its lines
+        if (existing.cogsJournalEntryId) {
+          await tx.journalEntry.delete({ where: { id: existing.cogsJournalEntryId } });
+        }
       }
 
+      // Mark invoice cancelled and clear accounting references
       await tx.salesInvoice.update({
         where: { id },
-        data: { status: "CANCELLED" },
+        data: {
+          status: "CANCELLED",
+          journalEntryId: null,
+          cogsJournalEntryId: null,
+          customerTxId: null,
+        },
       });
 
       await this.audit.write({
@@ -673,8 +679,8 @@ export class SalesInvoicesController {
         entityType: "sales_invoice",
         entityId: id,
         afterSnapshot: { status: "CANCELLED", invoiceNumber, wasConfirmed: existing.status === "CONFIRMED" },
-        summaryAr: `${user.name} ألغى فاتورة المبيعات رقم ${invoiceNumber}`,
-        summaryEn: `${user.name} cancelled sales invoice ${invoiceNumber}`,
+        summaryAr: `${user.name} ألغى فاتورة المبيعات رقم ${invoiceNumber} وتم حذف القيود المحاسبية`,
+        summaryEn: `${user.name} cancelled sales invoice ${invoiceNumber} and deleted all accounting entries`,
       });
 
       return { success: true };

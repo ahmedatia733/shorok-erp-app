@@ -33,15 +33,10 @@ function BalanceCell({ v }: { v: string }) {
 }
 
 export default function StatementPage() {
-  // Pre-select account if accountId is in URL params (e.g., from confirm modal links)
-  const initAccountId =
-    typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("accountId") ?? ""
-      : "";
-  const [entityType, setEntityType] = useState<EntityType>(initAccountId ? "account" : "supplier");
+  const [entityType, setEntityType] = useState<EntityType>("supplier");
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
-  const [selectedId, setSelectedId] = useState(initAccountId);
+  const [selectedId, setSelectedId] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -67,21 +62,28 @@ export default function StatementPage() {
     })();
   }, []);
 
-  // Auto-load when pre-filled from URL param
+  // Read URL params client-side after hydration and auto-load
   useEffect(() => {
-    if (initAccountId) void load();
+    const accountId = new URLSearchParams(window.location.search).get("accountId") ?? "";
+    if (accountId) {
+      setEntityType("account");
+      setSelectedId(accountId);
+      void load(accountId, "account");
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initAccountId]);
+  }, []);
 
-  async function load() {
-    if (!selectedId) return;
+  async function load(idOverride?: string, typeOverride?: EntityType) {
+    const id = idOverride ?? selectedId;
+    const type = typeOverride ?? entityType;
+    if (!id) return;
     setLoading(true);
     setError(null);
     try {
-      if (entityType === "supplier") {
-        setData(await getSupplierStatement(selectedId, from || undefined, to || undefined));
+      if (type === "supplier") {
+        setData(await getSupplierStatement(id, from || undefined, to || undefined));
       } else {
-        setData(await getAccountStatement(selectedId, from || undefined, to || undefined));
+        setData(await getAccountStatement(id, from || undefined, to || undefined));
       }
     } catch {
       setError("حدث خطأ أثناء تحميل كشف الحساب");
@@ -198,7 +200,7 @@ export default function StatementPage() {
           </div>
 
           <div className="flex items-end">
-            <Button onClick={() => void load()} disabled={!selectedId || loading} className="w-full">
+            <Button onClick={() => void load(undefined, undefined)} disabled={!selectedId || loading} className="w-full">
               {loading ? "جار التحميل..." : "عرض"}
             </Button>
           </div>
