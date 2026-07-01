@@ -50,7 +50,13 @@ export default function CustomerStatementPage() {
 
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+
+  // Pre-select customer if customerId is in URL params
+  const initCustomerId =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("customerId") ?? ""
+      : "";
+  const [selectedId, setSelectedId] = useState(initCustomerId);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -79,7 +85,10 @@ export default function CustomerStatementPage() {
       setCustomers(c);
       setAccounts(a);
       if (a.length > 0 && a[0]) setTxPaymentAccountId(a[0].id);
+      // Auto-load if customerId was in URL params
+      if (initCustomerId) await load(initCustomerId);
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function load(idOverride?: string) {

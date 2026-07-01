@@ -157,6 +157,87 @@ interface ConfirmModalProps {
   locale: AppLocale;
 }
 
+/** Smart keyword-based auto-selector helpers */
+function autoSelect(accounts: AccountRow[], ...keywords: string[]): string {
+  const kws = keywords.map((k) => k.toLowerCase());
+  const match = accounts.find((a) =>
+    kws.some((k) => a.nameAr.toLowerCase().includes(k) || (a.nameEn ?? "").toLowerCase().includes(k)),
+  );
+  return match?.id ?? "";
+}
+
+function AccountLink({ locale, accountId, label }: { locale: AppLocale; accountId: string; label?: string }) {
+  if (!accountId) return null;
+  return (
+    <a
+      href={`/${locale}/accounting/statement?accountId=${accountId}`}
+      target="_blank"
+      rel="noreferrer"
+      className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+    >
+      {label ?? "عرض كشف الحساب"} ↗
+    </a>
+  );
+}
+
+function AccountSelector({
+  label,
+  hint,
+  amountLabel,
+  value,
+  onChange,
+  primary,
+  fallback,
+  locale,
+  required,
+}: {
+  label: string;
+  hint: string;
+  amountLabel: string;
+  value: string;
+  onChange: (id: string) => void;
+  primary: AccountRow[];
+  fallback: AccountRow[];
+  locale: AppLocale;
+  required?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-border p-3 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-medium">
+            {label}
+            {required && <span className="text-red-500 ms-1">*</span>}
+          </div>
+          <div className="text-xs text-textSecondary">{hint} — <strong>{amountLabel}</strong></div>
+        </div>
+        <AccountLink locale={locale} accountId={value} />
+      </div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background"
+      >
+        <option value="">— اختر الحساب —</option>
+        {primary.length > 0 && (
+          <optgroup label="الحسابات المقترحة">
+            {primary.map((a) => (
+              <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+            ))}
+          </optgroup>
+        )}
+        {fallback.length > 0 && (
+          <optgroup label="جميع الحسابات">
+            {fallback.map((a) => (
+              <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+    </div>
+  );
+}
+
 function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: ConfirmModalProps) {
   const [arAccountId, setArAccountId] = useState("");
   const [revenueAccountId, setRevenueAccountId] = useState("");
@@ -168,15 +249,29 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const grandTotal = parseFloat(invoice.grandTotal);
-  const subtotal = parseFloat(invoice.subtotal);
-  const taxAmount = parseFloat(invoice.taxAmount);
-  const totalCost = parseFloat(invoice.totalCost);
+  // ── Auto-select accounts on mount ──────────────────────────────────────────
+  useEffect(() => {
+    const assetAccs   = leafAccounts.filter((a) => a.category === "ASSET");
+    const revenueAccs = leafAccounts.filter((a) => a.category === "REVENUE");
+    const cogAccs     = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
 
-  const arAccount = leafAccounts.find((a) => a.id === arAccountId);
-  const revenueAccount = leafAccounts.find((a) => a.id === revenueAccountId);
-  const taxAccount = leafAccounts.find((a) => a.id === taxAccountId);
-  const cogsAccount = leafAccounts.find((a) => a.id === cogsAccountId);
+    setArAccountId(autoSelect(assetAccs,   "ذمم", "مدينين", "receivable", "ar"));
+    setRevenueAccountId(autoSelect(revenueAccs, "مبيعات", "إيرادات", "revenue", "sales"));
+    setTaxAccountId(autoSelect(leafAccounts, "ضريبة", "ضرائب", "vat", "tax"));
+    setCogsAccountId(autoSelect(cogAccs,   "تكلفة", "cogs", "cost of sales"));
+    setInventoryAccountId(autoSelect(assetAccs, "مخزون", "بضاعة", "inventory", "stock"));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const grandTotal = parseFloat(invoice.grandTotal);
+  const subtotal   = parseFloat(invoice.subtotal);
+  const taxAmount  = parseFloat(invoice.taxAmount);
+  const totalCost  = parseFloat(invoice.totalCost);
+
+  const arAccount        = leafAccounts.find((a) => a.id === arAccountId);
+  const revenueAccount   = leafAccounts.find((a) => a.id === revenueAccountId);
+  const taxAccount       = leafAccounts.find((a) => a.id === taxAccountId);
+  const cogsAccount      = leafAccounts.find((a) => a.id === cogsAccountId);
   const inventoryAccount = leafAccounts.find((a) => a.id === inventoryAccountId);
 
   const hasTax = taxAmount > 0;
@@ -207,230 +302,212 @@ function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: C
     }
   }
 
-  const assetAccounts = leafAccounts.filter((a) => a.category === "ASSET");
+  const assetAccounts   = leafAccounts.filter((a) => a.category === "ASSET");
   const revenueAccounts = leafAccounts.filter((a) => a.category === "REVENUE");
-  const liabilityAccounts = leafAccounts.filter((a) => a.category === "LIABILITY");
-  const cogsAccounts = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
+  const cogsAccounts    = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
+
+  // Smart-filtered primary lists for each field
+  const arPrimary      = assetAccounts.filter((a) => /ذمم|مدينين|receivable|ar/i.test(a.nameAr + a.nameEn));
+  const revPrimary     = revenueAccounts.filter((a) => /مبيعات|إيراد|revenue|sales/i.test(a.nameAr + a.nameEn));
+  const taxPrimary     = leafAccounts.filter((a) => /ضريبة|ضرائب|vat|tax/i.test(a.nameAr + (a.nameEn ?? "")));
+  const cogsPrimary    = cogsAccounts.filter((a) => /تكلفة|cogs|cost/i.test(a.nameAr + (a.nameEn ?? "")));
+  const invPrimary     = assetAccounts.filter((a) => /مخزون|بضاعة|inventory|stock/i.test(a.nameAr + (a.nameEn ?? "")));
 
   return (
     <Modal open={true} onClose={onClose} className="max-w-2xl w-full">
-      <div className="p-6 space-y-5" dir="rtl">
+      <div className="p-6 space-y-5 max-h-[90vh] overflow-y-auto" dir="rtl">
         <h2 className="text-lg font-bold">
           تأكيد الفاتورة — SI-{invoice.invoiceNumber}
         </h2>
 
-        {/* Summary */}
+        {/* ── Customer + Invoice summary ────────────────────────────────── */}
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="rounded bg-gray-50 p-3">
-            <div className="text-xs text-gray-500">العميل</div>
-            <div className="font-medium">{invoice.customer?.code} — {invoice.customer?.nameAr}</div>
-          </div>
-          <div className="rounded bg-gray-50 p-3">
-            <div className="text-xs text-gray-500">الإجمالي</div>
-            <div className="font-bold text-green-700">{formatCurrency(invoice.grandTotal, locale)}</div>
-          </div>
-          {totalCost > 0 && (
-            <>
-              <div className="rounded bg-gray-50 p-3">
-                <div className="text-xs text-gray-500">التكلفة</div>
-                <div className="font-medium">{formatCurrency(invoice.totalCost, locale)}</div>
-              </div>
-              <div className="rounded bg-gray-50 p-3">
-                <div className="text-xs text-gray-500">صافي الربح (بدون ضريبة)</div>
-                <div className={"font-bold " + (subtotal - totalCost >= 0 ? "text-green-700" : "text-red-600")}>
-                  {formatCurrency(subtotal - totalCost, locale)}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Section 1 — Journal Entry 1 */}
-        <div className="space-y-3">
-          <div className="font-semibold text-sm border-b pb-1">الربط المحاسبي — القيد الأول (إيرادات وذمم)</div>
-
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="postJe"
-              checked={postJournalEntry}
-              onChange={(e) => setPostJournalEntry(e.target.checked)}
-              className="w-4 h-4"
-            />
-            <label htmlFor="postJe" className="text-sm">تسجيل قيد محاسبي</label>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">
-                حساب المدينين/العملاء (مدين) — مطلوب
-              </label>
-              <p className="text-xs text-gray-400 mb-1">يُقيَّد مدينًا بالإجمالي الكامل {formatCurrency(grandTotal, locale)}</p>
-              <select
-                value={arAccountId}
-                onChange={(e) => setArAccountId(e.target.value)}
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-              >
-                <option value="">— اختر الحساب —</option>
-                {assetAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                ))}
-                {leafAccounts
-                  .filter((a) => a.category !== "ASSET")
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                  ))}
-              </select>
+          {/* Customer card — links to their statement */}
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-1 col-span-2 sm:col-span-1">
+            <div className="text-xs text-blue-500 font-medium">العميل</div>
+            <div className="font-bold text-blue-800">
+              {invoice.customer?.code} — {invoice.customer?.nameAr}
             </div>
+            <a
+              href={`/${locale}/accounting/customers?customerId=${invoice.customer?.id ?? ""}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
+            >
+              عرض كشف حساب العميل ↗
+            </a>
+          </div>
 
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">
-                حساب إيرادات المبيعات (دائن) — مطلوب
-              </label>
-              <p className="text-xs text-gray-400 mb-1">يُقيَّد دائنًا بصافي المبيعات {formatCurrency(subtotal, locale)}</p>
-              <select
-                value={revenueAccountId}
-                onChange={(e) => setRevenueAccountId(e.target.value)}
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-              >
-                <option value="">— اختر الحساب —</option>
-                {revenueAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                ))}
-                {leafAccounts
-                  .filter((a) => a.category !== "REVENUE")
-                  .map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                  ))}
-              </select>
+          {/* Amounts summary */}
+          <div className="rounded-lg border border-border bg-surface p-3 space-y-1 col-span-2 sm:col-span-1">
+            <div className="flex justify-between text-xs text-textSecondary">
+              <span>صافي المبيعات</span>
+              <span dir="ltr">{formatCurrency(subtotal, locale)}</span>
             </div>
-
             {hasTax && (
-              <div>
-                <label className="block text-xs text-gray-600 mb-1">
-                  حساب الضريبة المستحقة (دائن) — {postJournalEntry ? "مطلوب" : "اختياري"}
-                </label>
-                <p className="text-xs text-gray-400 mb-1">ضريبة القيمة المضافة {formatCurrency(taxAmount, locale)}</p>
-                <select
-                  value={taxAccountId}
-                  onChange={(e) => setTaxAccountId(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                >
-                  <option value="">— اختر الحساب —</option>
-                  {liabilityAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                  ))}
-                  {leafAccounts
-                    .filter((a) => a.category !== "LIABILITY")
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                    ))}
-                </select>
+              <div className="flex justify-between text-xs text-textSecondary">
+                <span>ضريبة القيمة المضافة</span>
+                <span dir="ltr">{formatCurrency(taxAmount, locale)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm font-bold text-green-700 border-t pt-1 mt-1">
+              <span>الإجمالي المستحق</span>
+              <span dir="ltr">{formatCurrency(grandTotal, locale)}</span>
+            </div>
+            {totalCost > 0 && (
+              <div className={
+                "flex justify-between text-xs font-semibold " +
+                (subtotal - totalCost >= 0 ? "text-green-600" : "text-red-600")
+              }>
+                <span>صافي الربح</span>
+                <span dir="ltr">{formatCurrency(subtotal - totalCost, locale)}</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Section 2 — COGS */}
+        {/* ── Journal Entry toggle ──────────────────────────────────────── */}
+        <div className="flex items-center gap-3 rounded-lg border border-border p-3">
+          <input
+            type="checkbox"
+            id="postJe"
+            checked={postJournalEntry}
+            onChange={(e) => setPostJournalEntry(e.target.checked)}
+            className="w-4 h-4 accent-primary"
+          />
+          <div>
+            <label htmlFor="postJe" className="text-sm font-medium cursor-pointer">
+              تسجيل قيد محاسبي في دفتر اليومية
+            </label>
+            <p className="text-xs text-textSecondary">
+              يُنشئ قيداً مزدوجاً Dr ذمم / Cr إيرادات {hasTax ? "/ Cr ضريبة" : ""}
+            </p>
+          </div>
+        </div>
+
+        {/* ── Section 1: AR account ─────────────────────────────────────── */}
+        <AccountSelector
+          label="حساب الذمم المدينة / العملاء"
+          hint="مدين — يُقيَّد بالإجمالي الكامل"
+          amountLabel={formatCurrency(grandTotal, locale)}
+          value={arAccountId}
+          onChange={setArAccountId}
+          primary={arPrimary.length > 0 ? arPrimary : assetAccounts}
+          fallback={arPrimary.length > 0 ? assetAccounts.filter((a) => !arPrimary.includes(a)) : []}
+          locale={locale}
+          required
+        />
+
+        {/* ── Section 2: Revenue account ────────────────────────────────── */}
+        <AccountSelector
+          label="حساب إيرادات المبيعات"
+          hint="دائن — يُقيَّد بصافي المبيعات"
+          amountLabel={formatCurrency(subtotal, locale)}
+          value={revenueAccountId}
+          onChange={setRevenueAccountId}
+          primary={revPrimary.length > 0 ? revPrimary : revenueAccounts}
+          fallback={revPrimary.length > 0 ? revenueAccounts.filter((a) => !revPrimary.includes(a)) : []}
+          locale={locale}
+          required
+        />
+
+        {/* ── Section 3: Tax account ────────────────────────────────────── */}
+        {hasTax && (
+          <AccountSelector
+            label="حساب ضريبة القيمة المضافة"
+            hint={`دائن — ${postJournalEntry ? "مطلوب" : "اختياري"} — ضريبة مخرجات على المبيعات`}
+            amountLabel={formatCurrency(taxAmount, locale)}
+            value={taxAccountId}
+            onChange={setTaxAccountId}
+            primary={taxPrimary}
+            fallback={leafAccounts.filter((a) => !taxPrimary.includes(a))}
+            locale={locale}
+            required={postJournalEntry}
+          />
+        )}
+
+        {/* ── Section 4: COGS ───────────────────────────────────────────── */}
         {totalCost > 0 && (
           <div className="space-y-3 border-t pt-3">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 rounded-lg border border-border p-3">
               <input
                 type="checkbox"
                 id="postCogs"
                 checked={postCogs}
                 onChange={(e) => setPostCogs(e.target.checked)}
-                className="w-4 h-4"
+                className="w-4 h-4 accent-primary"
               />
-              <label htmlFor="postCogs" className="text-sm font-medium">
-                تسجيل تكلفة البضاعة المباعة (COGS)
-              </label>
+              <div>
+                <label htmlFor="postCogs" className="text-sm font-medium cursor-pointer">
+                  تسجيل تكلفة البضاعة المباعة (COGS)
+                </label>
+                <p className="text-xs text-textSecondary">
+                  Dr تكلفة / Cr مخزون — {formatCurrency(totalCost, locale)}
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-gray-400 me-7">
-              ينشئ قيد Dr تكلفة / Cr مخزون بمبلغ {formatCurrency(totalCost, locale)}
-            </p>
 
             {postCogs && (
-              <div className="space-y-3 me-7">
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">
-                    حساب تكلفة البضاعة المباعة (مدين)
-                  </label>
-                  <select
-                    value={cogsAccountId}
-                    onChange={(e) => setCogsAccountId(e.target.value)}
-                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                  >
-                    <option value="">— اختر الحساب —</option>
-                    {cogsAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                    ))}
-                    {leafAccounts
-                      .filter((a) => a.category !== "COST_OF_SALES")
-                      .map((a) => (
-                        <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                      ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">
-                    حساب المخزون / البضاعة (دائن)
-                  </label>
-                  <select
-                    value={inventoryAccountId}
-                    onChange={(e) => setInventoryAccountId(e.target.value)}
-                    className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                  >
-                    <option value="">— اختر الحساب —</option>
-                    {assetAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                    ))}
-                    {leafAccounts
-                      .filter((a) => a.category !== "ASSET")
-                      .map((a) => (
-                        <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-                      ))}
-                  </select>
-                </div>
+              <div className="space-y-3">
+                <AccountSelector
+                  label="حساب تكلفة البضاعة المباعة"
+                  hint="مدين"
+                  amountLabel={formatCurrency(totalCost, locale)}
+                  value={cogsAccountId}
+                  onChange={setCogsAccountId}
+                  primary={cogsPrimary.length > 0 ? cogsPrimary : cogsAccounts}
+                  fallback={cogsAccounts.filter((a) => !cogsPrimary.includes(a))}
+                  locale={locale}
+                />
+                <AccountSelector
+                  label="حساب المخزون / البضاعة"
+                  hint="دائن"
+                  amountLabel={formatCurrency(totalCost, locale)}
+                  value={inventoryAccountId}
+                  onChange={setInventoryAccountId}
+                  primary={invPrimary.length > 0 ? invPrimary : assetAccounts}
+                  fallback={assetAccounts.filter((a) => !invPrimary.includes(a))}
+                  locale={locale}
+                />
               </div>
             )}
           </div>
         )}
 
-        {/* Journal Entry Preview */}
-        <div className="rounded bg-gray-50 p-3 text-xs space-y-2 font-mono">
-          <div className="font-bold text-gray-600 mb-1">معاينة القيد 1 — الإيرادات والذمم</div>
+        {/* ── Journal Entry Preview ─────────────────────────────────────── */}
+        <div className="rounded-lg bg-gray-950 text-gray-100 p-4 text-xs space-y-2 font-mono">
+          <div className="text-gray-400 font-bold mb-2">◈ معاينة القيد المحاسبي</div>
           <div className="flex justify-between">
-            <span>Dr  {arAccount?.nameAr ?? "—"}</span>
+            <span className="text-green-400">Dr  {arAccount?.nameAr ?? "— اختر الحساب —"}</span>
             <span>{formatCurrency(grandTotal, locale)}</span>
           </div>
-          <div className="flex justify-between text-gray-500">
-            <span>Cr  {revenueAccount?.nameAr ?? "—"}</span>
+          <div className="flex justify-between text-gray-400">
+            <span>Cr  {revenueAccount?.nameAr ?? "— اختر الحساب —"}</span>
             <span>{formatCurrency(subtotal, locale)}</span>
           </div>
           {hasTax && (
-            <div className="flex justify-between text-gray-500">
-              <span>Cr  {taxAccount?.nameAr ?? "—"}</span>
+            <div className="flex justify-between text-gray-400">
+              <span>Cr  {taxAccount?.nameAr ?? "— اختر الحساب —"}</span>
               <span>{formatCurrency(taxAmount, locale)}</span>
             </div>
           )}
           {postCogs && totalCost > 0 && (
             <>
-              <div className="border-t mt-2 pt-2 font-bold text-gray-600">القيد 2 — تكلفة البضاعة</div>
-              <div className="flex justify-between">
-                <span>Dr  {cogsAccount?.nameAr ?? "—"}</span>
+              <div className="border-t border-gray-700 mt-2 pt-2 text-gray-400">القيد 2 — تكلفة البضاعة</div>
+              <div className="flex justify-between text-green-400">
+                <span>Dr  {cogsAccount?.nameAr ?? "— اختر —"}</span>
                 <span>{formatCurrency(totalCost, locale)}</span>
               </div>
-              <div className="flex justify-between text-gray-500">
-                <span>Cr  {inventoryAccount?.nameAr ?? "—"}</span>
+              <div className="flex justify-between text-gray-400">
+                <span>Cr  {inventoryAccount?.nameAr ?? "— اختر —"}</span>
                 <span>{formatCurrency(totalCost, locale)}</span>
               </div>
             </>
           )}
         </div>
 
-        <p className="text-xs text-blue-600">
-          سيتم إضافة حركة مدين تلقائياً في كشف حساب العميل
+        <p className="text-xs text-blue-600 bg-blue-50 rounded p-2">
+          ✓ سيتم تلقائياً تسجيل حركة مدين في كشف حساب العميل بمبلغ {formatCurrency(grandTotal, locale)}
         </p>
 
         {error && <Alert variant="error">{error}</Alert>}

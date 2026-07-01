@@ -33,10 +33,15 @@ function BalanceCell({ v }: { v: string }) {
 }
 
 export default function StatementPage() {
-  const [entityType, setEntityType] = useState<EntityType>("supplier");
+  // Pre-select account if accountId is in URL params (e.g., from confirm modal links)
+  const initAccountId =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("accountId") ?? ""
+      : "";
+  const [entityType, setEntityType] = useState<EntityType>(initAccountId ? "account" : "supplier");
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(initAccountId);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -61,6 +66,12 @@ export default function StatementPage() {
       if (a.length > 0 && a[0]) setPayAccountId(a[0].id);
     })();
   }, []);
+
+  // Auto-load when pre-filled from URL param
+  useEffect(() => {
+    if (initAccountId) void load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initAccountId]);
 
   async function load() {
     if (!selectedId) return;
