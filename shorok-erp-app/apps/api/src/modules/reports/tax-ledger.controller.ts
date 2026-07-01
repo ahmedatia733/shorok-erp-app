@@ -136,7 +136,7 @@ export class TaxLedgerController {
     // runningBalance: positive = net debit, negative = net credit
     let running = openingDebit.minus(openingCredit);
 
-    const entries = periodLines.map((line) => {
+    const rawEntries = periodLines.map((line) => {
       const dr = new Decimal(line.debit.toString());
       const cr = new Decimal(line.credit.toString());
       running = running.plus(dr).minus(cr);
@@ -160,6 +160,77 @@ export class TaxLedgerController {
         credit:        cr.gt(0) ? cr.toFixed(2) : "",
         runningBalance: running.toFixed(2),
       };
+    });
+
+    // ── Enrich with invoice details ───────────────────────────────────────
+    const salesIds = [...new Set(
+      rawEntries.filter(e => e.referenceType === "sales_invoice" && e.referenceId).map(e => e.referenceId!),
+    )];
+    const purchaseIds = [...new Set(
+      rawEntries.filter(e => e.referenceType === "purchase_invoice" && e.referenceId).map(e => e.referenceId!),
+    )];
+
+    const [salesMap, purchaseMap] = await Promise.all([
+      salesIds.length > 0
+        ? this.prisma.salesInvoice.findMany({
+            where: { id: { in: salesIds } },
+            include: {
+              customer: { select: { id: true, code: true, nameAr: true } },
+              branch:   { select: { id: true, nameAr: true } },
+            },
+          }).then(invs => new Map(invs.map(i => [i.id, i] as [string, typeof i])))
+        : Promise.resolve(new Map<string, any>()),
+      purchaseIds.length > 0
+        ? this.prisma.purchaseInvoice.findMany({
+            where: { id: { in: purchaseIds } },
+            include: {
+              supplier: { select: { id: true, nameAr: true } },
+              branch:   { select: { id: true, nameAr: true } },
+            },
+          }).then(invs => new Map(invs.map(i => [i.id, i] as [string, typeof i])))
+        : Promise.resolve(new Map<string, any>()),
+    ]);
+
+    const entries = rawEntries.map(e => {
+      let invoiceDetail: Record<string, any> | null = null;
+
+      if (e.referenceType === "sales_invoice" && e.referenceId && salesMap.has(e.referenceId)) {
+        const inv = salesMap.get(e.referenceId)!;
+        invoiceDetail = {
+          type:          "sales",
+          invoiceNumber: inv.invoiceNumber.toString(),
+          invoiceDate:   inv.invoiceDate.toISOString().slice(0, 10),
+          entityLabel:   "العميل",
+          entityNameAr:  inv.customer?.nameAr   ?? null,
+          entityCode:    inv.customer?.code      ?? null,
+          branchNameAr:  inv.branch?.nameAr      ?? null,
+          subtotal:      inv.subtotal.toFixed(2),
+          taxRate:       inv.taxRate.toFixed(2),
+          taxAmount:     inv.taxAmount.toFixed(2),
+          grandTotal:    inv.grandTotal.toFixed(2),
+          totalCost:     inv.totalCost.toFixed(2),
+          notes:         inv.notes ?? null,
+        };
+      } else if (e.referenceType === "purchase_invoice" && e.referenceId && purchaseMap.has(e.referenceId)) {
+        const inv = purchaseMap.get(e.referenceId)!;
+        invoiceDetail = {
+          type:          "purchase",
+          invoiceNumber: inv.invoiceNumber,
+          invoiceDate:   inv.invoiceDate.toISOString().slice(0, 10),
+          entityLabel:   "المورد",
+          entityNameAr:  inv.supplier?.nameAr ?? null,
+          entityCode:    null,
+          branchNameAr:  inv.branch?.nameAr   ?? null,
+          subtotal:      inv.subtotal.toFixed(2),
+          taxRate:       null,
+          taxAmount:     inv.taxAmount.toFixed(2),
+          grandTotal:    inv.grandTotal.toFixed(2),
+          totalCost:     null,
+          notes:         inv.notes ?? null,
+        };
+      }
+
+      return { ...e, invoiceDetail };
     });
 
     // ── Period totals ─────────────────────────────────────────────────────

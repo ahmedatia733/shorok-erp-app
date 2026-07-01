@@ -9,6 +9,22 @@ export interface TaxAccount {
 
 export { listAccounts, type AccountRow };
 
+export interface TaxInvoiceDetail {
+  type: "sales" | "purchase";
+  invoiceNumber: string;
+  invoiceDate: string;
+  entityLabel: string;
+  entityNameAr: string | null;
+  entityCode: string | null;
+  branchNameAr: string | null;
+  subtotal: string;
+  taxRate: string | null;
+  taxAmount: string;
+  grandTotal: string;
+  totalCost: string | null;
+  notes: string | null;
+}
+
 export interface TaxEntry {
   id: string;
   entryId: string;
@@ -23,9 +39,10 @@ export interface TaxEntry {
   accountId: string;
   accountCode: string;
   accountNameAr: string;
-  debit: string;   // empty string if zero
-  credit: string;  // empty string if zero
+  debit: string;
+  credit: string;
   runningBalance: string;
+  invoiceDetail: TaxInvoiceDetail | null;
 }
 
 export interface TaxBalance {

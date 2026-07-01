@@ -1,14 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale } from "next-intl";
-import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
 import { Button } from "../../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
-import { formatDate, formatCurrency } from "../../../../../lib/format";
 import {
   listTaxAccounts,
   getTaxLedger,
@@ -180,28 +177,133 @@ function SplitPanel({
   );
 }
 
+// ─── Invoice detail card ──────────────────────────────────────────────────────
+
+function InvoiceDetailCard({ detail }: { detail: NonNullable<TaxEntry["invoiceDetail"]> }) {
+  const isSales = detail.type === "sales";
+  const accent  = isSales ? "green" : "blue";
+
+  return (
+    <div className={`mx-4 mb-3 rounded-lg border ${isSales ? "border-green-200 bg-green-50" : "border-blue-200 bg-blue-50"} overflow-hidden text-xs`}>
+      {/* Header */}
+      <div className={`flex items-center justify-between px-4 py-2 ${isSales ? "bg-green-100" : "bg-blue-100"}`}>
+        <span className={`font-bold text-sm ${isSales ? "text-green-800" : "text-blue-800"}`}>
+          {isSales ? "فاتورة مبيعات" : "فاتورة مشتريات"} #{detail.invoiceNumber}
+        </span>
+        <span className="text-textSecondary">{detail.invoiceDate}</span>
+      </div>
+
+      {/* Entity + branch */}
+      <div className="grid grid-cols-2 gap-px bg-border">
+        <div className="bg-white px-4 py-2.5 space-y-0.5">
+          <div className="text-textSecondary">{detail.entityLabel}</div>
+          <div className={`font-semibold ${isSales ? "text-green-800" : "text-blue-800"}`}>
+            {detail.entityNameAr ?? "—"}
+            {detail.entityCode && (
+              <span className="ms-1.5 text-xs font-normal text-textSecondary">({detail.entityCode})</span>
+            )}
+          </div>
+        </div>
+        <div className="bg-white px-4 py-2.5 space-y-0.5">
+          <div className="text-textSecondary">الفرع</div>
+          <div className="font-semibold text-foreground">{detail.branchNameAr ?? "—"}</div>
+        </div>
+      </div>
+
+      {/* Amounts row */}
+      <div className={`grid gap-px bg-border ${detail.totalCost ? "grid-cols-5" : "grid-cols-4"}`}>
+        <div className="bg-white px-4 py-2.5 space-y-0.5">
+          <div className="text-textSecondary">المجموع (قبل ض)</div>
+          <div className="font-semibold text-foreground" dir="ltr">{fmt(detail.subtotal)}</div>
+        </div>
+        {detail.taxRate && (
+          <div className="bg-white px-4 py-2.5 space-y-0.5">
+            <div className="text-textSecondary">نسبة الضريبة</div>
+            <div className="font-semibold text-foreground">{parseFloat(detail.taxRate).toFixed(0)}%</div>
+          </div>
+        )}
+        {!detail.taxRate && <div className="bg-white px-4 py-2.5" />}
+        <div className={`bg-white px-4 py-2.5 space-y-0.5 ${isSales ? "border-s-2 border-orange-200" : "border-s-2 border-blue-200"}`}>
+          <div className={`${isSales ? "text-orange-600" : "text-blue-600"}`}>الضريبة (VAT)</div>
+          <div className={`font-bold ${isSales ? "text-orange-700" : "text-blue-700"}`} dir="ltr">
+            {fmt(detail.taxAmount)}
+          </div>
+        </div>
+        <div className="bg-white px-4 py-2.5 space-y-0.5">
+          <div className="text-textSecondary">الإجمالي النهائي</div>
+          <div className="font-bold text-foreground" dir="ltr">{fmt(detail.grandTotal)}</div>
+        </div>
+        {detail.totalCost && (
+          <div className="bg-white px-4 py-2.5 space-y-0.5">
+            <div className="text-textSecondary">التكلفة</div>
+            <div className="font-semibold text-red-600" dir="ltr">{fmt(detail.totalCost)}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Notes */}
+      {detail.notes && (
+        <div className="bg-white px-4 py-2 text-textSecondary border-t border-border">
+          <span className="font-medium text-foreground">ملاحظات: </span>{detail.notes}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Full ledger ──────────────────────────────────────────────────────────────
 
 function FullLedger({ result }: { result: TaxLedgerResult }) {
-  const locale = useLocale() as AppLocale;
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  function toggle(id: string) {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  // Auto-expand all invoice rows on first render
+  useEffect(() => {
+    const ids = result.entries
+      .filter(e => e.invoiceDetail)
+      .map(e => e.id);
+    setExpandedIds(new Set(ids));
+  }, [result]);
+
+  const COLS = 9; // total columns including expand toggle
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>كشف الحساب الضريبي الكامل</CardTitle>
-        <Button variant="ghost" size="sm" onClick={() => window.print()} className="no-print">
-          طباعة
-        </Button>
+        <div className="flex items-center gap-2 no-print">
+          <button
+            type="button"
+            onClick={() => {
+              const all = result.entries.filter(e => e.invoiceDetail).map(e => e.id);
+              setExpandedIds(prev => prev.size === all.length ? new Set() : new Set(all));
+            }}
+            className="text-xs text-textSecondary hover:text-foreground underline"
+          >
+            {expandedIds.size > 0 ? "طي الكل" : "فتح الكل"}
+          </button>
+          <Button variant="ghost" size="sm" onClick={() => window.print()} className="no-print">
+            طباعة
+          </Button>
+        </div>
       </CardHeader>
       <CardBody className="overflow-x-auto p-0">
         <Table>
           <THead>
             <TR>
+              <TH className="w-8"></TH>
               <TH>التاريخ</TH>
               <TH>رقم القيد</TH>
-              <TH>المرجع</TH>
-              <TH>البيان / الملاحظة</TH>
-              <TH>الحساب</TH>
+              <TH>نوع المستند</TH>
+              <TH>العميل / المورد</TH>
+              <TH>الفرع</TH>
               <TH>مدين (ضريبة مدخلات)</TH>
               <TH>دائن (ضريبة مخرجات)</TH>
               <TH>الرصيد</TH>
@@ -211,10 +313,9 @@ function FullLedger({ result }: { result: TaxLedgerResult }) {
             {/* Opening row */}
             {(parseFloat(result.opening.debit) > 0 || parseFloat(result.opening.credit) > 0) && (
               <TR>
+                <TD />
                 <TD colSpan={5}>
-                  <span className="text-xs font-medium text-textSecondary">
-                    رصيد أول المدة
-                  </span>
+                  <span className="text-xs font-medium text-textSecondary">رصيد أول المدة</span>
                 </TD>
                 <TD className="text-blue-700 font-semibold" dir="ltr">
                   {parseFloat(result.opening.debit) > 0 ? fmt(result.opening.debit) : ""}
@@ -222,55 +323,80 @@ function FullLedger({ result }: { result: TaxLedgerResult }) {
                 <TD className="text-orange-700 font-semibold" dir="ltr">
                   {parseFloat(result.opening.credit) > 0 ? fmt(result.opening.credit) : ""}
                 </TD>
-                <TD dir="ltr">
-                  <BalanceChip value={result.opening.net} />
-                </TD>
+                <TD dir="ltr"><BalanceChip value={result.opening.net} /></TD>
               </TR>
             )}
 
             {result.entries.length === 0 && (
               <TR>
-                <TD colSpan={8}>
+                <TD colSpan={COLS}>
                   <p className="text-center text-textSecondary py-6">لا توجد حركات في هذه الفترة</p>
                 </TD>
               </TR>
             )}
 
-            {result.entries.map((e) => (
-              <TR key={e.id}>
-                <TD className="whitespace-nowrap text-xs">{e.date}</TD>
-                <TD className="font-mono text-xs" dir="ltr">#{e.entryNumber}</TD>
-                <TD>
-                  <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
-                    e.referenceType === "sales_invoice"    ? "bg-green-100 text-green-700" :
-                    e.referenceType === "purchase_invoice" ? "bg-blue-100 text-blue-700" :
-                                                             "bg-gray-100 text-gray-600"
-                  }`}>
-                    {e.referenceLabel}
-                  </span>
-                  {e.reference && (
-                    <span className="ms-1 font-mono text-xs">{e.reference}</span>
+            {result.entries.map((e) => {
+              const isExpanded = expandedIds.has(e.id);
+              const hasDetail  = !!e.invoiceDetail;
+              const inv        = e.invoiceDetail;
+
+              return (
+                <tbody key={e.id}>
+                  {/* Main row */}
+                  <TR
+                    className={hasDetail ? "cursor-pointer hover:bg-surface/60" : ""}
+                    onClick={hasDetail ? () => toggle(e.id) : undefined}
+                  >
+                    {/* Expand toggle */}
+                    <TD className="w-8 text-center">
+                      {hasDetail && (
+                        <span className={`inline-block text-xs transition-transform duration-150 ${isExpanded ? "rotate-90" : ""} text-textSecondary`}>
+                          ▶
+                        </span>
+                      )}
+                    </TD>
+                    <TD className="whitespace-nowrap text-xs">{e.date}</TD>
+                    <TD className="font-mono text-xs" dir="ltr">#{e.entryNumber}</TD>
+                    <TD>
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+                        e.referenceType === "sales_invoice"    ? "bg-green-100 text-green-700" :
+                        e.referenceType === "purchase_invoice" ? "bg-blue-100 text-blue-700" :
+                                                                 "bg-gray-100 text-gray-600"
+                      }`}>
+                        {e.referenceLabel}
+                        {e.reference && <span className="ms-1 font-mono">{e.reference}</span>}
+                      </span>
+                    </TD>
+                    {/* Customer/Supplier name from invoiceDetail */}
+                    <TD className="text-xs font-medium">
+                      {inv?.entityNameAr ?? <span className="text-textSecondary">{e.note || e.description}</span>}
+                    </TD>
+                    <TD className="text-xs text-textSecondary">{inv?.branchNameAr ?? ""}</TD>
+                    <TD className="text-blue-700 font-medium" dir="ltr">
+                      {e.debit ? fmt(e.debit) : ""}
+                    </TD>
+                    <TD className="text-orange-700 font-medium" dir="ltr">
+                      {e.credit ? fmt(e.credit) : ""}
+                    </TD>
+                    <TD dir="ltr"><BalanceChip value={e.runningBalance} /></TD>
+                  </TR>
+
+                  {/* Expanded invoice detail */}
+                  {hasDetail && isExpanded && inv && (
+                    <tr>
+                      <td colSpan={COLS} className="p-0 bg-white">
+                        <InvoiceDetailCard detail={inv} />
+                      </td>
+                    </tr>
                   )}
-                </TD>
-                <TD className="text-xs text-textSecondary max-w-xs">
-                  <div className="truncate">{e.note || e.description}</div>
-                </TD>
-                <TD className="text-xs">{e.accountNameAr}</TD>
-                <TD className="text-blue-700 font-medium" dir="ltr">
-                  {e.debit ? fmt(e.debit) : ""}
-                </TD>
-                <TD className="text-orange-700 font-medium" dir="ltr">
-                  {e.credit ? fmt(e.credit) : ""}
-                </TD>
-                <TD dir="ltr">
-                  <BalanceChip value={e.runningBalance} />
-                </TD>
-              </TR>
-            ))}
+                </tbody>
+              );
+            })}
 
             {/* Period totals */}
             {result.entries.length > 0 && (
               <TR>
+                <TD />
                 <TD colSpan={5}>
                   <span className="text-xs font-bold">إجمالي الفترة</span>
                 </TD>
@@ -286,6 +412,7 @@ function FullLedger({ result }: { result: TaxLedgerResult }) {
 
             {/* Closing balance */}
             <TR>
+              <TD />
               <TD colSpan={5}>
                 <span className="text-xs font-bold">رصيد آخر المدة</span>
               </TD>
@@ -296,10 +423,7 @@ function FullLedger({ result }: { result: TaxLedgerResult }) {
                 {parseFloat(result.closing.credit) > 0 ? fmt(result.closing.credit) : ""}
               </TD>
               <TD dir="ltr">
-                <BalanceChip value={
-                  // closing.net is credit - debit (positive = liability); negate for display convention
-                  String(-parseFloat(result.closing.net))
-                } />
+                <BalanceChip value={String(-parseFloat(result.closing.net))} />
               </TD>
             </TR>
           </TBody>
