@@ -414,39 +414,49 @@ export default function JournalPage() {
                         <div className="px-4 py-3">
                           <table className="w-full text-sm border border-border rounded overflow-hidden">
                             <thead>
-                              <tr className="bg-surface text-right">
-                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary border-b border-border">الحساب</th>
-                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary border-b border-border text-end">مدين</th>
-                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary border-b border-border text-end">دائن</th>
-                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary border-b border-border">بيان السطر</th>
+                              <tr className="bg-surface border-b-2 border-border text-right">
+                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary w-8">#</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary">الحساب</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary">البيان</th>
+                                <th className="px-3 py-2 text-xs font-bold text-red-700 text-end w-32">مدين</th>
+                                <th className="px-3 py-2 text-xs font-bold text-green-700 text-end w-32">دائن</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {entry.lines.map((line) => (
-                                <tr key={line.id} className="border-b border-border last:border-0">
-                                  <td className="px-3 py-2">
-                                    <span className="font-mono text-xs text-textSecondary me-2">{line.accountCode}</span>
-                                    {locale === "ar" ? line.accountNameAr : line.accountNameEn}
-                                  </td>
-                                  <td className="px-3 py-2 text-end tabular-nums font-medium text-red-700">
-                                    {parseFloat(line.debit) > 0 ? formatCurrency(line.debit, locale) : "—"}
-                                  </td>
-                                  <td className="px-3 py-2 text-end tabular-nums font-medium text-green-700">
-                                    {parseFloat(line.credit) > 0 ? formatCurrency(line.credit, locale) : "—"}
-                                  </td>
-                                  <td className="px-3 py-2 text-textSecondary text-xs">{line.note ?? "—"}</td>
-                                </tr>
-                              ))}
+                              {entry.lines.map((line, li) => {
+                                const isDebit  = parseFloat(line.debit)  > 0;
+                                const isCredit = parseFloat(line.credit) > 0;
+                                return (
+                                  <tr key={line.id} className="border-b border-border last:border-0 hover:bg-surface/60">
+                                    <td className="px-3 py-2 text-xs text-textSecondary text-center select-none">
+                                      {li + 1}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <span className="font-mono text-xs text-textSecondary me-2">{line.accountCode}</span>
+                                      {locale === "ar" ? line.accountNameAr : line.accountNameEn}
+                                    </td>
+                                    <td className="px-3 py-2 text-textSecondary text-xs">{line.note ?? "—"}</td>
+                                    <td className={"px-3 py-2 text-end tabular-nums font-medium text-sm " + (isDebit ? "bg-red-50 text-red-700" : "text-textSecondary")}>
+                                      {isDebit ? formatCurrency(line.debit, locale) : ""}
+                                    </td>
+                                    <td className={"px-3 py-2 text-end tabular-nums font-medium text-sm " + (isCredit ? "bg-green-50 text-green-700" : "text-textSecondary")}>
+                                      {isCredit ? formatCurrency(line.credit, locale) : ""}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                               {/* totals row */}
                               <tr className="bg-surface border-t-2 border-border">
-                                <td className="px-3 py-1.5 text-xs font-semibold text-textSecondary">الإجمالي</td>
+                                <td />
+                                <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold text-textSecondary text-end">
+                                  الإجمالي
+                                </td>
                                 <td className="px-3 py-1.5 text-end tabular-nums font-bold text-red-700 text-sm">
                                   {formatCurrency(entry.totalDebit, locale)}
                                 </td>
                                 <td className="px-3 py-1.5 text-end tabular-nums font-bold text-green-700 text-sm">
                                   {formatCurrency(entry.totalDebit, locale)}
                                 </td>
-                                <td />
                               </tr>
                             </tbody>
                           </table>
