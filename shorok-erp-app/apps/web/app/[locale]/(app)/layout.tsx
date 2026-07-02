@@ -104,6 +104,9 @@ export default function ProtectedAppLayout({ children }: { children: React.React
               <NavLink href={`/${locale}/accounting/reports/trial-balance`} label="ميزان المراجعة" />
               <NavLink href={`/${locale}/accounting/reports/balance-sheet`} label="الميزانية العمومية" />
               <NavLink href={`/${locale}/accounting/reports/aging`} label="عمر الديون" />
+              <NavLink href={`/${locale}/accounting/reports/supplier-statement`} label="كشف حساب المورد" />
+              <NavLink href={`/${locale}/accounting/reports/supplier-aging`} label="أعمار الدائنين" />
+              <NavLink href={`/${locale}/accounting/reports/cash-flow`} label="التدفقات النقدية" />
               <NavLink href={`/${locale}/accounting/tax`} label="حساب الضريبة (VAT)" />
             </NavSection>
           )}

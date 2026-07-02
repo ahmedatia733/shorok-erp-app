@@ -57,6 +57,8 @@ export const createFactoryPayment = (body: {
   orderDate: string;
   paidAmount: string;
   notes?: string;
+  debitAccountId?: string;
+  creditAccountId?: string;
 }) => apiCall<FactoryEntryRow>("/factory-ledger/payments", { method: "POST", body });
 
 export const updateFactoryEntry = (

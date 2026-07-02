@@ -6,6 +6,9 @@ import { TrialBalanceController } from "./trial-balance.controller";
 import { BalanceSheetController } from "./balance-sheet.controller";
 import { AgingController } from "./aging.controller";
 import { TaxLedgerController } from "./tax-ledger.controller";
+import { SupplierStatementController } from "./supplier-statement.controller";
+import { SupplierAgingController } from "./supplier-aging.controller";
+import { CashFlowController } from "./cash-flow.controller";
 
 @Module({
   controllers: [
@@ -15,6 +18,9 @@ import { TaxLedgerController } from "./tax-ledger.controller";
     BalanceSheetController,
     AgingController,
     TaxLedgerController,
+    SupplierStatementController,
+    SupplierAgingController,
+    CashFlowController,
   ],
   providers: [DashboardService],
 })

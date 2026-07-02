@@ -129,3 +129,89 @@ export const getAging = (type: "AR" | "AP", asOf?: string) => {
   if (asOf) params.set("asOf", asOf);
   return apiCall<AgingData>(`/reports/aging?${params.toString()}`);
 };
+
+// ─── Supplier Statement ───────────────────────────────────────────────────────
+
+export interface SupplierStatementRow {
+  id: string;
+  date: string;
+  type: "purchase" | "payment" | "other";
+  description: string;
+  totalAmount: string;
+  paidAmount: string;
+  runningBalance: string;
+  journalEntryId: string | null;
+  notes: string | null;
+}
+
+export interface SupplierStatementData {
+  supplier: { id: string; nameAr: string; nameEn: string | null };
+  totalPurchases: string;
+  totalPaid: string;
+  closingBalance: string;
+  rows: SupplierStatementRow[];
+}
+
+export const getSupplierStatement = (supplierId: string, from?: string, to?: string) => {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to)   p.set("to",   to);
+  const qs = p.toString() ? `?${p.toString()}` : "";
+  return apiCall<SupplierStatementData>(`/reports/supplier-statement/${supplierId}${qs}`);
+};
+
+// ─── Supplier Aging ───────────────────────────────────────────────────────────
+
+export interface SupplierAgingRow {
+  supplierId: string;
+  nameAr: string;
+  nameEn: string | null;
+  balance: string;
+  oldestDays: number;
+  agingBucket: string;
+  bucketAmounts: { "0-30": string; "31-60": string; "61-90": string; "90+": string };
+}
+
+export interface SupplierAgingData {
+  asOf: string;
+  grandTotal: string;
+  rows: SupplierAgingRow[];
+}
+
+export const getSupplierAging = (asOf?: string) => {
+  const qs = asOf ? `?asOf=${asOf}` : "";
+  return apiCall<SupplierAgingData>(`/reports/supplier-aging${qs}`);
+};
+
+// ─── Cash Flow ────────────────────────────────────────────────────────────────
+
+export interface CashFlowLine {
+  date: string;
+  description: string;
+  accountNameAr: string;
+  accountCode: string;
+  debit: string;
+  credit: string;
+  net: string;
+  category: "operating" | "investing" | "other";
+}
+
+export interface CashFlowData {
+  from: string;
+  to: string;
+  cashAccounts: Array<{ id: string; code: string; nameAr: string }>;
+  operatingInflow:  string;
+  operatingOutflow: string;
+  netOperating:     string;
+  investingInflow:  string;
+  investingOutflow: string;
+  netInvesting:     string;
+  otherInflow:      string;
+  otherOutflow:     string;
+  netOther:         string;
+  netCashFlow:      string;
+  lines: CashFlowLine[];
+}
+
+export const getCashFlow = (from: string, to: string) =>
+  apiCall<CashFlowData>(`/reports/cash-flow?from=${from}&to=${to}`);

@@ -27,12 +27,14 @@ import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { InventoryEngine } from "../inventory/inventory.engine";
 
 @Controller("sales-invoices")
 export class SalesInvoicesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly inventoryEngine: InventoryEngine,
   ) {}
 
   // ─── helpers ─────────────────────────────────────────────────────────
@@ -231,6 +233,15 @@ export class SalesInvoicesController {
     const grandTotal = subtotal.add(taxAmount);
     const totalCost = lineData.reduce((acc, l) => acc.add(l.lineCost), new Decimal(0));
 
+    // Validate orderId if provided: order must exist and not already have an SI
+    if (body.orderId) {
+      const order = await this.prisma.customerOrder.findUnique({ where: { id: body.orderId } });
+      if (!order) throw new NotFoundError({ orderId: body.orderId });
+      if (order.salesInvoiceId) {
+        throw new ValidationError({ reason: "order_already_has_invoice", orderId: body.orderId });
+      }
+    }
+
     return this.prisma.runInTransaction(async (tx) => {
       const invoice = await tx.salesInvoice.create({
         data: {
@@ -274,6 +285,14 @@ export class SalesInvoicesController {
         },
       });
 
+      // Link originating order → this invoice (one-to-one)
+      if (body.orderId) {
+        await tx.customerOrder.update({
+          where: { id: body.orderId },
+          data: { salesInvoiceId: invoice.id },
+        });
+      }
+
       await this.audit.write({
         tx,
         actorId: user.id,
@@ -286,6 +305,7 @@ export class SalesInvoicesController {
           branchId: body.branchId,
           grandTotal: grandTotal.toFixed(2),
           linesCount: lineData.length,
+          orderId: body.orderId ?? null,
         },
         summaryAr: `${user.name} أنشأ فاتورة مبيعات رقم ${invoice.invoiceNumber} — إجمالي: ${grandTotal.toFixed(2)} ج.م`,
         summaryEn: `${user.name} created sales invoice ${invoice.invoiceNumber} — total: ${grandTotal.toFixed(2)} EGP`,
@@ -582,7 +602,42 @@ export class SalesInvoicesController {
         });
       }
 
-      // 4. Update invoice
+      // 4. Inventory SALE movements — reduce stock for each line
+      if (body.postCogs && body.inventoryAccountId) {
+        const siWithLines = await tx.salesInvoice.findUnique({
+          where: { id },
+          include: {
+            lines: {
+              include: { productVariant: { select: { id: true, sizeMetersPerBoard: true } } },
+            },
+          },
+        });
+        if (siWithLines) {
+          for (const line of siWithLines.lines) {
+            if (!line.productVariant) continue;
+            const sizePerBoard = new Decimal(line.productVariant.sizeMetersPerBoard.toString());
+            // quantity is in meters; convert to boards (negative = out)
+            const metersQty = new Decimal(line.quantity.toString());
+            const boardsDelta = metersQty.div(sizePerBoard).negated();
+            if (!boardsDelta.isZero()) {
+              await this.inventoryEngine.apply({
+                branchId: existing.branchId,
+                productVariantId: line.productVariant.id,
+                movementType: "SALE",
+                boardsDelta: boardsDelta.toFixed(4),
+                reference: { type: "sales_invoice", id: existing.id },
+                actor: user,
+                summaryAr: `صرف من المخزون — فاتورة مبيعات ${invoiceNumber}`,
+                summaryEn: `Stock out — sales invoice ${invoiceNumber}`,
+                humanReadableNote: `فاتورة مبيعات ${invoiceNumber}`,
+                tx,
+              });
+            }
+          }
+        }
+      }
+
+      // 5. Update invoice
       const invoice = await tx.salesInvoice.update({
         where: { id },
         data: {
@@ -658,6 +713,38 @@ export class SalesInvoicesController {
         // Delete COGS journal entry + its lines
         if (existing.cogsJournalEntryId) {
           await tx.journalEntry.delete({ where: { id: existing.cogsJournalEntryId } });
+        }
+
+        // Delete inventory SALE movements (reverse the stock deduction)
+        await tx.inventoryMovement.deleteMany({
+          where: { referenceType: "sales_invoice", referenceId: id },
+        });
+
+        // Restore inventory balance for each movement (re-add the boards)
+        // Since we use InventoryEngine which updates branchInventoryBalance, we need to add back.
+        // Re-query deleted movements quantities: we already deleted them, so restore via engine.
+        // Simpler: update balance directly since we know the lines.
+        const siLines = await tx.salesInvoiceLine.findMany({
+          where: { invoiceId: id },
+          include: { productVariant: { select: { id: true, sizeMetersPerBoard: true } } },
+        });
+        for (const line of siLines) {
+          if (!line.productVariant) continue;
+          const sizePerBoard = new Decimal(line.productVariant.sizeMetersPerBoard.toString());
+          const metersQty = new Decimal(line.quantity.toString());
+          const boardsToRestore = metersQty.div(sizePerBoard);
+          if (boardsToRestore.isZero()) continue;
+          await this.inventoryEngine.apply({
+            branchId: existing.branchId,
+            productVariantId: line.productVariant.id,
+            movementType: "ADJUSTMENT",
+            boardsDelta: boardsToRestore.toFixed(4),
+            reference: { type: "sales_invoice_cancel", id: existing.id },
+            actor: user,
+            summaryAr: `استرجاع مخزون — إلغاء فاتورة ${invoiceNumber}`,
+            summaryEn: `Stock restored — cancel SI ${invoiceNumber}`,
+            tx,
+          });
         }
       }
 

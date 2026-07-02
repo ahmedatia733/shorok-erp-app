@@ -78,12 +78,39 @@ export class CollectionsController {
         });
       }
 
+      // Auto-post GL journal entry if both accounts are provided: Dr Cash / Cr A/R
+      let journalEntryId: string | null = null;
+      if (body.cashAccountId && body.arAccountId) {
+        const je = await tx.journalEntry.create({
+          data: {
+            entryType: "RECEIPT",
+            entryDate: new Date(),
+            description: `تحصيل من ${order.customerName} — طلبية #${id.slice(0, 8)}`,
+            referenceType: "order_collection",
+            referenceId: id,
+            createdBy: user.id,
+            lines: {
+              create: [
+                { accountId: body.cashAccountId, debit: amount.toFixed(2), credit: "0.00",
+                  note: `تحصيل نقدي — ${order.customerName}` },
+                { accountId: body.arAccountId,   debit: "0.00", credit: amount.toFixed(2),
+                  note: `إيصال — ${order.customerName}` },
+              ],
+            },
+          },
+        });
+        journalEntryId = je.id;
+      }
+
       // Insert collection row + recompute order amounts.
       await tx.orderCollection.create({
         data: {
           orderId: id,
           amount: amount.toFixed(2),
-          paidToAccount: body.paidToAccount ?? null,
+          paidToAccount:  body.paidToAccount  ?? null,
+          cashAccountId:  body.cashAccountId  ?? null,
+          arAccountId:    body.arAccountId    ?? null,
+          journalEntryId: journalEntryId,
           createdBy: user.id,
         },
       });

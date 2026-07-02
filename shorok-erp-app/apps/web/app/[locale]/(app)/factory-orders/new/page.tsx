@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AppLocale } from "../../../../../i18n";
@@ -16,6 +16,14 @@ import {
   createFactoryEntry,
   createFactoryPayment,
 } from "../../../../../lib/factory-ledger-client";
+import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+
+function autoSelectId(accounts: AccountRow[], ...kws: string[]): string {
+  const lower = kws.map((k) => k.toLowerCase());
+  return accounts.find(
+    (a) => a.isLeaf && a.active && lower.some((k) => a.nameAr.toLowerCase().includes(k) || (a.nameEn ?? "").toLowerCase().includes(k)),
+  )?.id ?? "";
+}
 
 type Tab = "purchase" | "payment";
 
@@ -43,8 +51,20 @@ export default function NewFactoryEntryPage() {
   const [pricePerMeter, setPricePerMeter] = useState("");
   const [paidAmount, setPaidAmount] = useState("");
   const [notes, setNotes] = useState("");
+  const [leafAccounts, setLeafAccounts] = useState<AccountRow[]>([]);
+  const [debitAccountId, setDebitAccountId] = useState("");
+  const [creditAccountId, setCreditAccountId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listAccounts().then((all) => {
+      const leaf = all.filter((a) => a.isLeaf && a.active);
+      setLeafAccounts(leaf);
+      setDebitAccountId(autoSelectId(leaf, "موردون", "دائنون", "supplier", "payable", "ap"));
+      setCreditAccountId(autoSelectId(leaf, "نقدية", "صندوق", "cash", "petty"));
+    });
+  }, []);
 
   const purchaseReady =
     !!supplierId &&
@@ -77,6 +97,8 @@ export default function NewFactoryEntryPage() {
           orderDate,
           paidAmount: paidAmount.trim(),
           notes: notes.trim() || undefined,
+          debitAccountId:  debitAccountId  || undefined,
+          creditAccountId: creditAccountId || undefined,
         });
       }
       router.push(`/${locale}/factory-orders?supplierId=${supplierId}`);
@@ -229,6 +251,55 @@ export default function NewFactoryEntryPage() {
                 disabled={submitting}
               />
             </div>
+
+            {/* GL journal entry for payments only */}
+            {tab === "payment" && (
+              <div className="rounded-lg border border-border bg-surface p-3 space-y-3">
+                <p className="text-xs font-semibold text-textSecondary">
+                  القيد المحاسبي التلقائي <span className="font-normal">(اختياري)</span>
+                </p>
+                <div>
+                  <label className="block text-sm font-medium mb-1">حساب الموردون / الذمم الدائنة (مدين)</label>
+                  <select
+                    value={debitAccountId}
+                    onChange={(e) => setDebitAccountId(e.target.value)}
+                    className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+                    disabled={submitting}
+                  >
+                    <option value="">— بدون قيد محاسبي —</option>
+                    {leafAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">حساب النقدية / البنك (دائن)</label>
+                  <select
+                    value={creditAccountId}
+                    onChange={(e) => setCreditAccountId(e.target.value)}
+                    className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+                    disabled={submitting}
+                  >
+                    <option value="">— بدون قيد محاسبي —</option>
+                    {leafAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                    ))}
+                  </select>
+                </div>
+                {debitAccountId && creditAccountId && paidAmount && (
+                  <div className="rounded bg-blue-50 border border-blue-200 p-2 text-xs font-mono space-y-0.5" dir="rtl">
+                    <div className="flex justify-between">
+                      <span>مدين — {leafAccounts.find((a) => a.id === debitAccountId)?.nameAr}</span>
+                      <span dir="ltr">{parseFloat(paidAmount || "0").toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-dashed border-blue-200 pt-0.5">
+                      <span>دائن — {leafAccounts.find((a) => a.id === creditAccountId)?.nameAr}</span>
+                      <span dir="ltr">{parseFloat(paidAmount || "0").toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-3 pt-2">
               <Button type="button" variant="ghost" onClick={() => router.back()}>

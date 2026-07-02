@@ -17,6 +17,8 @@ export const CreateFactoryPaymentRequestSchema = z.object({
   orderDate: IsoDateSchema,
   paidAmount: DecimalStringSchema,
   notes: z.string().max(2000).optional(),
+  debitAccountId:  UuidSchema.optional(),
+  creditAccountId: UuidSchema.optional(),
 });
 export type CreateFactoryPaymentRequest = z.infer<typeof CreateFactoryPaymentRequestSchema>;
 

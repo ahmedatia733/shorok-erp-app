@@ -30,6 +30,8 @@ export type OrdersQuery = z.infer<typeof OrdersQuerySchema>;
 export const RecordCollectionRequestSchema = z.object({
   amount: DecimalStringSchema,
   paidToAccount: z.string().max(120).optional(),
+  cashAccountId: UuidSchema.optional(),
+  arAccountId: UuidSchema.optional(),
 });
 export type RecordCollectionRequest = z.infer<typeof RecordCollectionRequestSchema>;
 

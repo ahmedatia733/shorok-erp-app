@@ -51,3 +51,24 @@ export const AgingQuerySchema = z.object({
   type: z.enum(["AR", "AP"]).default("AR"),
 });
 export type AgingQuery = z.infer<typeof AgingQuerySchema>;
+
+// Supplier Statement
+export const SupplierStatementQuerySchema = z.object({
+  supplierId: UuidSchema,
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type SupplierStatementQuery = z.infer<typeof SupplierStatementQuerySchema>;
+
+// Supplier Aging
+export const SupplierAgingQuerySchema = z.object({
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type SupplierAgingQuery = z.infer<typeof SupplierAgingQuerySchema>;
+
+// Cash Flow
+export const CashFlowQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type CashFlowQuery = z.infer<typeof CashFlowQuerySchema>;

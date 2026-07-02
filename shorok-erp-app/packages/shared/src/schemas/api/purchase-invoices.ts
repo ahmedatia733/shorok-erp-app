@@ -24,6 +24,7 @@ export const CreatePurchaseInvoiceRequestSchema = z.object({
   dueDate: IsoDateSchema.optional(),
   supplierId: UuidSchema,
   branchId: UuidSchema,
+  factoryLedgerEntryId: UuidSchema.optional(),
   basedOn: z.string().max(300).optional(),
   docDirection: z.string().max(100).optional(),
   customsNumber: z.string().max(100).optional(),

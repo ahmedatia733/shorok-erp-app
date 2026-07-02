@@ -52,6 +52,29 @@ export class FactoryLedgerPaymentsController {
     }
 
     return this.prisma.runInTransaction(async (tx) => {
+      // Auto-post GL journal entry: Dr AP(Suppliers) / Cr Cash if both accounts provided
+      let journalEntryId: string | null = null;
+      if (body.debitAccountId && body.creditAccountId) {
+        const je = await tx.journalEntry.create({
+          data: {
+            entryType: "JOURNAL",
+            entryDate: new Date(body.orderDate),
+            description: `دفعة للمورد ${supplier.nameAr} — ${paidAmount.toFixed(2)} ج.م`,
+            referenceType: "factory_ledger_payment",
+            createdBy: user.id,
+            lines: {
+              create: [
+                { accountId: body.debitAccountId,  debit: paidAmount.toFixed(2), credit: "0.00",
+                  note: `تسوية موردون — ${supplier.nameAr}` },
+                { accountId: body.creditAccountId, debit: "0.00", credit: paidAmount.toFixed(2),
+                  note: `دفع نقدي/بنكي — ${supplier.nameAr}` },
+              ],
+            },
+          },
+        });
+        journalEntryId = je.id;
+      }
+
       const entry = await tx.factoryLedgerEntry.create({
         data: {
           supplierId: body.supplierId,
@@ -63,6 +86,9 @@ export class FactoryLedgerPaymentsController {
           totalAmount: "0.00",
           paidAmount: paidAmount.toFixed(2),
           notes: body.notes ?? null,
+          debitAccountId:  body.debitAccountId  ?? null,
+          creditAccountId: body.creditAccountId ?? null,
+          journalEntryId:  journalEntryId,
           createdBy: user.id,
         },
       });

@@ -22,6 +22,7 @@ export const CreateSalesInvoiceSchema = z.object({
   branchId:    z.string().uuid(),
   taxRate:     PctStr.optional().default("0"),
   notes:       z.string().max(1000).optional(),
+  orderId:     z.string().uuid().optional(),
   lines:       z.array(SalesInvoiceLineInputSchema).min(1),
 });
 export type CreateSalesInvoice = z.infer<typeof CreateSalesInvoiceSchema>;

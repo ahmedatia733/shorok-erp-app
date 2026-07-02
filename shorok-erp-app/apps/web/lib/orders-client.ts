@@ -108,7 +108,7 @@ export const cancelOrder = (id: string, reason?: string) =>
 
 export const recordCollection = (
   id: string,
-  body: { amount: string; paidToAccount?: string },
+  body: { amount: string; paidToAccount?: string; cashAccountId?: string; arAccountId?: string },
 ) => apiCall<OrderDetail>(`/orders/${id}/collections`, { method: "POST", body });
 
 export const deleteOrder = (id: string) =>

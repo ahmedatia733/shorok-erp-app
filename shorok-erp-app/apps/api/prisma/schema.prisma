@@ -353,6 +353,7 @@ model CustomerOrder {
   remainingAmount          Decimal             @map("remaining_amount") @db.Decimal(14, 2)
   receiverName             String?             @map("receiver_name") @db.VarChar(160)
   status                   OrderStatus         @default(DRAFT)
+  salesInvoiceId           String?             @map("sales_invoice_id") @db.Uuid
   createdBy                String              @map("created_by") @db.Uuid
   createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -361,26 +362,34 @@ model CustomerOrder {
   productVariant  ProductVariant   @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
   creator         User             @relation("CustomerOrderCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
   priceApprover   User?            @relation("CustomerOrderPriceApprovedBy", fields: [priceApprovedByUserId], references: [id], onDelete: SetNull)
+  salesInvoice    SalesInvoice?    @relation("OrderSalesInvoice", fields: [salesInvoiceId], references: [id], onDelete: SetNull)
   collections     OrderCollection[]
 
   @@index([branchId, orderDate(sort: Desc)])
   @@index([status])
+  @@index([salesInvoiceId])
   @@map("customer_orders")
 }
 
 // ========================== OrderCollection ==========================
 
 model OrderCollection {
-  id            String   @id @default(uuid()) @db.Uuid
-  orderId       String   @map("order_id") @db.Uuid
-  collectedAt   DateTime @default(now()) @map("collected_at") @db.Timestamptz(6)
-  amount        Decimal  @db.Decimal(14, 2)
-  paidToAccount String?  @map("paid_to_account") @db.VarChar(120)
-  createdBy     String   @map("created_by") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id             String   @id @default(uuid()) @db.Uuid
+  orderId        String   @map("order_id") @db.Uuid
+  collectedAt    DateTime @default(now()) @map("collected_at") @db.Timestamptz(6)
+  amount         Decimal  @db.Decimal(14, 2)
+  paidToAccount  String?  @map("paid_to_account") @db.VarChar(120)
+  cashAccountId  String?  @map("cash_account_id") @db.Uuid
+  arAccountId    String?  @map("ar_account_id") @db.Uuid
+  journalEntryId String?  @map("journal_entry_id") @db.Uuid
+  createdBy      String   @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  order   CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  creator User          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  order        CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  creator      User          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  cashAccount  Account?      @relation("CollectionCashAccount", fields: [cashAccountId], references: [id])
+  arAccount    Account?      @relation("CollectionArAccount",   fields: [arAccountId],   references: [id])
+  journalEntry JournalEntry? @relation("CollectionJournalEntry", fields: [journalEntryId], references: [id])
 
   @@index([orderId])
   @@map("order_collections")
@@ -425,12 +434,19 @@ model FactoryLedgerEntry {
   paidAmount             Decimal   @default(0) @map("paid_amount") @db.Decimal(14, 2)
   runningBalance         Decimal   @default(0) @map("running_balance") @db.Decimal(14, 2)
   notes                  String?   @db.Text
+  debitAccountId         String?   @map("debit_account_id") @db.Uuid
+  creditAccountId        String?   @map("credit_account_id") @db.Uuid
+  journalEntryId         String?   @map("journal_entry_id") @db.Uuid
   createdBy              String    @map("created_by") @db.Uuid
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   supplier        Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   productVariant  ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
   creator         User            @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  debitAccount    Account?        @relation("FactoryEntryDebitAccount",  fields: [debitAccountId],  references: [id])
+  creditAccount   Account?        @relation("FactoryEntryCreditAccount", fields: [creditAccountId], references: [id])
+  journalEntry    JournalEntry?   @relation("FactoryEntryJournal",       fields: [journalEntryId],  references: [id])
+  purchaseInvoices PurchaseInvoice[]
 
   @@index([supplierId, orderDate])
   @@map("factory_ledger_entries")
@@ -508,6 +524,10 @@ model Account {
   fixedAssetsAsDepExpense FixedAsset[] @relation("DepreciationExpenseAccount")
   expensesAsGl            Expense[]    @relation("ExpenseGlAccount")
   expensesAsPaymentGl     Expense[]    @relation("ExpensePaymentGlAccount")
+  collectionsAsCash       OrderCollection[] @relation("CollectionCashAccount")
+  collectionsAsAr         OrderCollection[] @relation("CollectionArAccount")
+  factoryEntriesAsDebit   FactoryLedgerEntry[] @relation("FactoryEntryDebitAccount")
+  factoryEntriesAsCredit  FactoryLedgerEntry[] @relation("FactoryEntryCreditAccount")
 
   @@index([category])
   @@index([parentId])
@@ -530,7 +550,9 @@ model JournalEntry {
 
   creator  User          @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
   lines    JournalLine[]
-  expenses Expense[]
+  expenses        Expense[]
+  collections     OrderCollection[]  @relation("CollectionJournalEntry")
+  factoryEntries  FactoryLedgerEntry[] @relation("FactoryEntryJournal")
 
   @@index([entryDate(sort: Desc)])
   @@map("journal_entries")
@@ -557,36 +579,39 @@ model JournalLine {
 // ========================= PurchaseInvoice ===========================
 
 model PurchaseInvoice {
-  id                 String                @id @default(uuid()) @db.Uuid
-  invoiceNumber      String                @unique @map("invoice_number") @db.VarChar(30)
-  invoiceDate        DateTime              @map("invoice_date") @db.Date
-  dueDate            DateTime?             @map("due_date") @db.Date
-  supplierId         String                @map("supplier_id") @db.Uuid
-  branchId           String                @map("branch_id") @db.Uuid
-  basedOn            String?               @map("based_on") @db.VarChar(300)
-  docDirection       String?               @map("doc_direction") @db.VarChar(100)
-  customsNumber      String?               @map("customs_number") @db.VarChar(100)
-  notes              String?               @db.VarChar(1000)
-  status             PurchaseInvoiceStatus @default(DRAFT)
-  subtotal           Decimal               @default(0) @db.Decimal(14, 2)
-  taxAmount          Decimal               @default(0) @map("tax_amount") @db.Decimal(14, 2)
-  grandTotal         Decimal               @default(0) @map("grand_total") @db.Decimal(14, 2)
-  apAccountId        String?               @map("ap_account_id") @db.Uuid
-  taxAccountId       String?               @map("tax_account_id") @db.Uuid
-  inventoryAccountId String?               @map("inventory_account_id") @db.Uuid
-  journalEntryId     String?               @map("journal_entry_id") @db.Uuid
-  createdBy          String                @map("created_by") @db.Uuid
-  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                    String                @id @default(uuid()) @db.Uuid
+  invoiceNumber         String                @unique @map("invoice_number") @db.VarChar(30)
+  invoiceDate           DateTime              @map("invoice_date") @db.Date
+  dueDate               DateTime?             @map("due_date") @db.Date
+  supplierId            String                @map("supplier_id") @db.Uuid
+  branchId              String                @map("branch_id") @db.Uuid
+  factoryLedgerEntryId  String?               @map("factory_ledger_entry_id") @db.Uuid
+  basedOn               String?               @map("based_on") @db.VarChar(300)
+  docDirection          String?               @map("doc_direction") @db.VarChar(100)
+  customsNumber         String?               @map("customs_number") @db.VarChar(100)
+  notes                 String?               @db.VarChar(1000)
+  status                PurchaseInvoiceStatus @default(DRAFT)
+  subtotal              Decimal               @default(0) @db.Decimal(14, 2)
+  taxAmount             Decimal               @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  grandTotal            Decimal               @default(0) @map("grand_total") @db.Decimal(14, 2)
+  apAccountId           String?               @map("ap_account_id") @db.Uuid
+  taxAccountId          String?               @map("tax_account_id") @db.Uuid
+  inventoryAccountId    String?               @map("inventory_account_id") @db.Uuid
+  journalEntryId        String?               @map("journal_entry_id") @db.Uuid
+  createdBy             String                @map("created_by") @db.Uuid
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  branch   Branch   @relation("PurchaseInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
-  creator  User     @relation("PurchaseInvoiceCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
-  lines    PurchaseInvoiceLine[]
+  supplier             Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  branch               Branch               @relation("PurchaseInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  creator              User                 @relation("PurchaseInvoiceCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  factoryLedgerEntry   FactoryLedgerEntry?  @relation(fields: [factoryLedgerEntryId], references: [id], onDelete: SetNull)
+  lines                PurchaseInvoiceLine[]
 
   @@index([supplierId])
   @@index([branchId])
   @@index([invoiceDate(sort: Desc)])
+  @@index([factoryLedgerEntryId])
   @@map("purchase_invoices")
 }
 
@@ -773,6 +798,7 @@ model SalesInvoice {
   branch    Branch           @relation("SalesInvoiceBranch", fields: [branchId], references: [id])
   creator   User             @relation("SalesInvoiceCreatedBy", fields: [createdBy], references: [id])
   lines     SalesInvoiceLine[]
+  orders    CustomerOrder[]  @relation("OrderSalesInvoice")
 
   @@index([customerId])
   @@index([invoiceDate(sort: Desc)])
