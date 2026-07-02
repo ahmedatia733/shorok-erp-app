@@ -48,15 +48,13 @@ export class IncomeStatementController {
       },
     });
 
+    type AccountLine = { accountId: string; code: string; nameAr: string; nameEn: string; amount: string };
+
     let revenue = new Decimal(0);
     let costOfSales = new Decimal(0);
-    const expenseRows: Array<{
-      accountId: string;
-      code: string;
-      nameAr: string;
-      nameEn: string;
-      amount: string;
-    }> = [];
+    const revenueLines: AccountLine[] = [];
+    const cogsLines: AccountLine[] = [];
+    const expenseRows: AccountLine[] = [];
 
     for (const acc of accounts) {
       const totalDebit = acc.journalLines.reduce(
@@ -69,22 +67,21 @@ export class IncomeStatementController {
       );
 
       if (acc.category === "REVENUE") {
-        // Revenue: credit - debit
-        revenue = revenue.plus(totalCredit.minus(totalDebit));
+        const amount = totalCredit.minus(totalDebit);
+        revenue = revenue.plus(amount);
+        if (!amount.isZero()) {
+          revenueLines.push({ accountId: acc.id, code: acc.code, nameAr: acc.nameAr, nameEn: acc.nameEn, amount: amount.toFixed(2) });
+        }
       } else if (acc.category === "COST_OF_SALES") {
-        // Cost of sales: debit - credit
-        costOfSales = costOfSales.plus(totalDebit.minus(totalCredit));
+        const amount = totalDebit.minus(totalCredit);
+        costOfSales = costOfSales.plus(amount);
+        if (!amount.isZero()) {
+          cogsLines.push({ accountId: acc.id, code: acc.code, nameAr: acc.nameAr, nameEn: acc.nameEn, amount: amount.toFixed(2) });
+        }
       } else if (acc.category === "EXPENSE") {
-        // Expense: debit - credit; only include non-zero accounts
         const amount = totalDebit.minus(totalCredit);
         if (!amount.isZero()) {
-          expenseRows.push({
-            accountId: acc.id,
-            code: acc.code,
-            nameAr: acc.nameAr,
-            nameEn: acc.nameEn,
-            amount: amount.toFixed(2),
-          });
+          expenseRows.push({ accountId: acc.id, code: acc.code, nameAr: acc.nameAr, nameEn: acc.nameEn, amount: amount.toFixed(2) });
         }
       }
     }
@@ -95,11 +92,17 @@ export class IncomeStatementController {
       new Decimal(0),
     );
     const netProfit = grossProfit.minus(totalExpenses);
+    const grossMarginPct = revenue.isZero()
+      ? "0.00"
+      : grossProfit.div(revenue).times(100).toFixed(2);
 
     return {
       revenue: revenue.toFixed(2),
+      revenueLines,
       costOfSales: costOfSales.toFixed(2),
+      cogsLines,
       grossProfit: grossProfit.toFixed(2),
+      grossMarginPct,
       expenses: expenseRows,
       totalExpenses: totalExpenses.toFixed(2),
       netProfit: netProfit.toFixed(2),

@@ -59,17 +59,22 @@ export const createJournalEntry = (body: {
 export const deleteJournalEntry = (id: string) =>
   apiCall<void>(`/journal/${id}`, { method: "DELETE" });
 
+export interface ISAccountLine {
+  accountId: string;
+  code: string;
+  nameAr: string;
+  nameEn: string;
+  amount: string;
+}
+
 export interface IncomeStatementData {
   revenue: string;
+  revenueLines: ISAccountLine[];
   costOfSales: string;
+  cogsLines: ISAccountLine[];
   grossProfit: string;
-  expenses: Array<{
-    accountId: string;
-    code: string;
-    nameAr: string;
-    nameEn: string;
-    amount: string;
-  }>;
+  grossMarginPct: string;
+  expenses: ISAccountLine[];
   totalExpenses: string;
   netProfit: string;
   from: string;
