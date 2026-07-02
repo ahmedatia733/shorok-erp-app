@@ -83,6 +83,13 @@ function emptyLine(): JournalLine {
   return { category: "", accountId: "", accountNameAr: "", note: "", debit: "", credit: "" };
 }
 
+function lineNet(l: JournalLine): { type: "debit" | "credit"; net: number } {
+  const d = parseFloat(l.debit)  || 0;
+  const c = parseFloat(l.credit) || 0;
+  const net = d - c;
+  return { type: net >= 0 ? "debit" : "credit", net: Math.abs(net) };
+}
+
 function getAllLeafs(accounts: AccountRow[]): AccountRow[] {
   const out: AccountRow[] = [];
   for (const a of accounts) {
@@ -201,14 +208,14 @@ export default function JournalPage() {
 
   // ─── Derived values ────────────────────────────────────────────────────────
 
-  const totalDebit  = lines.reduce((s, l) => s + (parseFloat(l.debit)  || 0), 0);
-  const totalCredit = lines.reduce((s, l) => s + (parseFloat(l.credit) || 0), 0);
+  const totalDebit  = lines.reduce((s, l) => { const { type, net } = lineNet(l); return type === "debit"  ? s + net : s; }, 0);
+  const totalCredit = lines.reduce((s, l) => { const { type, net } = lineNet(l); return type === "credit" ? s + net : s; }, 0);
   const diff        = totalDebit - totalCredit;
   const isBalanced  = totalDebit > 0 && Math.abs(diff) < 0.005;
   const canSubmit   =
     lines.length >= 2 &&
     isBalanced &&
-    lines.every((l) => l.accountId !== "") &&
+    lines.every((l) => l.accountId !== "" && (parseFloat(l.debit) || 0) + (parseFloat(l.credit) || 0) > 0) &&
     totalDebit > 0;
 
   // ─── Line mutations ────────────────────────────────────────────────────────
@@ -227,11 +234,11 @@ export default function JournalPage() {
   }
 
   function handleDebitChange(idx: number, val: string) {
-    updateLine(idx, { debit: val, credit: val ? "" : (lines[idx]?.credit ?? "") });
+    updateLine(idx, { debit: val });
   }
 
   function handleCreditChange(idx: number, val: string) {
-    updateLine(idx, { credit: val, debit: val ? "" : (lines[idx]?.debit ?? "") });
+    updateLine(idx, { credit: val });
   }
 
   // ─── Template application ──────────────────────────────────────────────────
@@ -265,12 +272,15 @@ export default function JournalPage() {
         reference: reference.trim() || undefined,
         entryDate,
         description,
-        lines: lines.map((l) => ({
-          accountId: l.accountId,
-          debit:  l.debit  ? parseFloat(l.debit).toFixed(2)  : "0.00",
-          credit: l.credit ? parseFloat(l.credit).toFixed(2) : "0.00",
-          note: l.note || undefined,
-        })),
+        lines: lines.map((l) => {
+          const { type, net } = lineNet(l);
+          return {
+            accountId: l.accountId,
+            debit:  type === "debit"  ? net.toFixed(2) : "0.00",
+            credit: type === "credit" ? net.toFixed(2) : "0.00",
+            note: l.note || undefined,
+          };
+        }),
       });
       setCreateOpen(false);
       resetModal();
@@ -688,6 +698,14 @@ export default function JournalPage() {
                           value={line.credit}
                           onChange={(e) => handleCreditChange(idx, e.target.value)}
                         />
+                        {line.debit && line.credit && (() => {
+                          const { type, net } = lineNet(line);
+                          return (
+                            <div className="text-xs text-center mt-0.5 font-mono text-amber-700">
+                              صافي {net.toFixed(2)} {type === "debit" ? "م" : "د"}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* حذف */}
