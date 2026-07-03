@@ -256,11 +256,13 @@ export class FixedAssetsController {
         const periodStr = body.periodDate;
         const je = await tx.journalEntry.create({
           data: {
-            entryType: "ADJUSTMENT",
-            reference: asset.code,
-            entryDate: periodDate,
-            description: `استهلاك ${asset.nameAr} - ${periodStr}`,
-            createdBy: user.id,
+            entryType:     "ADJUSTMENT",
+            reference:     asset.code,
+            entryDate:     periodDate,
+            description:   `استهلاك ${asset.nameAr} - ${periodStr}`,
+            referenceType: "depreciation_entry",
+            referenceId:   entry.id,
+            createdBy:     user.id,
             lines: {
               create: [
                 {

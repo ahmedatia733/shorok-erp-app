@@ -132,7 +132,8 @@ function SourceBadge({ refType, refId, locale }: { refType: string | null; refId
     order_collection:       { label: "تحصيل طلبية",   href: (id, l) => `/${l}/orders` },
     purchase_invoice:       { label: "فاتورة مشتريات", href: (id, l) => `/${l}/purchasing/invoices` },
     factory_ledger_payment: { label: "دفعة مصنع",     href: (id, l) => `/${l}/factory-orders` },
-    expense:                { label: "مصروف",          href: (id, l) => `/${l}/accounting/journal` },
+    expense:                { label: "مصروف",           href: (id, l) => `/${l}/accounting/expenses` },
+    depreciation_entry:     { label: "استهلاك أصل",   href: (id, l) => `/${l}/accounting/fixed-assets` },
     fixed_asset:            { label: "أصل ثابت",      href: (id, l) => `/${l}/accounting/fixed-assets` },
   };
 

@@ -103,6 +103,20 @@ export class ExpensesController {
     return this.prisma.runInTransaction(async (tx) => {
       // Auto-post to GL if both GL accounts provided
       let journalEntryId: string | null = null;
+      const expense = await tx.expense.create({
+        data: {
+          branchId:           body.branchId,
+          expenseDate:        new Date(body.expenseDate),
+          description:        body.description,
+          amount:             amount.toFixed(2),
+          paidFromAccount:    body.paidFromAccount,
+          glAccountId:        body.glAccountId        ?? null,
+          paymentGlAccountId: body.paymentGlAccountId ?? null,
+          journalEntryId:     null,
+          createdBy: user.id,
+        },
+      });
+
       if (body.glAccountId && body.paymentGlAccountId) {
         const je = await tx.journalEntry.create({
           data: {
@@ -110,6 +124,7 @@ export class ExpensesController {
             entryDate:     new Date(body.expenseDate),
             description:   body.description,
             referenceType: "expense",
+            referenceId:   expense.id,
             createdBy:     user.id,
             lines: {
               create: [
@@ -120,21 +135,11 @@ export class ExpensesController {
           },
         });
         journalEntryId = je.id;
+        await tx.expense.update({
+          where: { id: expense.id },
+          data:  { journalEntryId: je.id },
+        });
       }
-
-      const expense = await tx.expense.create({
-        data: {
-          branchId:           body.branchId,
-          expenseDate:        new Date(body.expenseDate),
-          description:        body.description,
-          amount:             amount.toFixed(2),
-          paidFromAccount:    body.paidFromAccount,
-          glAccountId:        body.glAccountId        ?? null,
-          paymentGlAccountId: body.paymentGlAccountId ?? null,
-          journalEntryId,
-          createdBy: user.id,
-        },
-      });
 
       const summaryKey = amount.isNegative()
         ? "expenses.summary.correction"

@@ -32,6 +32,9 @@ export interface StatementEntry {
   debit: string;
   credit: string;
   balance: string;
+  referenceType?: string;
+  referenceId?: string;
+  journalEntryId?: string;
 }
 
 export interface SupplierStatement {
@@ -43,7 +46,7 @@ export interface SupplierStatement {
 }
 
 export interface AccountStatement {
-  entity: { id: string; name: string; type: "CASH" | "BANK" };
+  entity: { id: string; name: string; code?: string; type: "CASH" | "BANK" | "gl_account" };
   entries: StatementEntry[];
   totalIn: string;
   totalOut: string;

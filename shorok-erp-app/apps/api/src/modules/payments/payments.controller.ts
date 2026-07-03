@@ -274,7 +274,7 @@ export class PaymentsController {
       },
       include: {
         journalEntry: {
-          select: { entryNumber: true, entryDate: true, reference: true, description: true },
+          select: { id: true, entryNumber: true, entryDate: true, reference: true, description: true, referenceType: true, referenceId: true },
         },
       },
       orderBy: [{ journalEntry: { entryDate: "asc" } }, { id: "asc" }],
@@ -294,6 +294,9 @@ export class PaymentsController {
         debit: l.debit.toString(),
         credit: l.credit.toString(),
         balance: glBalance.toFixed(2),
+        referenceType: l.journalEntry.referenceType ?? undefined,
+        referenceId:   l.journalEntry.referenceId   ?? undefined,
+        journalEntryId: l.journalEntry.id,
       };
     });
 
@@ -301,7 +304,7 @@ export class PaymentsController {
     const totalOut = lines.reduce((s, l) => s + parseFloat(l.credit.toString()), 0);
 
     return {
-      entity: { id: glAccount.id, name: glAccount.nameAr, type: "gl_account" },
+      entity: { id: glAccount.id, name: glAccount.nameAr, code: glAccount.code, type: "gl_account" },
       entries: glEntries,
       totalIn: totalIn.toFixed(2),
       totalOut: totalOut.toFixed(2),
