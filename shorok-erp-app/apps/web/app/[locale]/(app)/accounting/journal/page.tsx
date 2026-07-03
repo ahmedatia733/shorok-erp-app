@@ -16,6 +16,8 @@ import {
   type JournalEntryRow,
 } from "../../../../../lib/journal-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { listCustomers, type CustomerRow } from "../../../../../lib/customers-client";
+import { listSuppliers, type SupplierRow } from "../../../../../lib/suppliers-client";
 import {
   listTemplates,
   type JournalTemplate,
@@ -25,22 +27,25 @@ import { formatDate, formatCurrency } from "../../../../../lib/format";
 // ─── Category definitions (shared with templates page) ────────────────────────
 
 const CATEGORIES = [
-  { id: "banks",     label: "البنوك" },
-  { id: "vaults",    label: "الخزن" },
-  { id: "cash",      label: "الصندوق والنقدية" },
-  { id: "ar",        label: "الذمم المدينة" },
-  { id: "ap",        label: "الذمم الدائنة" },
-  { id: "revenue",   label: "الإيرادات" },
-  { id: "cogs",      label: "تكلفة المبيعات" },
-  { id: "expense",   label: "المصروفات" },
-  { id: "fixed",     label: "الأصول الثابتة" },
-  { id: "inventory", label: "المخزون والبضاعة" },
-  { id: "tax",       label: "الضرائب" },
-  { id: "equity",    label: "رأس المال" },
-  { id: "all",       label: "جميع الحسابات" },
+  { id: "banks",     label: "البنوك",               special: false },
+  { id: "vaults",    label: "الخزن",                special: false },
+  { id: "cash",      label: "الصندوق والنقدية",      special: false },
+  { id: "ar",        label: "الذمم المدينة",         special: false },
+  { id: "ap",        label: "الذمم الدائنة",         special: false },
+  { id: "revenue",   label: "الإيرادات",             special: false },
+  { id: "cogs",      label: "تكلفة المبيعات",        special: false },
+  { id: "expense",   label: "المصروفات",             special: false },
+  { id: "fixed",     label: "الأصول الثابتة",        special: false },
+  { id: "inventory", label: "المخزون والبضاعة",      special: false },
+  { id: "tax",       label: "الضرائب",               special: false },
+  { id: "equity",    label: "رأس المال",             special: false },
+  { id: "customers", label: "العملاء",               special: true  },
+  { id: "suppliers", label: "الموردون",              special: true  },
+  { id: "all",       label: "جميع الحسابات",         special: false },
 ];
 
 function filterAccounts(cat: string, accounts: AccountRow[]): AccountRow[] {
+  if (cat === "customers" || cat === "suppliers") return [];
   const both = (a: AccountRow) => (a.nameAr + " " + (a.nameEn ?? "")).toLowerCase();
   const tests: Record<string, (a: AccountRow) => boolean> = {
     banks:     (a) => a.category === "ASSET"       && /بنك|مصرف|bank|cib|nbe|qnb|hsbc/i.test(both(a)),
@@ -66,6 +71,7 @@ interface JournalLine {
   category: string;
   accountId: string;
   accountNameAr: string;
+  entityLabel: string;
   note: string;
   debit: string;
   credit: string;
@@ -80,7 +86,7 @@ const ENTRY_TYPE_LABELS: Record<string, string> = {
 };
 
 function emptyLine(): JournalLine {
-  return { category: "", accountId: "", accountNameAr: "", note: "", debit: "", credit: "" };
+  return { category: "", accountId: "", accountNameAr: "", entityLabel: "", note: "", debit: "", credit: "" };
 }
 
 function lineNet(l: JournalLine): { type: "debit" | "credit"; net: number } {
@@ -163,6 +169,8 @@ export default function JournalPage() {
   // ── Create modal state ────────────────────────────────────────────────────
   const [createOpen,    setCreateOpen]    = useState(false);
   const [leafAccounts,  setLeafAccounts]  = useState<AccountRow[]>([]);
+  const [customers,     setCustomers]     = useState<CustomerRow[]>([]);
+  const [suppliers,     setSuppliers]     = useState<SupplierRow[]>([]);
   const [entryType,     setEntryType]     = useState("JOURNAL");
   const [entryDate,     setEntryDate]     = useState(() => new Date().toISOString().slice(0, 10));
   const [description,   setDescription]   = useState("");
@@ -198,7 +206,13 @@ export default function JournalPage() {
 
   useEffect(() => {
     if (!createOpen || leafAccounts.length > 0) return;
-    void listAccounts().then((data) => setLeafAccounts(getAllLeafs(data)));
+    void Promise.all([listAccounts(), listCustomers(), listSuppliers()]).then(
+      ([accs, custs, supps]) => {
+        setLeafAccounts(getAllLeafs(accs));
+        setCustomers(custs.filter((c) => c.active));
+        setSuppliers(supps.filter((s) => s.active));
+      },
+    );
   }, [createOpen, leafAccounts.length]);
 
   useEffect(() => {
@@ -225,12 +239,40 @@ export default function JournalPage() {
   }
 
   function handleCategoryChange(idx: number, cat: string) {
-    updateLine(idx, { category: cat, accountId: "", accountNameAr: "" });
+    updateLine(idx, { category: cat, accountId: "", accountNameAr: "", entityLabel: "" });
   }
 
   function handleAccountChange(idx: number, accountId: string) {
     const acc = leafAccounts.find((a) => a.id === accountId);
     updateLine(idx, { accountId, accountNameAr: acc?.nameAr ?? "" });
+  }
+
+  function handleCustomerSelect(idx: number, customerId: string) {
+    const cust = customers.find((c) => c.id === customerId);
+    if (!cust) return;
+    const arAcc = leafAccounts.find(
+      (a) => a.category === "ASSET" && /ذمم مدين|مدينون|حساب.*عميل/.test(a.nameAr),
+    );
+    updateLine(idx, {
+      entityLabel: `${cust.code} — ${cust.nameAr}`,
+      note: lines[idx]?.note || `${cust.code} — ${cust.nameAr}`,
+      accountId: arAcc?.id ?? "",
+      accountNameAr: arAcc?.nameAr ?? "",
+    });
+  }
+
+  function handleSupplierSelect(idx: number, supplierId: string) {
+    const supp = suppliers.find((s) => s.id === supplierId);
+    if (!supp) return;
+    const apAcc = leafAccounts.find(
+      (a) => a.category === "LIABILITY" && /ذمم دائن|دائنون|حساب.*مورد/.test(a.nameAr),
+    );
+    updateLine(idx, {
+      entityLabel: supp.nameAr,
+      note: lines[idx]?.note || supp.nameAr,
+      accountId: apAcc?.id ?? "",
+      accountNameAr: apAcc?.nameAr ?? "",
+    });
   }
 
   function handleDebitChange(idx: number, val: string) {
@@ -250,6 +292,7 @@ export default function JournalPage() {
         category: "all",
         accountId: l.accountId,
         accountNameAr: acc?.nameAr ?? l.accountNameAr,
+        entityLabel: "",
         note: l.note ?? "",
         debit:  l.type === "debit"  ? (l.amount ?? "") : "",
         credit: l.type === "credit" ? (l.amount ?? "") : "",
@@ -610,7 +653,10 @@ export default function JournalPage() {
               </thead>
               <tbody>
                 {lines.map((line, idx) => {
-                  const accountOptions = line.category
+                  const isCustomers = line.category === "customers";
+                  const isSuppliers = line.category === "suppliers";
+                  const isSpecial   = isCustomers || isSuppliers;
+                  const accountOptions = line.category && !isSpecial
                     ? filterAccounts(line.category, leafAccounts)
                     : [];
 
@@ -642,6 +688,54 @@ export default function JournalPage() {
                       <td className="px-1.5 py-1.5">
                         {!line.category ? (
                           <span className="text-xs text-textSecondary italic">اختر القائمة أولاً</span>
+                        ) : isCustomers ? (
+                          <div className="space-y-1">
+                            <select
+                              className={selectCls}
+                              value=""
+                              onChange={(e) => handleCustomerSelect(idx, e.target.value)}
+                            >
+                              <option value="">— اختر العميل —</option>
+                              {customers.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.code} — {c.nameAr}
+                                </option>
+                              ))}
+                            </select>
+                            {line.entityLabel && (
+                              <div className="text-xs text-primary font-medium px-1">
+                                ✓ {line.entityLabel}
+                              </div>
+                            )}
+                            {isSpecial && line.entityLabel && !line.accountId && (
+                              <div className="text-xs text-amber-600 px-1">
+                                ⚠ لم يُعثر على حساب ذمم — غيّر القائمة لـ «الذمم المدينة» واختر يدوياً
+                              </div>
+                            )}
+                          </div>
+                        ) : isSuppliers ? (
+                          <div className="space-y-1">
+                            <select
+                              className={selectCls}
+                              value=""
+                              onChange={(e) => handleSupplierSelect(idx, e.target.value)}
+                            >
+                              <option value="">— اختر المورد —</option>
+                              {suppliers.map((s) => (
+                                <option key={s.id} value={s.id}>{s.nameAr}</option>
+                              ))}
+                            </select>
+                            {line.entityLabel && (
+                              <div className="text-xs text-primary font-medium px-1">
+                                ✓ {line.entityLabel}
+                              </div>
+                            )}
+                            {isSpecial && line.entityLabel && !line.accountId && (
+                              <div className="text-xs text-amber-600 px-1">
+                                ⚠ لم يُعثر على حساب موردين — غيّر القائمة لـ «الذمم الدائنة» واختر يدوياً
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <select
                             className={selectCls}
