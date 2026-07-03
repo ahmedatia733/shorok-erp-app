@@ -141,6 +141,8 @@ export default function ProtectedAppLayout({ children }: { children: React.React
             <NavLink href={`/${locale}/inventory`} label={t("inventory")} />
             <NavLink href={`/${locale}/inventory/movements`} label={t("inventoryMovements")} />
             <NavLink href={`/${locale}/inventory/stock`} label="جرد المخزون" />
+            <NavLink href={`/${locale}/inventory/counts`} label="الجرد اليومي" />
+            <NavLink href={`/${locale}/inventory/adjustments`} label="التسويات" />
           </NavSection>
 
           {/* Reports section */}

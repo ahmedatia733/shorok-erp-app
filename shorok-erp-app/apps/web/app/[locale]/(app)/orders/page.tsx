@@ -14,7 +14,7 @@ import { Skeleton } from "../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../components/ui/table";
 import { BranchPicker } from "../../../../components/features/inventory/branch-picker";
 import { ApiClientError } from "../../../../lib/api-client";
-import { listOrders, deleteOrder, type OrderListRow } from "../../../../lib/orders-client";
+import { listOrders, deleteOrder, approveOrderPrice, type OrderListRow } from "../../../../lib/orders-client";
 import { formatCurrency, formatDate } from "../../../../lib/format";
 import { useCurrentUser } from "../../../../lib/auth";
 
@@ -52,6 +52,7 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
 
   const isOwner = user?.role === "OWNER";
 
@@ -92,6 +93,20 @@ export default function OrdersPage() {
       alive = false;
     };
   }, [branchId, statusFilter, locale]);
+
+  const handleApprovePrice = async (id: string) => {
+    setApprovingId(id);
+    try {
+      await approveOrderPrice(id);
+      setRows((prev) =>
+        prev.map((r) => r.id === id ? { ...r, status: "CONFIRMED" as const, priceOverrideStatus: "APPROVED" } : r),
+      );
+    } catch {
+      setError(tCommon("actionFailed"));
+    } finally {
+      setApprovingId(null);
+    }
+  };
 
   const canCreate = user?.role && ["OWNER", "BRANCH_MANAGER"].includes(user.role);
 
@@ -205,32 +220,44 @@ export default function OrdersPage() {
                       </TD>
                       {isOwner ? (
                         <TD>
-                          {isDeleting ? (
-                            <span className="flex items-center gap-2 text-xs">
-                              <span className="text-error">{tCommon("deleteConfirm")}</span>
+                          <div className="flex items-center gap-2 justify-end">
+                            {o.status === "PENDING_PRICE_APPROVAL" && (
                               <button
-                                onClick={() => void handleDelete()}
-                                disabled={deleteLoading}
-                                className="text-error font-medium hover:underline disabled:opacity-50"
+                                onClick={() => void handleApprovePrice(o.id)}
+                                disabled={approvingId === o.id}
+                                className="rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:opacity-50 whitespace-nowrap"
+                                title="اعتماد السعر وتأكيد الطلب"
                               >
-                                {tCommon("yes")}
+                                {approvingId === o.id ? "..." : "✓ اعتماد السعر"}
                               </button>
+                            )}
+                            {isDeleting ? (
+                              <span className="flex items-center gap-1 text-xs">
+                                <span className="text-error">{tCommon("deleteConfirm")}</span>
+                                <button
+                                  onClick={() => void handleDelete()}
+                                  disabled={deleteLoading}
+                                  className="text-error font-medium hover:underline disabled:opacity-50"
+                                >
+                                  {tCommon("yes")}
+                                </button>
+                                <button
+                                  onClick={() => setDeletingId(null)}
+                                  className="text-textSecondary hover:underline"
+                                >
+                                  {tCommon("no")}
+                                </button>
+                              </span>
+                            ) : (
                               <button
-                                onClick={() => setDeletingId(null)}
-                                className="text-textSecondary hover:underline"
+                                title={tCommon("delete")}
+                                onClick={() => setDeletingId(o.id)}
+                                className="text-base"
                               >
-                                {tCommon("no")}
+                                🗑️
                               </button>
-                            </span>
-                          ) : (
-                            <button
-                              title={tCommon("delete")}
-                              onClick={() => setDeletingId(o.id)}
-                              className="text-base"
-                            >
-                              🗑️
-                            </button>
-                          )}
+                            )}
+                          </div>
                         </TD>
                       ) : null}
                     </TR>
