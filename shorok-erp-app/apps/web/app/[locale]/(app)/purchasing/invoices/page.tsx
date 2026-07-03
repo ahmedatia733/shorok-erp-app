@@ -7,6 +7,7 @@ import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
 import { Button } from "../../../../../components/ui/button";
 import { Card, CardBody } from "../../../../../components/ui/card";
+import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { useHasRole } from "../../../../../lib/auth";
@@ -431,6 +432,15 @@ export default function PurchaseInvoicesPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [cancelConfirmId, setCancelConfirmId] = useState<string | null>(null);
   const [confirmingInv,   setConfirmingInv]   = useState<PurchaseInvoiceRow | null>(null);
+  const [listSearch,      setListSearch]      = useState("");
+
+  const displayedInvoices = listSearch
+    ? invoices.filter((inv) =>
+        (inv.invoiceNumber + " " + inv.supplierNameAr)
+          .toLowerCase()
+          .includes(listSearch.toLowerCase()),
+      )
+    : invoices;
 
   const loadInvoices = useCallback(async (cursor?: string | null) => {
     try {
@@ -509,6 +519,20 @@ export default function PurchaseInvoicesPage() {
 
       {error && <Alert variant="error">{error}</Alert>}
 
+      <div className="flex items-center gap-3">
+        <Input
+          placeholder="بحث برقم الفاتورة أو اسم المورد..."
+          value={listSearch}
+          onChange={(e) => setListSearch(e.target.value)}
+          className="max-w-sm"
+        />
+        {listSearch && (
+          <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>
+            مسح ✕
+          </button>
+        )}
+      </div>
+
       <Card>
         <CardBody className="p-0 overflow-x-auto">
           <Table>
@@ -525,15 +549,15 @@ export default function PurchaseInvoicesPage() {
               </TR>
             </THead>
             <TBody>
-              {invoices.length === 0 && (
+              {displayedInvoices.length === 0 && (
                 <TR>
                   <TD colSpan={8} className="text-center text-textSecondary py-8">
-                    {t("empty")}
+                    {listSearch ? "لا توجد نتائج مطابقة" : t("empty")}
                   </TD>
                 </TR>
               )}
 
-              {invoices.map((inv) => {
+              {displayedInvoices.map((inv) => {
                 const isExpanded      = expandedIds.has(inv.id);
                 const detail          = expandedDetails[inv.id] ?? inv;
                 const confirmingDel   = deleteConfirmId === inv.id;

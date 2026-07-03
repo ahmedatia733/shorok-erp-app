@@ -51,6 +51,15 @@ export default function ExpensesPage() {
   });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [listSearch, setListSearch] = useState("");
+
+  const displayedRows = listSearch
+    ? rows.filter((r) =>
+        (r.description + " " + (r.paidFromAccount ?? ""))
+          .toLowerCase()
+          .includes(listSearch.toLowerCase()),
+      )
+    : rows;
 
   const canWrite =
     user?.role && ["OWNER", "BRANCH_MANAGER", "ACCOUNTANT"].includes(user.role);
@@ -142,7 +151,7 @@ export default function ExpensesPage() {
           <CardTitle>{t("title")}</CardTitle>
         </CardHeader>
         <CardBody>
-          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
               <Label htmlFor="from">{t("filters.from")}</Label>
               <Input id="from" type="date" dir="ltr" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -150,6 +159,21 @@ export default function ExpensesPage() {
             <div>
               <Label htmlFor="to">{t("filters.to")}</Label>
               <Input id="to" type="date" dir="ltr" value={to} onChange={(e) => setTo(e.target.value)} />
+            </div>
+            <div>
+              <Label>بحث</Label>
+              <div className="flex items-center gap-1">
+                <Input
+                  placeholder="بحث بالبيان أو الحساب..."
+                  value={listSearch}
+                  onChange={(e) => setListSearch(e.target.value)}
+                />
+                {listSearch && (
+                  <button type="button" className="text-xs text-textSecondary hover:text-text whitespace-nowrap" onClick={() => setListSearch("")}>
+                    ✕
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -163,8 +187,8 @@ export default function ExpensesPage() {
             </div>
           ) : !branchId ? (
             <EmptyState title={t("branchPicker")} />
-          ) : rows.length === 0 ? (
-            <EmptyState title={t("empty")} />
+          ) : displayedRows.length === 0 ? (
+            <EmptyState title={listSearch ? "لا توجد نتائج مطابقة" : t("empty")} />
           ) : (
             <Table>
               <THead>
@@ -178,7 +202,7 @@ export default function ExpensesPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((e) => {
+                {displayedRows.map((e) => {
                   const isCorrection = e.amount.startsWith("-");
                   const isDeleting = deletingId === e.id;
                   return (

@@ -13,6 +13,7 @@ import { Table, TBody, TD, TH, THead, TR } from "../../../../components/ui/table
 import { Alert } from "../../../../components/ui/alert";
 import { listSuppliers, type SupplierRow } from "../../../../lib/suppliers-client";
 import { useHasRole } from "../../../../lib/auth";
+import { Input } from "../../../../components/ui/input";
 
 export default function SuppliersListPage() {
   const t = useTranslations("suppliers");
@@ -22,6 +23,12 @@ export default function SuppliersListPage() {
 
   const [rows, setRows] = useState<SupplierRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [listSearch, setListSearch] = useState("");
+
+  const displayedRows = (rows ?? []).filter((s) =>
+    !listSearch ||
+    (s.nameAr + " " + (s.nameEn ?? "")).toLowerCase().includes(listSearch.toLowerCase()),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +60,20 @@ export default function SuppliersListPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("title")}</CardTitle>
+          <div className="flex items-center gap-3 flex-wrap flex-1">
+            <CardTitle>{t("title")}</CardTitle>
+            <Input
+              placeholder="بحث باسم المورد..."
+              value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              className="max-w-xs"
+            />
+            {listSearch && (
+              <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>
+                مسح ✕
+              </button>
+            )}
+          </div>
         </CardHeader>
         <CardBody>
           {rows === null ? (
@@ -62,8 +82,8 @@ export default function SuppliersListPage() {
               <Skeleton className="h-10" />
               <Skeleton className="h-10" />
             </div>
-          ) : rows.length === 0 ? (
-            <EmptyState title={t("empty")} />
+          ) : displayedRows.length === 0 ? (
+            <EmptyState title={listSearch ? "لا توجد نتائج مطابقة" : t("empty")} />
           ) : (
             <Table>
               <THead>
@@ -75,7 +95,7 @@ export default function SuppliersListPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((s) => (
+                {displayedRows.map((s) => (
                   <TR key={s.id}>
                     <TD className="font-medium">{s.nameAr}</TD>
                     <TD className="text-textSecondary" dir="ltr">

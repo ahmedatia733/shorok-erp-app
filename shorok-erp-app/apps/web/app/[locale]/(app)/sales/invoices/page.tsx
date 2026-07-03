@@ -1191,6 +1191,15 @@ export default function SalesInvoicesPage() {
   const [filterStatus, setFilterStatus] = useState("");
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
+  const [listSearch, setListSearch] = useState("");
+
+  const displayedInvoices = listSearch
+    ? invoices.filter((inv) =>
+        (`SI-${inv.invoiceNumber} ${inv.customer?.nameAr ?? ""} ${inv.customer?.code ?? ""}`)
+          .toLowerCase()
+          .includes(listSearch.toLowerCase()),
+      )
+    : invoices;
 
   // Print state
   const [printInvoice, setPrintInvoice] = useState<SalesInvoiceDetail | null>(null);
@@ -1407,6 +1416,17 @@ export default function SalesInvoicesPage() {
               />
             </div>
             <Button onClick={() => void loadInvoices()}>بحث</Button>
+            <div className="flex items-center gap-1">
+              <Input
+                placeholder="بحث سريع برقم أو عميل..."
+                value={listSearch}
+                onChange={(e) => setListSearch(e.target.value)}
+                className="w-44"
+              />
+              {listSearch && (
+                <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>✕</button>
+              )}
+            </div>
           </div>
         </CardBody>
       </Card>
@@ -1429,14 +1449,14 @@ export default function SalesInvoicesPage() {
               </TR>
             </THead>
             <TBody>
-              {invoices.length === 0 ? (
+              {displayedInvoices.length === 0 ? (
                 <TR>
                   <TD colSpan={9} className="text-center text-gray-400 py-8">
-                    لا توجد فواتير
+                    {listSearch ? "لا توجد نتائج مطابقة" : "لا توجد فواتير"}
                   </TD>
                 </TR>
               ) : (
-                invoices.map((inv, idx) => {
+                displayedInvoices.map((inv, idx) => {
                   const grandTotal = parseFloat(inv.grandTotal);
                   const totalCost = parseFloat(inv.totalCost);
                   const profit = grandTotal - totalCost;

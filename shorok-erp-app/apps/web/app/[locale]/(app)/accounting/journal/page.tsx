@@ -180,6 +180,9 @@ export default function JournalPage() {
   const [lines,         setLines]         = useState<JournalLine[]>([emptyLine(), emptyLine()]);
   const [createLoading, setCreateLoading] = useState(false);
   const [createError,   setCreateError]   = useState<string | null>(null);
+  const [openComboIdx,  setOpenComboIdx]  = useState<number | null>(null);
+  const [comboSearch,   setComboSearch]   = useState<Record<number, string>>({});
+  const [listSearch,    setListSearch]    = useState("");
 
   // ── Template picker ───────────────────────────────────────────────────────
   const [templates,          setTemplates]          = useState<JournalTemplate[]>([]);
@@ -233,6 +236,14 @@ export default function JournalPage() {
     isBalanced &&
     lines.every((l) => l.accountId !== "" && (parseFloat(l.debit) || 0) + (parseFloat(l.credit) || 0) > 0) &&
     totalDebit > 0;
+
+  const displayedEntries = listSearch
+    ? entries.filter((e) =>
+        (`#${e.entryNumber} ${e.description} ${e.reference ?? ""}`)
+          .toLowerCase()
+          .includes(listSearch.toLowerCase()),
+      )
+    : entries;
 
   // ─── Line mutations ────────────────────────────────────────────────────────
 
@@ -388,6 +399,28 @@ export default function JournalPage() {
 
       {error && <Alert variant="error">{error}</Alert>}
 
+      {/* ── List search ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <Input
+          placeholder="بحث بالبيان أو المرجع أو رقم القيد..."
+          value={listSearch}
+          onChange={(e) => setListSearch(e.target.value)}
+          className="max-w-sm"
+        />
+        {listSearch && (
+          <span className="text-sm text-textSecondary">{displayedEntries.length} نتيجة</span>
+        )}
+        {listSearch && (
+          <button
+            type="button"
+            className="text-xs text-textSecondary hover:text-text"
+            onClick={() => setListSearch("")}
+          >
+            مسح ✕
+          </button>
+        )}
+      </div>
+
       {/* ── Entries table ─────────────────────────────────────────────────── */}
       <div className="border border-border rounded overflow-hidden">
         <Table>
@@ -403,7 +436,7 @@ export default function JournalPage() {
             </TR>
           </THead>
           <TBody>
-            {entries.map((entry) => {
+            {displayedEntries.map((entry) => {
               const expanded       = expandedIds.has(entry.id);
               const confirmDelete  = deleteConfirmId === entry.id;
               return (
@@ -522,10 +555,10 @@ export default function JournalPage() {
                 </>
               );
             })}
-            {entries.length === 0 && (
+            {displayedEntries.length === 0 && (
               <TR>
                 <TD colSpan={7} className="text-center py-8 text-textSecondary">
-                  لا توجد قيود محاسبية
+                  {listSearch ? "لا توجد قيود تطابق البحث" : "لا توجد قيود محاسبية"}
                 </TD>
               </TR>
             )}
@@ -658,9 +691,12 @@ export default function JournalPage() {
                   const isCustomers = line.category === "customers";
                   const isSuppliers = line.category === "suppliers";
                   const isSpecial   = isCustomers || isSuppliers;
-                  const accountOptions = line.category && !isSpecial
-                    ? filterAccounts(line.category, leafAccounts)
-                    : [];
+                  const pool = isSpecial ? [] : filterAccounts(line.category || "all", leafAccounts);
+                  const q = (comboSearch[idx] ?? "").toLowerCase();
+                  const visible = q
+                    ? pool.filter((a) => (a.nameAr + " " + (a.nameEn ?? "") + " " + a.code).toLowerCase().includes(q))
+                    : pool;
+                  const selectedAcc = line.accountId ? leafAccounts.find((a) => a.id === line.accountId) : null;
 
                   return (
                     <tr
@@ -688,9 +724,7 @@ export default function JournalPage() {
 
                       {/* الحساب */}
                       <td className="px-1.5 py-1.5">
-                        {!line.category ? (
-                          <span className="text-xs text-textSecondary italic">اختر القائمة أولاً</span>
-                        ) : isCustomers ? (
+                        {isCustomers ? (
                           <div className="space-y-1">
                             <select
                               className={selectCls}
@@ -699,17 +733,13 @@ export default function JournalPage() {
                             >
                               <option value="">— اختر العميل —</option>
                               {customers.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.code} — {c.nameAr}
-                                </option>
+                                <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
                               ))}
                             </select>
                             {line.entityLabel && (
-                              <div className="text-xs text-primary font-medium px-1">
-                                ✓ {line.entityLabel}
-                              </div>
+                              <div className="text-xs text-primary font-medium px-1">✓ {line.entityLabel}</div>
                             )}
-                            {isSpecial && line.entityLabel && !line.accountId && (
+                            {line.entityLabel && !line.accountId && (
                               <div className="text-xs text-amber-600 px-1">
                                 ⚠ لم يُعثر على حساب ذمم — غيّر القائمة لـ «الذمم المدينة» واختر يدوياً
                               </div>
@@ -728,33 +758,79 @@ export default function JournalPage() {
                               ))}
                             </select>
                             {line.entityLabel && (
-                              <div className="text-xs text-primary font-medium px-1">
-                                ✓ {line.entityLabel}
-                              </div>
+                              <div className="text-xs text-primary font-medium px-1">✓ {line.entityLabel}</div>
                             )}
-                            {isSpecial && line.entityLabel && !line.accountId && (
+                            {line.entityLabel && !line.accountId && (
                               <div className="text-xs text-amber-600 px-1">
                                 ⚠ لم يُعثر على حساب موردين — غيّر القائمة لـ «الذمم الدائنة» واختر يدوياً
                               </div>
                             )}
                           </div>
                         ) : (
-                          <select
-                            className={selectCls}
-                            value={line.accountId}
-                            onChange={(e) => handleAccountChange(idx, e.target.value)}
-                          >
-                            <option value="">— اختر الحساب —</option>
-                            {accountOptions.length === 0 ? (
-                              <option disabled value="">لا توجد حسابات في هذه القائمة</option>
+                          <div className="relative">
+                            {line.accountId && openComboIdx !== idx ? (
+                              <div
+                                className="flex items-center gap-1 rounded border border-border bg-background px-2 py-1.5 text-sm cursor-pointer hover:border-primary"
+                                onClick={() => setOpenComboIdx(idx)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpenComboIdx(idx); }}
+                              >
+                                <span className="font-mono text-xs text-textSecondary me-1">{selectedAcc?.code}</span>
+                                <span className="flex-1 truncate min-w-0">{selectedAcc?.nameAr ?? line.accountNameAr}</span>
+                                <button
+                                  type="button"
+                                  className="text-textSecondary hover:text-danger ms-1 shrink-0 text-xs"
+                                  onClick={(e) => { e.stopPropagation(); handleAccountChange(idx, ""); }}
+                                >✕</button>
+                              </div>
                             ) : (
-                              accountOptions.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.code} — {a.nameAr}
-                                </option>
-                              ))
+                              <input
+                                type="text"
+                                className={selectCls}
+                                placeholder={line.category && line.category !== "all" ? "ابحث في الحسابات..." : "ابحث في جميع الحسابات..."}
+                                value={comboSearch[idx] ?? ""}
+                                onChange={(e) => {
+                                  setOpenComboIdx(idx);
+                                  setComboSearch((p) => ({ ...p, [idx]: e.target.value }));
+                                }}
+                                onFocus={() => setOpenComboIdx(idx)}
+                                onBlur={() => setTimeout(() => {
+                                  setOpenComboIdx((c) => (c === idx ? null : c));
+                                  setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
+                                }, 200)}
+                              />
                             )}
-                          </select>
+                            {openComboIdx === idx && (
+                              <div className="absolute top-full mt-0.5 start-0 z-30 min-w-full w-64 max-h-52 overflow-y-auto rounded border border-border bg-surface shadow-lg">
+                                {visible.length === 0 ? (
+                                  <div className="px-3 py-2 text-xs text-textSecondary">لا توجد نتائج مطابقة</div>
+                                ) : (
+                                  visible.slice(0, 30).map((a) => (
+                                    <button
+                                      key={a.id}
+                                      type="button"
+                                      className="w-full text-start px-2 py-1.5 text-sm hover:bg-background transition-colors"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        handleAccountChange(idx, a.id);
+                                        setOpenComboIdx(null);
+                                        setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
+                                      }}
+                                    >
+                                      <span className="font-mono text-xs text-textSecondary me-1">{a.code}</span>
+                                      {a.nameAr}
+                                    </button>
+                                  ))
+                                )}
+                                {visible.length > 30 && (
+                                  <div className="px-2 py-1 text-xs text-textSecondary border-t border-border">
+                                    {visible.length - 30} نتيجة أخرى — اكتب للتضييق
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </td>
 

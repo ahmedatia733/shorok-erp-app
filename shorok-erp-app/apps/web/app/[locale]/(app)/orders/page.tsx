@@ -13,6 +13,7 @@ import { EmptyState } from "../../../../components/ui/empty-state";
 import { Skeleton } from "../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../components/ui/table";
 import { BranchPicker } from "../../../../components/features/inventory/branch-picker";
+import { Input } from "../../../../components/ui/input";
 import { ApiClientError } from "../../../../lib/api-client";
 import { listOrders, deleteOrder, approveOrderPrice, type OrderListRow } from "../../../../lib/orders-client";
 import { formatCurrency, formatDate } from "../../../../lib/format";
@@ -53,8 +54,15 @@ export default function OrdersPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [listSearch,  setListSearch]  = useState("");
 
   const isOwner = user?.role === "OWNER";
+
+  const displayedRows = listSearch
+    ? rows.filter((r) =>
+        r.customerName.toLowerCase().includes(listSearch.toLowerCase()),
+      )
+    : rows;
 
   const handleDelete = async () => {
     if (!deletingId) return;
@@ -138,7 +146,20 @@ export default function OrdersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("title")}</CardTitle>
+          <div className="flex items-center gap-3 flex-wrap flex-1">
+            <CardTitle>{t("title")}</CardTitle>
+            <Input
+              placeholder="بحث باسم العميل أو المنتج..."
+              value={listSearch}
+              onChange={(e) => setListSearch(e.target.value)}
+              className="max-w-xs"
+            />
+            {listSearch && (
+              <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>
+                مسح ✕
+              </button>
+            )}
+          </div>
         </CardHeader>
         <CardBody>
           {error ? (
@@ -155,8 +176,8 @@ export default function OrdersPage() {
             </div>
           ) : !branchId ? (
             <EmptyState title={t("branchPicker")} />
-          ) : rows.length === 0 ? (
-            <EmptyState title={t("empty")} />
+          ) : displayedRows.length === 0 ? (
+            <EmptyState title={listSearch ? "لا توجد نتائج مطابقة" : t("empty")} />
           ) : (
             <Table>
               <THead>
@@ -181,7 +202,7 @@ export default function OrdersPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((o) => {
+                {displayedRows.map((o) => {
                   const isDeleting = deletingId === o.id;
                   return (
                     <TR key={o.id}>
