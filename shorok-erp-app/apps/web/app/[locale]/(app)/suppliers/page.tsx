@@ -66,7 +66,7 @@ export default function SuppliersListPage() {
               placeholder="بحث باسم المورد..."
               value={listSearch}
               onChange={(e) => setListSearch(e.target.value)}
-              className="max-w-xs"
+              className="max-w-xs border-2 border-primary/40 bg-background"
             />
             {listSearch && (
               <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>

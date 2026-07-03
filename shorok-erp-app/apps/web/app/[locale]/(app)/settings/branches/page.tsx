@@ -191,7 +191,7 @@ export default function SettingsBranchesPage() {
         <CardHeader>
           <CardTitle>{t("title")}</CardTitle>
           <div className="flex items-center gap-2">
-            <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+            <Input placeholder="بحث هنا..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs border-2 border-primary/40 bg-background" />
             {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
           </div>
         </CardHeader>

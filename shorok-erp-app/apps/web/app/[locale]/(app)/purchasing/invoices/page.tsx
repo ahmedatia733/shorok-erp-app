@@ -524,7 +524,7 @@ export default function PurchaseInvoicesPage() {
           placeholder="بحث برقم الفاتورة أو اسم المورد..."
           value={listSearch}
           onChange={(e) => setListSearch(e.target.value)}
-          className="max-w-sm"
+          className="max-w-sm border-2 border-primary/40 bg-background"
         />
         {listSearch && (
           <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>

@@ -72,7 +72,7 @@ export default function InventoryPage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-page-title">{t("title")}</h1>
         <div className="flex items-center gap-2">
-          <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+          <Input placeholder="بحث هنا..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs border-2 border-primary/40 bg-background" />
           {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
           <BranchPicker value={branchId} onChange={setBranchId} />
         </div>

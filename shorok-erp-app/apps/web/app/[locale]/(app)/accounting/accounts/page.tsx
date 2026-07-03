@@ -274,7 +274,7 @@ export default function AccountsPage() {
             placeholder="بحث بالاسم أو الكود..."
             value={accountSearch}
             onChange={(e) => setAccountSearch(e.target.value)}
-            className="w-60"
+            className="w-60 border-2 border-primary/40 bg-background"
           />
           {accountSearch && (
             <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setAccountSearch("")}>

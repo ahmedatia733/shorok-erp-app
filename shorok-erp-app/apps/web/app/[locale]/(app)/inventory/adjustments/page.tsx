@@ -64,7 +64,7 @@ export default function AdjustmentsListPage() {
         <h1 className="text-xl font-bold">التسويات</h1>
         <div className="flex items-center gap-3">
           <BranchPicker value={branchId} onChange={setBranchId} />
-          <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+          <Input placeholder="بحث هنا..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs border-2 border-primary/40 bg-background" />
           {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
           {branchId && (
             <Link href={`/${locale}/inventory/adjustments/new?branchId=${branchId}`}>

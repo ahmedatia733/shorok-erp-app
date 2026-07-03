@@ -405,7 +405,7 @@ export default function JournalPage() {
           placeholder="بحث بالبيان أو المرجع أو رقم القيد..."
           value={listSearch}
           onChange={(e) => setListSearch(e.target.value)}
-          className="max-w-sm"
+          className="max-w-sm border-2 border-primary/40 bg-background"
         />
         {listSearch && (
           <span className="text-sm text-textSecondary">{displayedEntries.length} نتيجة</span>
