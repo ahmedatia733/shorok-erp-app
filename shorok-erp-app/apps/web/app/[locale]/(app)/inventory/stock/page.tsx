@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Alert } from "../../../../../components/ui/alert";
+import { Input } from "../../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { getInventoryBalance, type InventoryItem } from "../../../../../lib/payments-client";
 import { listBranches, type BranchSummary } from "../../../../../lib/inventory-client";
@@ -17,6 +18,7 @@ export default function StockPage() {
   const [rows, setRows] = useState<InventoryItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [listSearch, setListSearch] = useState("");
 
   useEffect(() => {
     void (async () => {
@@ -47,8 +49,16 @@ export default function StockPage() {
     }
   }
 
-  const grouped = rows
-    ? rows.reduce(
+  const displayedRows = listSearch && rows
+    ? rows.filter((r) =>
+        (r.skuNameAr + " " + r.skuNameEn + " " + r.skuCode)
+          .toLowerCase()
+          .includes(listSearch.toLowerCase())
+      )
+    : rows;
+
+  const grouped = displayedRows
+    ? displayedRows.reduce(
         (acc, r) => {
           const key = r.branchId;
           if (!acc[key]) acc[key] = { nameAr: r.branchNameAr, items: [] };
@@ -67,7 +77,7 @@ export default function StockPage() {
       <h1 className="text-2xl font-bold">جرد المخزون</h1>
 
       {/* Filter */}
-      <div className="bg-surface border border-border rounded-lg p-4 flex items-center gap-4">
+      <div className="bg-surface border border-border rounded-lg p-4 flex items-center gap-4 flex-wrap">
         <div>
           <label className="block text-xs text-textSecondary mb-1">الفرع</label>
           <select
@@ -80,6 +90,10 @@ export default function StockPage() {
               <option key={b.id} value={b.id}>{b.nameAr}</option>
             ))}
           </select>
+        </div>
+        <div className="flex items-center gap-2 mt-4">
+          <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+          {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
         </div>
         <button
           type="button"

@@ -33,6 +33,7 @@ export default function SettingsProductsPage() {
   const [variants, setVariants] = useState<VariantRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [listSearch, setListSearch] = useState("");
 
   // SKU create form
   const [code, setCode] = useState("");
@@ -388,13 +389,17 @@ export default function SettingsProductsPage() {
       <Card>
         <CardHeader>
           <CardTitle>{t("title")}</CardTitle>
+          <div className="flex items-center gap-2">
+            <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+            {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
+          </div>
         </CardHeader>
         <CardBody>
           {skus === null ? (
             <Skeleton className="h-10" />
           ) : (
             <div className="space-y-4">
-              {skus.map((s) => {
+              {(listSearch ? skus.filter((s) => (s.code + " " + s.colorNameAr + " " + (s.colorNameEn ?? "")).toLowerCase().includes(listSearch.toLowerCase())) : skus).map((s) => {
                 const vs = variantsBySku.get(s.id) ?? [];
                 return (
                   <div key={s.id} className="rounded-md border border-border p-3">

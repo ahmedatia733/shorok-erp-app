@@ -32,6 +32,7 @@ export default function SettingsUsersPage() {
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [listSearch, setListSearch] = useState("");
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("+20");
@@ -207,6 +208,10 @@ export default function SettingsUsersPage() {
       <Card>
         <CardHeader>
           <CardTitle>{t("title")}</CardTitle>
+          <div className="flex items-center gap-2">
+            <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+            {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
+          </div>
         </CardHeader>
         <CardBody>
           {rows === null ? (
@@ -223,7 +228,7 @@ export default function SettingsUsersPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((u) => (
+                {(listSearch ? (rows ?? []).filter((u) => (u.name + " " + (u.phone ?? "")).toLowerCase().includes(listSearch.toLowerCase())) : (rows ?? [])).map((u) => (
                   <TR key={u.id}>
                     <TD className="font-medium">{u.name}</TD>
                     <TD dir="ltr" className="text-textSecondary">

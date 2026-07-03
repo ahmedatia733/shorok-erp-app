@@ -9,6 +9,7 @@ import { Badge } from "../../../../components/ui/badge";
 import { Button } from "../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../components/ui/card";
 import { EmptyState } from "../../../../components/ui/empty-state";
+import { Input } from "../../../../components/ui/input";
 import { Skeleton } from "../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../components/ui/table";
 import { BranchPicker } from "../../../../components/features/inventory/branch-picker";
@@ -29,6 +30,7 @@ export default function InventoryPage() {
   const [branchId, setBranchId] = useState<string | null>(null);
   const [rows, setRows] = useState<BalanceRow[]>([]);
   const [recentMovements, setRecentMovements] = useState<MovementRow[]>([]);
+  const [listSearch, setListSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,11 +59,23 @@ export default function InventoryPage() {
 
   const canWrite = user?.role && ["OWNER", "BRANCH_MANAGER", "WAREHOUSE"].includes(user.role);
 
+  const displayedRows = listSearch
+    ? rows.filter((r) =>
+        (r.sku.colorNameAr + " " + r.sku.colorNameEn + " " + r.sku.code)
+          .toLowerCase()
+          .includes(listSearch.toLowerCase())
+      )
+    : rows;
+
   return (
     <div className="space-y-section">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-page-title">{t("title")}</h1>
-        <BranchPicker value={branchId} onChange={setBranchId} />
+        <div className="flex items-center gap-2">
+          <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+          {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
+          <BranchPicker value={branchId} onChange={setBranchId} />
+        </div>
       </div>
 
       {canWrite && branchId ? (
@@ -100,7 +114,7 @@ export default function InventoryPage() {
             </div>
           ) : !branchId ? (
             <EmptyState title={t("branchPicker")} />
-          ) : rows.length === 0 ? (
+          ) : displayedRows.length === 0 ? (
             <EmptyState title={t("noBalances")} />
           ) : (
             <Table>
@@ -120,7 +134,7 @@ export default function InventoryPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((row) => (
+                {displayedRows.map((row) => (
                   <TR key={row.productVariantId}>
                     <TD>{locale === "ar" ? row.sku.colorNameAr : row.sku.colorNameEn}</TD>
                     <TD dir="ltr">{row.sku.code}</TD>

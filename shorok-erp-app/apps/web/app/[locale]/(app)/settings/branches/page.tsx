@@ -30,6 +30,7 @@ export default function SettingsBranchesPage() {
   const [rows, setRows] = useState<BranchRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [listSearch, setListSearch] = useState("");
 
   // Create form
   const [nameAr, setNameAr] = useState("");
@@ -189,6 +190,10 @@ export default function SettingsBranchesPage() {
       <Card>
         <CardHeader>
           <CardTitle>{t("title")}</CardTitle>
+          <div className="flex items-center gap-2">
+            <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+            {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
+          </div>
         </CardHeader>
         <CardBody>
           {rows === null ? (
@@ -205,7 +210,7 @@ export default function SettingsBranchesPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((b) => (
+                {(listSearch ? (rows ?? []).filter((b) => (b.nameAr + " " + (b.nameEn ?? "")).toLowerCase().includes(listSearch.toLowerCase())) : (rows ?? [])).map((b) => (
                   <TR key={b.id}>
                     <TD className="font-medium">{b.nameAr}</TD>
                     <TD dir="ltr" className="text-textSecondary">

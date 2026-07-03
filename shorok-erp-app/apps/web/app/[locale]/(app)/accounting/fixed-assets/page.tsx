@@ -49,6 +49,7 @@ export default function FixedAssetsPage() {
   const [depOpen, setDepOpen] = useState<FixedAssetSummary | null>(null);
   const [detailOpen, setDetailOpen] = useState<FixedAssetDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [listSearch, setListSearch] = useState("");
 
   const loadAssets = () => {
     setLoading(true);
@@ -79,14 +80,33 @@ export default function FixedAssetsPage() {
     }
   };
 
+  const displayedAssets = listSearch
+    ? assets.filter((a) =>
+        (a.code + " " + a.nameAr + " " + (a.nameEn ?? ""))
+          .toLowerCase()
+          .includes(listSearch.toLowerCase()),
+      )
+    : assets;
+
   return (
     <div className="space-y-4 p-4" dir="rtl">
       {/* Top bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-textPrimary">الأصول الثابتة</h1>
-        {canRecord && (
-          <Button onClick={() => setCreateOpen(true)}>+ إضافة أصل ثابت</Button>
-        )}
+        <div className="flex items-center gap-3">
+          <Input
+            placeholder="بحث بالاسم أو الكود..."
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            className="w-56"
+          />
+          {listSearch && (
+            <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>
+          )}
+          {canRecord && (
+            <Button onClick={() => setCreateOpen(true)}>+ إضافة أصل ثابت</Button>
+          )}
+        </div>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
@@ -113,14 +133,14 @@ export default function FixedAssetsPage() {
             </TR>
           </THead>
           <TBody>
-            {assets.length === 0 && (
+            {displayedAssets.length === 0 && (
               <TR>
                 <TD colSpan={8} className="text-center text-textSecondary py-8">
-                  لا توجد أصول ثابتة مسجلة
+                  {listSearch ? "لا توجد نتائج مطابقة" : "لا توجد أصول ثابتة مسجلة"}
                 </TD>
               </TR>
             )}
-            {assets.map((asset) => {
+            {displayedAssets.map((asset) => {
               const bv = parseFloat(asset.bookValue);
               return (
                 <TR key={asset.id}>

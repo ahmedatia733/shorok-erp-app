@@ -7,6 +7,7 @@ import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
 import { Button } from "../../../../../components/ui/button";
 import { EmptyState } from "../../../../../components/ui/empty-state";
+import { Input } from "../../../../../components/ui/input";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { BranchPicker } from "../../../../../components/features/inventory/branch-picker";
@@ -18,6 +19,7 @@ export default function AdjustmentsListPage() {
   const locale = useLocale() as AppLocale;
   const [branchId, setBranchId] = useState<string | null>(null);
   const [rows, setRows]         = useState<MovementRow[]>([]);
+  const [listSearch, setListSearch] = useState("");
   const [cursor, setCursor]     = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -48,12 +50,22 @@ export default function AdjustmentsListPage() {
     }
   }
 
+  const displayedRows = listSearch
+    ? rows.filter((m) =>
+        (m.productVariant.sku.colorNameAr + " " + m.productVariant.sku.code + " " + (m.humanReadableNote ?? ""))
+          .toLowerCase()
+          .includes(listSearch.toLowerCase())
+      )
+    : rows;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-bold">التسويات</h1>
         <div className="flex items-center gap-3">
           <BranchPicker value={branchId} onChange={setBranchId} />
+          <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+          {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
           {branchId && (
             <Link href={`/${locale}/inventory/adjustments/new?branchId=${branchId}`}>
               <Button>+ تسوية جديدة</Button>
@@ -70,7 +82,7 @@ export default function AdjustmentsListPage() {
         </div>
       ) : !branchId ? (
         <EmptyState title="اختر الفرع أولاً" />
-      ) : rows.length === 0 ? (
+      ) : displayedRows.length === 0 ? (
         <EmptyState title="لا توجد تسويات لهذا الفرع" />
       ) : (
         <>
@@ -87,7 +99,7 @@ export default function AdjustmentsListPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((m) => {
+                {displayedRows.map((m) => {
                   const boards = parseFloat(m.boardsQuantity);
                   const meters = parseFloat(m.metersQuantity);
                   return (

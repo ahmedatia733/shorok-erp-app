@@ -36,6 +36,7 @@ export default function FactoryOrdersPage() {
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [rows, setRows] = useState<FactoryEntryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [listSearch, setListSearch] = useState("");
 
   // delete state
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -138,6 +139,10 @@ export default function FactoryOrdersPage() {
     }
   };
 
+  const displayedRows = listSearch
+    ? (rows ?? []).filter((r) => (r.notes ?? "").toLowerCase().includes(listSearch.toLowerCase()))
+    : (rows ?? []);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -185,6 +190,10 @@ export default function FactoryOrdersPage() {
       <Card>
         <CardHeader>
           <CardTitle>{t("ledger")}</CardTitle>
+          <div className="flex items-center gap-2">
+            <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+            {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
+          </div>
         </CardHeader>
         <CardBody>
           {!supplierId ? (
@@ -195,7 +204,7 @@ export default function FactoryOrdersPage() {
               <Skeleton className="h-10" />
               <Skeleton className="h-10" />
             </div>
-          ) : rows.length === 0 ? (
+          ) : displayedRows.length === 0 ? (
             <EmptyState title={t("empty")} />
           ) : (
             <Table>
@@ -212,7 +221,7 @@ export default function FactoryOrdersPage() {
                 </TR>
               </THead>
               <TBody>
-                {rows.map((r) => {
+                {displayedRows.map((r) => {
                   const isPayment = r.productVariantId === null;
                   const productLabel = r.productVariant
                     ? `${locale === "ar" ? r.productVariant.sku.colorNameAr : r.productVariant.sku.colorNameEn} · ${r.productVariant.sku.code} · ${r.productVariant.sizeMetersPerBoard} m`

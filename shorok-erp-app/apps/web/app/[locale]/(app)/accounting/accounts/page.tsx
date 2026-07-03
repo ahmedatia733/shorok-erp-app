@@ -130,6 +130,7 @@ export default function AccountsPage() {
   const [editForm, setEditForm] = useState({ nameAr: "", nameEn: "", active: true });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [accountSearch, setAccountSearch] = useState("");
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -256,19 +257,53 @@ export default function AccountsPage() {
 
   const allFlat = getAllFlat(accounts);
   const leafAccounts = allFlat.filter((a) => a.isLeaf && a.active);
+  const searchResults = accountSearch
+    ? allFlat.filter((a) =>
+        (a.code + " " + a.nameAr + " " + (a.nameEn ?? ""))
+          .toLowerCase()
+          .includes(accountSearch.toLowerCase()),
+      )
+    : null;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="text-xl font-bold">{t("title")}</h1>
-        {isOwner && (
-          <Button onClick={() => setCreateOpen(true)}>{t("addAccount")}</Button>
-        )}
+        <div className="flex items-center gap-3">
+          <Input
+            placeholder="بحث بالاسم أو الكود..."
+            value={accountSearch}
+            onChange={(e) => setAccountSearch(e.target.value)}
+            className="w-60"
+          />
+          {accountSearch && (
+            <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setAccountSearch("")}>
+              مسح ✕
+            </button>
+          )}
+          {isOwner && (
+            <Button onClick={() => setCreateOpen(true)}>{t("addAccount")}</Button>
+          )}
+        </div>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
 
-      {CATEGORIES.map((cat) => {
+      {/* Search results flat list */}
+      {searchResults && (
+        <Card>
+          <CardBody className="p-0">
+            {searchResults.length === 0 ? (
+              <div className="px-4 py-6 text-center text-textSecondary text-sm">لا توجد نتائج مطابقة</div>
+            ) : (
+              <AccountTree accounts={searchResults} depth={0} onEdit={openEdit} balances={balances} locale={locale} />
+            )}
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Normal category tree when no search */}
+      {!searchResults && CATEGORIES.map((cat) => {
         const catAccounts = getByCategory(cat);
         if (catAccounts.length === 0) return null;
         const isOpen = expandedCategories.has(cat);

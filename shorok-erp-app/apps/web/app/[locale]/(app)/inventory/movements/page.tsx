@@ -9,6 +9,7 @@ import { Badge } from "../../../../../components/ui/badge";
 import { Button } from "../../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { EmptyState } from "../../../../../components/ui/empty-state";
+import { Input } from "../../../../../components/ui/input";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { BranchPicker } from "../../../../../components/features/inventory/branch-picker";
@@ -49,6 +50,7 @@ export default function MovementsPage() {
   const [referenceType,setReferenceType]= useState<string | null>(null);
   const [type, setType] = useState<MovementType | "ALL">("ALL");
   const [rows, setRows] = useState<MovementRow[]>([]);
+  const [listSearch, setListSearch] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -121,6 +123,14 @@ export default function MovementsPage() {
     window.history.replaceState(null, "", url.toString());
   }
 
+  const displayedRows = listSearch
+    ? rows.filter((m) =>
+        (m.productVariant.sku.colorNameAr + " " + m.productVariant.sku.code + " " + (m.humanReadableNote ?? ""))
+          .toLowerCase()
+          .includes(listSearch.toLowerCase())
+      )
+    : rows;
+
   const isFiltered = !!referenceId;
   const refLabel = referenceType === "purchase_invoice"
     ? "فاتورة مشتريات"
@@ -146,6 +156,8 @@ export default function MovementsPage() {
               </option>
             ))}
           </select>
+          <Input placeholder="بحث..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs" />
+          {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
         </div>
       </div>
 
@@ -186,7 +198,7 @@ export default function MovementsPage() {
               <Skeleton className="h-8 w-full" />
               <Skeleton className="h-8 w-full" />
             </div>
-          ) : rows.length === 0 ? (
+          ) : displayedRows.length === 0 ? (
             <EmptyState title={t("empty")} />
           ) : (
             <>
@@ -205,7 +217,7 @@ export default function MovementsPage() {
                   </TR>
                 </THead>
                 <TBody>
-                  {rows.map((m) => (
+                  {displayedRows.map((m) => (
                     <TR key={m.id}>
                       <TD dir="ltr">{formatDateTime(m.createdAt, locale)}</TD>
                       <TD>
