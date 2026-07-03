@@ -27,42 +27,21 @@ import { formatDate, formatCurrency } from "../../../../../lib/format";
 // ─── Category definitions (shared with templates page) ────────────────────────
 
 const CATEGORIES = [
-  { id: "banks",     label: "البنوك",               special: false },
-  { id: "vaults",    label: "الخزن",                special: false },
-  { id: "cash",      label: "الصندوق والنقدية",      special: false },
-  { id: "ar",        label: "الذمم المدينة",         special: false },
-  { id: "ap",        label: "الذمم الدائنة",         special: false },
-  { id: "revenue",   label: "الإيرادات",             special: false },
-  { id: "cogs",      label: "تكلفة المبيعات",        special: false },
-  { id: "expense",   label: "المصروفات",             special: false },
-  { id: "fixed",     label: "الأصول الثابتة",        special: false },
-  { id: "inventory", label: "المخزون والبضاعة",      special: false },
-  { id: "tax",       label: "الضرائب",               special: false },
-  { id: "equity",    label: "رأس المال",             special: false },
-  { id: "customers", label: "العملاء",               special: true  },
-  { id: "suppliers", label: "الموردون",              special: true  },
-  { id: "all",       label: "جميع الحسابات",         special: false },
+  { id: "ASSET",         label: "الأصول — بنوك • خزن • نقد • ذمم مدينة • مخزون",  special: false },
+  { id: "LIABILITY",     label: "الخصوم — ذمم دائنة • قروض • مستحقات",             special: false },
+  { id: "EQUITY",        label: "رأس المال والاحتياطيات",                           special: false },
+  { id: "REVENUE",       label: "الإيرادات والمبيعات",                              special: false },
+  { id: "COST_OF_SALES", label: "تكلفة البضاعة المباعة",                           special: false },
+  { id: "EXPENSE",       label: "المصروفات — إيجار • رواتب • كهرباء • ...",        special: false },
+  { id: "customers",     label: "العملاء",                                          special: true  },
+  { id: "suppliers",     label: "الموردون",                                         special: true  },
+  { id: "all",           label: "جميع الحسابات",                                   special: false },
 ];
 
 function filterAccounts(cat: string, accounts: AccountRow[]): AccountRow[] {
   if (cat === "customers" || cat === "suppliers") return [];
-  const both = (a: AccountRow) => (a.nameAr + " " + (a.nameEn ?? "")).toLowerCase();
-  const tests: Record<string, (a: AccountRow) => boolean> = {
-    banks:     (a) => a.category === "ASSET"       && /بنك|مصرف|bank|cib|nbe|qnb|hsbc/i.test(both(a)),
-    vaults:    (a) => a.category === "ASSET"       && /خزن|خزينة|vault|safe/i.test(both(a)),
-    cash:      (a) => a.category === "ASSET"       && /صندوق|نقد|كاش|cash|petty/i.test(both(a)),
-    ar:        (a) => a.category === "ASSET"       && /مدين|ذمم|عميل|receivabl/i.test(both(a)),
-    ap:        (a) => a.category === "LIABILITY"   && /دائن|مورد|ذمم|payabl/i.test(both(a)),
-    revenue:   (a) => a.category === "REVENUE",
-    cogs:      (a) => a.category === "COST_OF_SALES",
-    expense:   (a) => a.category === "EXPENSE",
-    fixed:     (a) => a.accountType === "FIXED_ASSET",
-    inventory: (a) => /مخزون|بضاع|سلع|stock|inventor/i.test(both(a)),
-    tax:       (a) => /ضريب|tax|vat/i.test(both(a)),
-    equity:    (a) => a.category === "EQUITY",
-    all:       () => true,
-  };
-  return accounts.filter((a) => a.isLeaf && a.active && (tests[cat] ?? (() => true))(a));
+  if (cat === "all") return accounts.filter((a) => a.isLeaf && a.active);
+  return accounts.filter((a) => a.isLeaf && a.active && a.category === cat);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
