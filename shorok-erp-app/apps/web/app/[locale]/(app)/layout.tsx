@@ -118,6 +118,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
             onToggle={() => setPurchasingOpen((v) => !v)}
           >
             <NavLink href={`/${locale}/purchasing/invoices`} label={t("purchaseInvoices")} />
+            <NavLink href={`/${locale}/purchasing/supplier-payments`} label="دفعات الموردين" />
             <NavLink href={`/${locale}/suppliers`} label={t("suppliers")} />
             <NavLink href={`/${locale}/factory-orders`} label={t("factoryOrders")} />
           </NavSection>

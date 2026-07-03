@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from "@nestjs/common";
-import { CreatePaymentSchema, StatementQuerySchema, type CreatePayment, type StatementQuery } from "@shorok/shared";
+import { CreatePaymentSchema, CreateSupplierPaymentSchema, StatementQuerySchema, type CreatePayment, type CreateSupplierPayment, type StatementQuery } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -131,6 +131,66 @@ export class PaymentsController {
     });
   }
 
+  // ── Supplier Payment (GL-based) ─────────────────────────────────────
+
+  @Post("supplier-payments")
+  @Roles("OWNER", "ACCOUNTANT")
+  async createSupplierPayment(
+    @Body(new ZodValidationPipe(CreateSupplierPaymentSchema)) body: CreateSupplierPayment,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const [supplier, apAccount, bankAccount] = await Promise.all([
+      this.prisma.supplier.findUnique({ where: { id: body.supplierId } }),
+      this.prisma.account.findUnique({ where: { id: body.apAccountId } }),
+      this.prisma.account.findUnique({ where: { id: body.bankAccountId } }),
+    ]);
+    if (!supplier) throw new NotFoundError({ supplierId: body.supplierId });
+    if (!apAccount) throw new NotFoundError({ apAccountId: body.apAccountId });
+    if (!bankAccount) throw new NotFoundError({ bankAccountId: body.bankAccountId });
+
+    return this.prisma.runInTransaction(async (tx) => {
+      const counter = await tx.journalEntry.count();
+      const entryNumber = BigInt(counter + 1);
+
+      const description = body.notes
+        ? `سداد للمورد ${supplier.nameAr} — ${body.notes}`
+        : `سداد للمورد ${supplier.nameAr}`;
+
+      const entry = await tx.journalEntry.create({
+        data: {
+          entryNumber,
+          entryType: "PAYMENT",
+          entryDate: new Date(body.paymentDate),
+          description,
+          reference: body.reference ?? null,
+          referenceType: "supplier_payment",
+          referenceId: body.supplierId,
+          createdBy: user.id,
+          lines: {
+            create: [
+              { accountId: body.apAccountId,   debit: body.amount, credit: "0", note: `سداد للمورد ${supplier.nameAr}` },
+              { accountId: body.bankAccountId, debit: "0", credit: body.amount, note: apAccount.nameAr },
+            ],
+          },
+        },
+        include: { lines: true },
+      });
+
+      await this.audit.write({
+        tx,
+        actorId: user.id,
+        action: "CREATE",
+        entityType: "supplier_payment",
+        entityId: entry.id,
+        afterSnapshot: { supplierId: body.supplierId, amount: body.amount, apAccountId: body.apAccountId, bankAccountId: body.bankAccountId },
+        summaryAr: `${user.name} سجّل دفعة ${body.amount} ج.م للمورد ${supplier.nameAr}`,
+        summaryEn: `${user.name} recorded supplier payment ${body.amount} EGP to ${supplier.nameEn}`,
+      });
+
+      return { journalEntryId: entry.id, entryNumber: Number(entry.entryNumber) };
+    });
+  }
+
   // ── Statements ──────────────────────────────────────────────────────
 
   @Get("statements/supplier/:id")
@@ -146,7 +206,7 @@ export class PaymentsController {
     if (query.from) dateFilter.gte = new Date(query.from);
     if (query.to) dateFilter.lte = new Date(query.to);
 
-    const [invoices, payments] = await Promise.all([
+    const [invoices, payments, journalPayments] = await Promise.all([
       this.prisma.purchaseInvoice.findMany({
         where: { supplierId, status: "CONFIRMED", ...(Object.keys(dateFilter).length ? { invoiceDate: dateFilter } : {}) },
         orderBy: { invoiceDate: "asc" },
@@ -155,6 +215,15 @@ export class PaymentsController {
         where: { entityType: "SUPPLIER", entityId: supplierId, ...(Object.keys(dateFilter).length ? { paymentDate: dateFilter } : {}) },
         include: { paymentAccount: true },
         orderBy: { paymentDate: "asc" },
+      }),
+      this.prisma.journalEntry.findMany({
+        where: {
+          referenceType: "supplier_payment",
+          referenceId: supplierId,
+          ...(Object.keys(dateFilter).length ? { entryDate: dateFilter } : {}),
+        },
+        include: { lines: { include: { account: { select: { nameAr: true } } } } },
+        orderBy: { entryDate: "asc" },
       }),
     ]);
 
@@ -178,6 +247,23 @@ export class PaymentsController {
         debit: p.amount.toString(),
         credit: "0.00",
       })),
+      ...journalPayments.map((je) => {
+        // The AP line (debit side) is the payment amount
+        const apLine = je.lines.find((l) => parseFloat(l.debit.toString()) > 0);
+        const bankLine = je.lines.find((l) => parseFloat(l.credit.toString()) > 0);
+        const amount = apLine ? apLine.debit.toString() : "0.00";
+        const bankName = bankLine?.account?.nameAr ?? "";
+        return {
+          id: je.id,
+          date: je.entryDate,
+          type: "payment",
+          reference: je.reference ?? `قيد #${Number(je.entryNumber)}`,
+          description: `سداد — ${bankName}`,
+          debit: amount,
+          credit: "0.00",
+          journalEntryId: je.id,
+        };
+      }),
     ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     let balance = 0;

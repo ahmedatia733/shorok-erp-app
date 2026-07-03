@@ -69,6 +69,16 @@ export interface InventoryItem {
 export const listPaymentAccounts = () =>
   apiCall<PaymentAccount[]>("/payment-accounts");
 
+export const createSupplierPayment = (body: {
+  supplierId: string;
+  apAccountId: string;
+  bankAccountId: string;
+  amount: string;
+  paymentDate: string;
+  reference?: string;
+  notes?: string;
+}) => apiCall<{ journalEntryId: string; entryNumber: number }>("/supplier-payments", { method: "POST", body });
+
 export const createPayment = (body: {
   entityType: "SUPPLIER" | "CUSTOMER";
   entityId: string;
