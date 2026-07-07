@@ -15,12 +15,14 @@ import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { InventoryEngine } from "../inventory/inventory.engine";
 
 @Controller("purchase-invoices")
 export class PurchaseInvoicesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly inventoryEngine: InventoryEngine,
   ) {}
 
   private formatInvoice(inv: any) {
@@ -317,6 +319,18 @@ export class PurchaseInvoicesController {
       throw new ValidationError({ reason: "invoice_not_draft", status: existing.status });
     }
 
+    // Hotfix T002 (Constitution I & VI): the inventory debit line used to be
+    // conditional while the AP credit was not, so omitting inventoryAccountId
+    // produced an unbalanced journal entry. Both debit-side accounts are now
+    // required up front, and the entry is asserted balanced before creation.
+    if (!body.inventoryAccountId) {
+      throw new ValidationError({ reason: "inventory_account_required" });
+    }
+    const preTax = new Decimal(existing.taxAmount.toString());
+    if (preTax.gt(0) && !body.taxAccountId) {
+      throw new ValidationError({ reason: "tax_account_required_when_tax_exists" });
+    }
+
     return this.prisma.runInTransaction(async (tx) => {
       // ── 1. Journal entry: DR Inventory + DR Tax / CR AP ──────────────────
       const subtotal   = new Decimal(existing.subtotal.toString());
@@ -326,14 +340,12 @@ export class PurchaseInvoicesController {
 
       const journalLines: Array<{ accountId: string; debit: string; credit: string; note: string }> = [];
 
-      if (body.inventoryAccountId) {
-        journalLines.push({
-          accountId: body.inventoryAccountId,
-          debit:  subtotal.toFixed(2),
-          credit: "0",
-          note: `مخزون — فاتورة مشتريات ${invoiceNumber}`,
-        });
-      }
+      journalLines.push({
+        accountId: body.inventoryAccountId!,
+        debit:  subtotal.toFixed(2),
+        credit: "0",
+        note: `مخزون — فاتورة مشتريات ${invoiceNumber}`,
+      });
 
       if (body.taxAccountId && taxAmount.gt(0)) {
         journalLines.push({
@@ -351,6 +363,16 @@ export class PurchaseInvoicesController {
         note: `ذمة للمورد — فاتورة مشتريات ${invoiceNumber}`,
       });
 
+      const totalDebit  = journalLines.reduce((a, l) => a.add(l.debit),  new Decimal(0));
+      const totalCredit = journalLines.reduce((a, l) => a.add(l.credit), new Decimal(0));
+      if (!totalDebit.eq(totalCredit)) {
+        throw new ValidationError({
+          reason: "unbalanced_journal_entry",
+          totalDebit: totalDebit.toFixed(2),
+          totalCredit: totalCredit.toFixed(2),
+        });
+      }
+
       const journalEntry = await tx.journalEntry.create({
         data: {
           entryType:     "PURCHASE_INVOICE",
@@ -364,19 +386,23 @@ export class PurchaseInvoicesController {
       });
 
       // ── 2. Inventory movements ────────────────────────────────────────────
+      // Hotfix T001 (Constitution VI): movements MUST go through the
+      // InventoryEngine so the movement row and the BranchInventoryBalance
+      // update commit together — the old direct create left balances stale.
       for (const line of existing.lines) {
-        await tx.inventoryMovement.create({
-          data: {
-            branchId:        existing.branchId,
-            productVariantId: line.productVariantId,
-            movementType:    "RECEIPT",
-            boardsQuantity:  line.boardsQuantity,
-            metersQuantity:  line.metersQuantity,
-            referenceType:   "purchase_invoice",
-            referenceId:     existing.id,
-            createdBy:       user.id,
-            humanReadableNote: `فاتورة مشتريات ${invoiceNumber}`,
-          },
+        const boards = new Decimal(line.boardsQuantity.toString());
+        if (boards.isZero()) continue;
+        await this.inventoryEngine.apply({
+          branchId: existing.branchId,
+          productVariantId: line.productVariantId,
+          movementType: "RECEIPT",
+          boardsDelta: boards,
+          reference: { type: "purchase_invoice", id: existing.id },
+          actor: user,
+          summaryAr: `استلام مخزون — فاتورة مشتريات ${invoiceNumber}`,
+          summaryEn: `Stock receipt — purchase invoice ${invoiceNumber}`,
+          humanReadableNote: `فاتورة مشتريات ${invoiceNumber}`,
+          tx,
         });
       }
 
@@ -424,7 +450,10 @@ export class PurchaseInvoicesController {
   @Post(":id/cancel")
   @Roles("OWNER")
   async cancel(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    const existing = await this.prisma.purchaseInvoice.findUnique({ where: { id } });
+    const existing = await this.prisma.purchaseInvoice.findUnique({
+      where: { id },
+      include: { lines: true },
+    });
     if (!existing) throw new NotFoundError({ id });
     if (existing.status !== "DRAFT" && existing.status !== "CONFIRMED") {
       throw new ValidationError({ reason: "cannot_cancel", status: existing.status });
@@ -451,10 +480,39 @@ export class PurchaseInvoicesController {
           await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
         }
 
-        // Delete inventory movements
-        await tx.inventoryMovement.deleteMany({
-          where: { referenceType: "purchase_invoice", referenceId: id },
+        // Hotfix T001 (Constitution I & VI): stock reversal goes through the
+        // InventoryEngine as compensating negative movements instead of
+        // deleting movement rows — history stays intact and the balance row
+        // is actually decremented. The engine blocks the cancel if the stock
+        // has already been consumed.
+        // Guard: invoices confirmed BEFORE this hotfix wrote movement rows
+        // WITHOUT a balance update; reversing those would corrupt balances.
+        // Engine-applied movements always have a same-transaction audit row
+        // (entity_type=inventory_movement) — only those are reversed here.
+        const receipts = await tx.inventoryMovement.findMany({
+          where: { referenceType: "purchase_invoice", referenceId: id, movementType: "RECEIPT" },
         });
+        const audited = await tx.auditLog.findMany({
+          where: { entityType: "inventory_movement", entityId: { in: receipts.map((r) => r.id) } },
+          select: { entityId: true },
+        });
+        const engineApplied = new Set(audited.map((a) => a.entityId));
+        for (const receipt of receipts.filter((r) => engineApplied.has(r.id))) {
+          const boards = new Decimal(receipt.boardsQuantity.toString());
+          if (boards.isZero()) continue;
+          await this.inventoryEngine.apply({
+            branchId: receipt.branchId,
+            productVariantId: receipt.productVariantId,
+            movementType: "ADJUSTMENT",
+            boardsDelta: boards.negated(),
+            reference: { type: "purchase_invoice_cancel", id },
+            actor: user,
+            summaryAr: `إلغاء استلام مخزون — فاتورة مشتريات ${invoiceNumber}`,
+            summaryEn: `Reverse stock receipt — cancelled purchase invoice ${invoiceNumber}`,
+            humanReadableNote: `إلغاء فاتورة مشتريات ${invoiceNumber}`,
+            tx,
+          });
+        }
       }
 
       await this.audit.write({

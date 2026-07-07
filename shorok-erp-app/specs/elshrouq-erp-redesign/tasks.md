@@ -6,15 +6,15 @@
 **⛔ EXECUTION GATE: No task in this file may be executed until Ahmed Attia explicitly approves implementation. Phase 1 additionally requires its own named approval.**
 **Paths**: repo-relative from `shorok-erp-app/`. Script note: always run Spec Kit scripts with `SPECIFY_FEATURE=elshrouq-erp-redesign` (git root is the parent directory; branch detection fails without it).
 
-## Phase 1: Quarantine hotfixes ⛔ GATED — separate explicit approval required
+## Phase 1: Quarantine hotfixes — ✅ APPROVED & IMPLEMENTED 2026-07-07 (Ahmed Attia)
 
 **Goal**: stop live data corruption; change nothing else.
 **Independent test**: post a purchase invoice on staging → `branch_inventory_balances` increases; malformed confirm payload cannot produce an unbalanced entry.
 
-- [ ] T001 [P1-hotfix] [US1] Route purchase-invoice confirm inventory writes through InventoryEngine.apply (replace direct `tx.inventoryMovement.create` loop) in apps/api/src/modules/purchase-invoices/purchase-invoices.controller.ts
-- [ ] T002 [P1-hotfix] [US1] Add Σdebit==Σcredit assertion (Decimal) before journal creation in purchase-invoice confirm in apps/api/src/modules/purchase-invoices/purchase-invoices.controller.ts
-- [ ] T003 [P1-hotfix] Integration test: purchase confirm updates balance + rejects unbalanced payload in apps/api/src/modules/purchase-invoices/purchase-invoices.hotfix.spec.ts
-- [ ] T004 [P1-hotfix] [P] Mark legacy ledger UIs read-only with migration-notice banner (payments page, factory-orders mutations) in apps/web/app/[locale]/(app)/factory-orders/page.tsx and apps/web/app/[locale]/(app)/purchasing/supplier-payments/page.tsx
+- [x] T001 [P1-hotfix] [US1] Route purchase-invoice confirm inventory writes through InventoryEngine.apply (replace direct `tx.inventoryMovement.create` loop) in apps/api/src/modules/purchase-invoices/purchase-invoices.controller.ts
+- [x] T002 [P1-hotfix] [US1] Add Σdebit==Σcredit assertion (Decimal) before journal creation in purchase-invoice confirm in apps/api/src/modules/purchase-invoices/purchase-invoices.controller.ts
+- [x] T003 [P1-hotfix] Integration test: purchase confirm updates balance + rejects unbalanced payload in apps/api/tests/integration/purchase-invoices-hotfix.spec.ts (repo integration-test convention)
+- [x] T004 [P1-hotfix] [P] Mark legacy ledger UIs read-only with migration-notice banner (payments page, factory-orders mutations) in apps/web/app/[locale]/(app)/factory-orders/page.tsx and apps/web/app/[locale]/(app)/purchasing/supplier-payments/page.tsx
 
 ## Phase 2: Foundation — engine, periods, configuration
 

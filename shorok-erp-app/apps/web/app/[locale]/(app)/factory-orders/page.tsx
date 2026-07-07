@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import Link from "next/link";
 import type { AppLocale } from "../../../../i18n";
 import { Alert } from "../../../../components/ui/alert";
 import { Button } from "../../../../components/ui/button";
@@ -22,16 +21,18 @@ import {
 } from "../../../../lib/factory-ledger-client";
 import { decimalAdd } from "../../../../lib/decimal-string";
 import { formatCurrency, formatDate } from "../../../../lib/format";
-import { useCurrentUser, useHasRole } from "../../../../lib/auth";
+import { useCurrentUser } from "../../../../lib/auth";
 import { ApiClientError } from "../../../../lib/api-client";
 
 export default function FactoryOrdersPage() {
   const t = useTranslations("factory_orders");
   const tCommon = useTranslations("common");
   const locale = useLocale() as AppLocale;
-  const canCreate = useHasRole("ACCOUNTANT");
   const user = useCurrentUser();
-  const isOwner = user?.role === "OWNER";
+  // Phase-1 hotfix T004: legacy-ledger writes (edit/delete rows) frozen
+  // pending migration — owner actions hidden, viewing stays available.
+  const LEGACY_WRITES_FROZEN = true;
+  const isOwner = user?.role === "OWNER" && !LEGACY_WRITES_FROZEN;
 
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [rows, setRows] = useState<FactoryEntryRow[] | null>(null);
@@ -145,15 +146,18 @@ export default function FactoryOrdersPage() {
 
   return (
     <div className="space-y-4">
+      {/* Phase-1 hotfix T004 (specs/elshrouq-erp-redesign): legacy parallel
+          ledger frozen for new writes pending migration. */}
+      <Alert variant="warning">
+        دفتر المصنع قيد الاستبدال ضمن تطوير النظام المحاسبي — العرض متاح، وتسجيل حركات جديدة متوقف.
+        لتسجيل المشتريات الجديدة استخدم{" "}
+        <a href={`/${locale}/purchasing/invoices/new`} className="underline font-medium">
+          فواتير المشتريات
+        </a>
+        .
+      </Alert>
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-bold">{t("title")}</h1>
-        {canCreate ? (
-          <Link
-            href={`/${locale}/factory-orders/new${supplierId ? `?supplierId=${supplierId}` : ""}`}
-          >
-            <Button>{t("create")}</Button>
-          </Link>
-        ) : null}
       </div>
 
       <Card>

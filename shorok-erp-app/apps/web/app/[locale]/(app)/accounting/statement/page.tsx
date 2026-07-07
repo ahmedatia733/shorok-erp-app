@@ -16,7 +16,6 @@ import {
   getSupplierStatement,
   getAccountStatement,
   createPayment,
-  deletePayment,
   type PaymentAccount,
   type SupplierStatement,
   type AccountStatement,
@@ -180,16 +179,6 @@ export default function StatementPage() {
     }
   }
 
-  async function handleDelete(paymentId: string) {
-    if (!confirm("هل تريد حذف هذه الدفعة؟")) return;
-    try {
-      await deletePayment(paymentId);
-      await load();
-    } catch {
-      alert("فشل حذف الدفعة");
-    }
-  }
-
   function switchType(t: EntityType) {
     setEntityType(t);
     setSelectedId("");
@@ -308,10 +297,14 @@ export default function StatementPage() {
                 )}
               </div>
 
+              {/* Phase-1 hotfix T004: this button wrote to the legacy Payment
+                  model which creates NO journal entry (invisible in GL).
+                  Frozen pending migration — supplier payments go through
+                  دفعات الموردين which posts a real GL entry. */}
               {entityType === "supplier" && (
-                <Button variant="primary" size="sm" onClick={() => setPayModal(true)}>
-                  + سداد دفعة
-                </Button>
+                <a href={`/${locale}/purchasing/supplier-payments`}>
+                  <Button variant="primary" size="sm">+ سداد دفعة (من صفحة دفعات الموردين)</Button>
+                </a>
               )}
             </div>
 
@@ -413,19 +406,9 @@ export default function StatementPage() {
                         {parseFloat(e.credit) > 0 ? fmt(e.credit) : "—"}
                       </TD>
                       <BalanceCell v={e.balance} />
-                      {entityType === "supplier" && (
-                        <TD>
-                          {e.type === "payment" && (
-                            <button
-                              type="button"
-                              onClick={() => void handleDelete(e.id ?? "")}
-                              className="text-xs text-red-500 hover:underline"
-                            >
-                              حذف
-                            </button>
-                          )}
-                        </TD>
-                      )}
+                      {/* Phase-1 hotfix T004: legacy payment delete frozen —
+                          history is read-only pending migration. */}
+                      {entityType === "supplier" && <TD />}
                     </TR>
                   ))
                 )}

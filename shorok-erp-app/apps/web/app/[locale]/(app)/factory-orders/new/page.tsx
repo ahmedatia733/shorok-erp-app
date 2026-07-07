@@ -27,6 +27,10 @@ function autoSelectId(accounts: AccountRow[], ...kws: string[]): string {
 
 type Tab = "purchase" | "payment";
 
+/** Phase-1 hotfix T004: factory-ledger writes frozen pending migration
+ *  to purchase invoices + payment vouchers (specs/elshrouq-erp-redesign). */
+const LEGACY_WRITES_FROZEN = true;
+
 function todayISO(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -112,6 +116,17 @@ export default function NewFactoryEntryPage() {
 
   return (
     <div className="max-w-2xl">
+      {/* Phase-1 hotfix T004 (specs/elshrouq-erp-redesign): factory ledger is a
+          legacy parallel ledger being migrated to purchase invoices + payment
+          vouchers; new writes are frozen so migration reconciliation stays clean. */}
+      <Alert variant="warning" className="mb-4">
+        هذه الشاشة قيد الاستبدال ضمن تطوير النظام المحاسبي، وتسجيل حركات جديدة هنا متوقف.
+        لتسجيل المشتريات الجديدة استخدم{" "}
+        <a href={`/${locale}/purchasing/invoices/new`} className="underline font-medium">
+          فواتير المشتريات
+        </a>
+        .
+      </Alert>
       <Card>
         <CardHeader>
           <CardTitle>{t("create")}</CardTitle>
@@ -308,8 +323,11 @@ export default function NewFactoryEntryPage() {
               <Button
                 type="submit"
                 disabled={
-                  submitting || (tab === "purchase" ? !purchaseReady : !paymentReady)
+                  LEGACY_WRITES_FROZEN ||
+                  submitting ||
+                  (tab === "purchase" ? !purchaseReady : !paymentReady)
                 }
+                title="تسجيل حركات دفتر المصنع متوقف — استخدم فواتير المشتريات"
               >
                 {submitting ? tForm("submitting") : tForm("submit")}
               </Button>
