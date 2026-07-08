@@ -18,3 +18,5 @@ export * from "./journal-templates";
 export * from "./customers";
 export * from "./fixed-assets";
 export * from "./sales-invoices";
+export * from "./posting";
+export * from "./configuration";

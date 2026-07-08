@@ -96,6 +96,80 @@ enum AccountType {
   EXPENSE
 }
 
+// ── Phase 2 accounting-foundation enums ──────────────────────────────
+enum FinancialPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum TreasuryType {
+  CASH
+  BANK
+}
+
+enum AccountSystemRole {
+  AR_CONTROL
+  AP_CONTROL
+  VAT_INPUT
+  VAT_OUTPUT
+  INVENTORY
+  COGS
+  REVENUE
+  DISCOUNT
+  ROUNDING
+  RETAINED_EARNINGS
+  OPENING_EQUITY
+  SHRINKAGE
+}
+
+enum JournalEntryStatus {
+  POSTED
+  REVERSED
+}
+
+enum JournalSourceType {
+  SALES_INVOICE
+  PURCHASE_INVOICE
+  SALES_RETURN
+  PURCHASE_RETURN
+  RECEIPT_VOUCHER
+  PAYMENT_VOUCHER
+  EXPENSE
+  ADJUSTMENT
+  DEPRECIATION
+  OPENING
+  MANUAL
+}
+
+enum JournalPartyType {
+  CUSTOMER
+  SUPPLIER
+}
+
+enum TaxRegistrationStatus {
+  REGISTERED
+  NOT_REGISTERED
+}
+
+enum TaxFilingCycle {
+  MONTHLY
+  QUARTERLY
+}
+
+enum PrintBrandingPolicy {
+  CURRENT
+  AS_POSTED
+}
+
+enum PaperSize {
+  A4
+  A5_LANDSCAPE
+}
+
+enum CostingMethod {
+  WAC
+}
+
 // =============================== Branch ==============================
 
 model Branch {
@@ -514,6 +588,11 @@ model Account {
   isLeaf      Boolean         @default(true) @map("is_leaf")
   active      Boolean         @default(true)
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Phase 2 accounting foundation (additive)
+  isCashOrBank Boolean            @default(false) @map("is_cash_or_bank")
+  treasuryType TreasuryType?      @map("treasury_type")
+  bankMeta     Json?              @map("bank_meta")
+  systemRole   AccountSystemRole? @unique @map("system_role")
 
   parent       Account?       @relation("AccountChildren", fields: [parentId], references: [id])
   children     Account[]      @relation("AccountChildren")
@@ -547,14 +626,26 @@ model JournalEntry {
   referenceId   String?   @map("reference_id") @db.Uuid
   createdBy     String    @map("created_by") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Phase 2 accounting foundation (additive; nullable/defaulted for legacy writers)
+  status         JournalEntryStatus @default(POSTED)
+  periodId       String?            @map("period_id") @db.Uuid
+  reversalOfId   String?            @map("reversal_of_id") @db.Uuid
+  sourceType     JournalSourceType? @map("source_type")
+  sourceId       String?            @map("source_id") @db.Uuid
+  idempotencyKey String?            @unique @map("idempotency_key") @db.VarChar(120)
 
   creator  User          @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
   lines    JournalLine[]
   expenses        Expense[]
   collections     OrderCollection[]  @relation("CollectionJournalEntry")
   factoryEntries  FactoryLedgerEntry[] @relation("FactoryEntryJournal")
+  period       FinancialPeriod? @relation(fields: [periodId], references: [id])
+  reversalOf   JournalEntry?    @relation("JournalEntryReversal", fields: [reversalOfId], references: [id])
+  reversedBy   JournalEntry[]   @relation("JournalEntryReversal")
 
   @@index([entryDate(sort: Desc)])
+  @@index([periodId])
+  @@index([sourceType, sourceId])
   @@map("journal_entries")
 }
 
@@ -567,12 +658,17 @@ model JournalLine {
   debit          Decimal @default(0) @db.Decimal(14, 2)
   credit         Decimal @default(0) @db.Decimal(14, 2)
   note           String? @db.VarChar(300)
+  // Phase 2 party/branch dimensions (additive; nullable for legacy writers)
+  partyType JournalPartyType? @map("party_type")
+  partyId   String?           @map("party_id") @db.Uuid
+  branchId  String?           @map("branch_id") @db.Uuid
 
   journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account      Account      @relation(fields: [accountId], references: [id])
 
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([accountId, partyType, partyId])
   @@map("journal_lines")
 }
 
@@ -823,4 +919,148 @@ model SalesInvoiceLine {
 
   @@index([invoiceId])
   @@map("sales_invoice_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase 2 accounting foundation — new models (additive)
+// ═══════════════════════════════════════════════════════════════════
+
+model CompanyProfile {
+  id                   String   @id @default(uuid()) @db.Uuid
+  nameAr               String   @map("name_ar") @db.VarChar(200)
+  nameEn               String   @map("name_en") @db.VarChar(200)
+  logoUrl              String?  @map("logo_url")
+  brandPrimaryColor    String?  @map("brand_primary_color") @db.VarChar(20)
+  currency             String   @default("EGP") @db.Char(3)
+  currencyLockedAt     DateTime? @map("currency_locked_at") @db.Timestamptz(6)
+  taxRegistrationNo    String?  @map("tax_registration_no") @db.VarChar(60)
+  fiscalYearStartMonth Int      @default(1) @map("fiscal_year_start_month")
+  defaultLocale        String   @default("ar") @db.VarChar(5)
+  printFooterAr        String?  @map("print_footer_ar")
+  printFooterEn        String?  @map("print_footer_en")
+  printBrandingPolicy  PrintBrandingPolicy @default(CURRENT) @map("print_branding_policy")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("company_profile")
+}
+
+model FinancialPeriod {
+  id           String   @id @default(uuid()) @db.Uuid
+  year         Int
+  month        Int
+  status       FinancialPeriodStatus @default(OPEN)
+  closedBy     String?  @map("closed_by") @db.Uuid
+  closedAt     DateTime? @map("closed_at") @db.Timestamptz(6)
+  reopenedBy   String?  @map("reopened_by") @db.Uuid
+  reopenedAt   DateTime? @map("reopened_at") @db.Timestamptz(6)
+  reopenReason String?  @map("reopen_reason") @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  journalEntries JournalEntry[]
+
+  @@unique([year, month])
+  @@map("financial_periods")
+}
+
+model PostingProfile {
+  id                        String   @id @default(uuid()) @db.Uuid
+  effectiveFrom             DateTime @map("effective_from") @db.Date
+  arAccountId               String?  @map("ar_account_id") @db.Uuid
+  apAccountId               String?  @map("ap_account_id") @db.Uuid
+  revenueAccountId          String?  @map("revenue_account_id") @db.Uuid
+  cogsAccountId             String?  @map("cogs_account_id") @db.Uuid
+  inventoryAccountId        String?  @map("inventory_account_id") @db.Uuid
+  vatInputAccountId         String?  @map("vat_input_account_id") @db.Uuid
+  vatOutputAccountId        String?  @map("vat_output_account_id") @db.Uuid
+  discountAccountId         String?  @map("discount_account_id") @db.Uuid
+  roundingAccountId         String?  @map("rounding_account_id") @db.Uuid
+  retainedEarningsAccountId String?  @map("retained_earnings_account_id") @db.Uuid
+  openingEquityAccountId    String?  @map("opening_equity_account_id") @db.Uuid
+  shrinkageAccountId        String?  @map("shrinkage_account_id") @db.Uuid
+  createdBy                 String   @map("created_by") @db.Uuid
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([effectiveFrom(sort: Desc)])
+  @@map("posting_profiles")
+}
+
+model TaxProfile {
+  id                 String   @id @default(uuid()) @db.Uuid
+  nameKey            String   @map("name_key") @db.VarChar(100)
+  rate               Decimal  @db.Decimal(5, 2)
+  inputAccountId     String?  @map("input_account_id") @db.Uuid
+  outputAccountId    String?  @map("output_account_id") @db.Uuid
+  registrationStatus TaxRegistrationStatus @default(REGISTERED) @map("registration_status")
+  filingCycle        TaxFilingCycle @default(MONTHLY) @map("filing_cycle")
+  effectiveFrom      DateTime @map("effective_from") @db.Date
+  active             Boolean  @default(true)
+  createdBy          String   @map("created_by") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([effectiveFrom(sort: Desc)])
+  @@map("tax_profiles")
+}
+
+model ExpenseCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  nameAr         String   @map("name_ar") @db.VarChar(160)
+  nameEn         String   @map("name_en") @db.VarChar(160)
+  accountId      String   @map("account_id") @db.Uuid
+  taxableDefault Boolean  @default(false) @map("taxable_default")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("expense_categories")
+}
+
+model NumberingSeries {
+  id           String   @id @default(uuid()) @db.Uuid
+  documentType JournalSourceType @map("document_type")
+  prefix       String   @default("") @db.VarChar(10)
+  padWidth     Int      @default(5) @map("pad_width")
+  nextNumber   BigInt   @default(1) @map("next_number")
+  resetYearly  Boolean  @default(false) @map("reset_yearly")
+  perBranch    Boolean  @default(false) @map("per_branch")
+  branchId     String?  @map("branch_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("numbering_series")
+}
+
+model PrintTemplate {
+  id             String   @id @default(uuid()) @db.Uuid
+  documentType   JournalSourceType @map("document_type")
+  version        Int      @default(1)
+  fieldToggles   Json?    @map("field_toggles")
+  footerAr       String?  @map("footer_ar")
+  footerEn       String?  @map("footer_en")
+  signatureSlots Json?    @map("signature_slots")
+  paper          PaperSize @default(A4)
+  brandingPolicy PrintBrandingPolicy @default(CURRENT) @map("branding_policy")
+  effectiveFrom  DateTime @default(now()) @map("effective_from") @db.Date
+  active         Boolean  @default(true)
+
+  @@map("print_templates")
+}
+
+model CostingSettings {
+  id                   String   @id @default(uuid()) @db.Uuid
+  method               CostingMethod @default(WAC)
+  effectiveFrom        DateTime @default(now()) @map("effective_from") @db.Date
+  changedBy            String?  @map("changed_by") @db.Uuid
+  valuationSnapshotUrl String?  @map("valuation_snapshot_url")
+
+  @@map("costing_settings")
+}
+
+model Warehouse {
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String?  @map("branch_id") @db.Uuid
+  nameAr    String   @map("name_ar") @db.VarChar(160)
+  nameEn    String   @map("name_en") @db.VarChar(160)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("warehouses")
 }
