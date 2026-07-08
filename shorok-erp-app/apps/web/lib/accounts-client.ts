@@ -16,6 +16,25 @@ export interface AccountRow {
 
 export const listAccounts = () => apiCall<AccountRow[]>("/accounts");
 
+/**
+ * Flatten the account tree returned by `listAccounts` to its active leaf
+ * accounts. `GET /accounts` returns a NESTED tree, so a top-level
+ * `.filter(a => a.isLeaf)` misses any leaf nested under a parent (e.g. the
+ * VAT account 2300 under 2000) — the Phase 1 purchase-confirm bug. Always
+ * flatten through this helper before matching/listing postable accounts.
+ */
+export function getLeafAccounts(accounts: AccountRow[]): AccountRow[] {
+  const out: AccountRow[] = [];
+  const walk = (nodes: AccountRow[]) => {
+    for (const a of nodes) {
+      if (a.isLeaf && a.active) out.push(a);
+      if (a.children && a.children.length) walk(a.children);
+    }
+  };
+  walk(accounts);
+  return out;
+}
+
 export const createAccount = (body: {
   code: string;
   nameAr: string;

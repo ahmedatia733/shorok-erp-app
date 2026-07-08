@@ -16,9 +16,10 @@ import {
   type VariantOption,
 } from "../../../../../../lib/purchase-invoices-client";
 import { AP_COLORS, apColorMap } from "../../../../../../lib/ap-colors";
+import { boardArea, totalArea, BOARD_AREA_LARGE, BOARD_AREA_SMALL } from "../../../../../../lib/purchase-sizing";
 
-const SIZE_K = 5.25; // كبير
-const SIZE_S = 4.0;  // صغير
+const SIZE_K = BOARD_AREA_LARGE; // كبير — 5.25 م²/لوح
+const SIZE_S = BOARD_AREA_SMALL; // صغير — 4 م²/لوح
 
 interface InvoiceLine {
   _key: string;
@@ -65,27 +66,21 @@ function recompute(line: InvoiceLine, variant?: VariantOption): Partial<InvoiceL
   const L = parseFloat(line.customL) || 0;
   const W = parseFloat(line.customW) || 0;
 
-  // م² from custom size (طول × عرض)
-  const sqm = L > 0 && W > 0 ? L * W : 0;
+  // Area (م²) per board — standard كبير/صغير, custom طول×عرض, or the
+  // variant's stored size. This is what the "مساحة اللوح" field shows, so
+  // كبير/صغير now display 5.25 / 4 instead of an empty cell.
+  const variantSize = variant ? parseFloat(variant.sizeMetersPerBoard) : 0;
+  const perBoard = boardArea(line.sizeChoice, L, W, variantSize);
 
-  // metersQuantity: custom size overrides ك/ص
-  let meters = 0;
-  if (sqm > 0) {
-    meters = boards * sqm;
-  } else {
-    const sizeM =
-      line.sizeChoice === "K" ? SIZE_K :
-      line.sizeChoice === "S" ? SIZE_S :
-      (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
-    meters = boards * sizeM;
-  }
+  // Total line area (م²) = boards × area per board.
+  const meters = totalArea(boards, perBoard);
 
   const price = parseFloat(line.unitPrice) || 0;
   const lineTotal = meters * price;
   const taxRate = parseFloat(line.taxRate) || 0;
   const taxAmount = (lineTotal * taxRate) / 100;
   return {
-    sqm: sqm > 0 ? sqm.toFixed(4) : "",
+    sqm: perBoard > 0 ? perBoard.toFixed(4) : "",
     metersQuantity: meters > 0 ? meters.toFixed(4) : "",
     lineTotal: lineTotal > 0 ? lineTotal.toFixed(2) : "",
     taxAmount: taxAmount > 0 ? taxAmount.toFixed(2) : "",
@@ -282,15 +277,15 @@ export default function NewPurchaseInvoicePage() {
               <th className="border border-border px-2 py-1.5 text-center w-28">الكود</th>
               <th className="border border-border px-2 py-1.5 text-center min-w-[120px]">اسم الكود</th>
               <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">الصنف</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">عدد</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">كبير</th>
-              <th className="border border-border px-2 py-1.5 text-center w-16">صغير</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14" title="طول (مقاس خاص)">طول</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14" title="عرض (مقاس خاص)">عرض</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16" title="عدد الألواح">عدد الألواح</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16" title="لوح كبير = 5.25 م²">كبير (5.25)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16" title="لوح صغير = 4 م²">صغير (4)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14" title="طول اللوح (مقاس خاص)">طول</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14" title="عرض اللوح (مقاس خاص)">عرض</th>
 
-              <th className="border border-border px-2 py-1.5 text-center w-16" title="متر مربع = طول × عرض">م²</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">الوحدة (م/لوح)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20" title="مساحة اللوح الواحد بالمتر المربع (كبير 5.25 / صغير 4 / طول×عرض)">مساحة اللوح (م²)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24" title="إجمالي المساحة = عدد الألواح × مساحة اللوح">إجمالي المساحة (م²)</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24" title="وصف الوحدة">الوحدة</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">سعر الوحدة</th>
               <th className="border border-border px-2 py-1.5 text-center w-24">الإجمالي</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة %</th>
@@ -349,10 +344,11 @@ export default function NewPurchaseInvoicePage() {
                       dir="ltr"
                     />
                   </td>
-                  {/* ك — كبير 5.25م */}
+                  {/* ك — كبير 5.25 م² */}
                   <td className="border border-border px-1 py-1 text-center">
                     <button
                       type="button"
+                      title="لوح كبير — 5.25 م²"
                       onClick={() => updateLine(idx, { sizeChoice: line.sizeChoice === "K" ? "" : "K" })}
                       className={`w-7 h-7 rounded text-xs font-bold border transition-colors ${
                         line.sizeChoice === "K"
@@ -363,10 +359,11 @@ export default function NewPurchaseInvoicePage() {
                       ك
                     </button>
                   </td>
-                  {/* ص — صغير 4م */}
+                  {/* ص — صغير 4 م² */}
                   <td className="border border-border px-1 py-1 text-center">
                     <button
                       type="button"
+                      title="لوح صغير — 4 م²"
                       onClick={() => updateLine(idx, { sizeChoice: line.sizeChoice === "S" ? "" : "S" })}
                       className={`w-7 h-7 rounded text-xs font-bold border transition-colors ${
                         line.sizeChoice === "S"

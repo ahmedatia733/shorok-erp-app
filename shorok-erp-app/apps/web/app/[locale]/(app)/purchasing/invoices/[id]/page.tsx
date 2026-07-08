@@ -7,6 +7,7 @@ import type { AppLocale } from "../../../../../../i18n";
 import { Alert } from "../../../../../../components/ui/alert";
 import { Button } from "../../../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../../../components/ui/card";
+import { Modal } from "../../../../../../components/ui/modal";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
 import { useHasRole } from "../../../../../../lib/auth";
 import {
@@ -15,7 +16,8 @@ import {
   deletePurchaseInvoice,
   type PurchaseInvoiceRow,
 } from "../../../../../../lib/purchase-invoices-client";
-import { listAccounts } from "../../../../../../lib/accounts-client";
+import { listAccounts, getLeafAccounts, type AccountRow } from "../../../../../../lib/accounts-client";
+import { confirmErrorMessageAr } from "../../../../../../lib/purchase-confirm-error";
 import { formatDate, formatCurrency } from "../../../../../../lib/format";
 
 function autoSelectId(accounts: Awaited<ReturnType<typeof listAccounts>>, ...kws: string[]) {
@@ -58,37 +60,61 @@ export default function PurchaseInvoiceDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Confirm-modal account selection (Phase 1 stabilization). Accounts come
+  // from posting configuration in Phase 3; for now the user picks them here.
+  const [leafAccounts, setLeafAccounts] = useState<AccountRow[]>([]);
+  const [apAccountId, setApAccountId] = useState("");
+  const [taxAccountId, setTaxAccountId] = useState("");
+  const [inventoryAccountId, setInventoryAccountId] = useState("");
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+
   useEffect(() => {
     void getPurchaseInvoice(id)
       .then(setInvoice)
       .catch(() => setError(t("loadFailed")));
   }, [id, t]);
 
-  async function handleConfirm() {
-    setActionLoading(true);
-    try {
-      const allAccounts = await listAccounts();
-      const leaf = allAccounts.filter((a) => a.isLeaf && a.active);
+  function openConfirm() {
+    setConfirmError(null);
+    setConfirmOpen(true);
+    void listAccounts().then((all) => {
+      // Flatten the tree so nested leaves (e.g. VAT 2300 under 2000) appear.
+      const leaf = getLeafAccounts(all);
+      setLeafAccounts(leaf);
       const liab = leaf.filter((a) => a.category === "LIABILITY");
       const asset = leaf.filter((a) => a.category === "ASSET");
-      const apAccountId =
+      setApAccountId(
         autoSelectId(liab, "موردون", "دائنون", "payable", "creditor") ??
-        autoSelectId(leaf, "موردون", "دائنون", "payable", "creditor") ??
-        (liab[0]?.id ?? leaf[0]?.id ?? "");
-      const taxAccountId =
-        autoSelectId(leaf, "ضريبة", "ضرائب", "vat", "tax");
-      const inventoryAccountId =
+          autoSelectId(leaf, "موردون", "دائنون", "payable", "creditor") ??
+          "",
+      );
+      setTaxAccountId(autoSelectId(leaf, "ضريبة", "ضرائب", "vat", "tax") ?? "");
+      setInventoryAccountId(
         autoSelectId(asset, "مخزون", "بضاعة", "inventory", "stock") ??
-        autoSelectId(leaf, "مخزون", "بضاعة", "inventory", "stock");
+          autoSelectId(leaf, "مخزون", "بضاعة", "inventory", "stock") ??
+          "",
+      );
+    });
+  }
+
+  const hasTax = invoice ? parseFloat(invoice.taxAmount) > 0 : false;
+
+  async function handleConfirm() {
+    setConfirmError(null);
+    if (!apAccountId) { setConfirmError("يجب اختيار حساب الموردين قبل ترحيل الفاتورة."); return; }
+    if (!inventoryAccountId) { setConfirmError("يجب اختيار حساب المخزون قبل ترحيل الفاتورة."); return; }
+    if (hasTax && !taxAccountId) { setConfirmError("يجب اختيار حساب ضريبة المشتريات لأن الفاتورة تحتوي على ضريبة."); return; }
+    setActionLoading(true);
+    try {
       const updated = await confirmPurchaseInvoice(id, {
         apAccountId,
-        taxAccountId,
-        inventoryAccountId,
+        taxAccountId: taxAccountId || undefined,
+        inventoryAccountId: inventoryAccountId || undefined,
       });
       setInvoice(updated);
       setConfirmOpen(false);
-    } catch {
-      setError(t("confirmFailed"));
+    } catch (err) {
+      setConfirmError(confirmErrorMessageAr(err));
     } finally {
       setActionLoading(false);
     }
@@ -223,22 +249,7 @@ export default function PurchaseInvoiceDetailPage() {
       {/* Actions */}
       {isOwner && invoice.status === "DRAFT" && (
         <div className="flex gap-3">
-          {confirmOpen ? (
-            <div className="flex items-center gap-2">
-              <span className="text-sm">{t("confirmPrompt")}</span>
-              <Button
-                onClick={() => void handleConfirm()}
-                disabled={actionLoading}
-              >
-                {actionLoading ? tCommon("loading") : tCommon("yes")}
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
-                {tCommon("no")}
-              </Button>
-            </div>
-          ) : (
-            <Button onClick={() => setConfirmOpen(true)}>{t("confirm")}</Button>
-          )}
+          <Button onClick={openConfirm}>{t("confirm")}</Button>
 
           {deleteOpen ? (
             <div className="flex items-center gap-2">
@@ -261,6 +272,85 @@ export default function PurchaseInvoiceDetailPage() {
           )}
         </div>
       )}
+
+      {/* Confirm modal — explicit account selection + clear errors (Phase 1) */}
+      {confirmOpen && (
+        <Modal open onClose={() => setConfirmOpen(false)} title="ترحيل فاتورة المشتريات">
+          <div className="space-y-4 text-sm" dir="rtl">
+            {confirmError && <Alert variant="error">{confirmError}</Alert>}
+
+            <p className="text-textSecondary">
+              اختر الحسابات المطلوبة ثم اضغط ترحيل. سيتم تحديث المخزون وتسجيل القيد المحاسبي.
+            </p>
+
+            <ConfirmAccountSelect
+              label="حساب الموردين (دائن)"
+              required
+              value={apAccountId}
+              onChange={setApAccountId}
+              options={leafAccounts.filter((a) => a.category === "LIABILITY")}
+              fallback={leafAccounts}
+            />
+            <ConfirmAccountSelect
+              label="حساب المخزون (مدين)"
+              required
+              value={inventoryAccountId}
+              onChange={setInventoryAccountId}
+              options={leafAccounts.filter((a) => a.category === "ASSET")}
+              fallback={leafAccounts}
+            />
+            <ConfirmAccountSelect
+              label={`حساب ضريبة المشتريات${hasTax ? " (مطلوب)" : " (اختياري)"}`}
+              required={hasTax}
+              value={taxAccountId}
+              onChange={setTaxAccountId}
+              options={leafAccounts}
+            />
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={actionLoading}>
+                {tCommon("no")}
+              </Button>
+              <Button onClick={() => void handleConfirm()} disabled={actionLoading}>
+                {actionLoading ? tCommon("loading") : t("confirm")}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Simple account dropdown for the Phase 1 confirm modal. `options` is the
+// preferred category-filtered list; `fallback` (optional) widens to all
+// leaves so a mis-categorised account is still selectable.
+function ConfirmAccountSelect({
+  label, required, value, onChange, options, fallback,
+}: {
+  label: string;
+  required?: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  options: AccountRow[];
+  fallback?: AccountRow[];
+}) {
+  const list = options.length > 0 ? options : (fallback ?? []);
+  return (
+    <div className="space-y-1">
+      <label className="text-sm font-medium">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+      >
+        <option value="">— اختر الحساب —</option>
+        {list.map((a) => (
+          <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+        ))}
+      </select>
     </div>
   );
 }

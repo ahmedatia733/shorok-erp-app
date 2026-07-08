@@ -18,7 +18,8 @@ import {
   deletePurchaseInvoice,
   type PurchaseInvoiceRow,
 } from "../../../../../lib/purchase-invoices-client";
-import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { listAccounts, getLeafAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { confirmErrorMessageAr } from "../../../../../lib/purchase-confirm-error";
 import { AP_COLORS, apColorMap } from "../../../../../lib/ap-colors";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 
@@ -132,7 +133,8 @@ function ConfirmModal({
 
   useEffect(() => {
     void listAccounts().then((all) => {
-      const leaf = all.filter((a) => a.isLeaf && a.active);
+      // Flatten the tree so nested leaves (e.g. VAT 2300 under 2000) are found.
+      const leaf = getLeafAccounts(all);
       setLeafAccounts(leaf);
 
       const liabilityAccs = leaf.filter((a) => a.category === "LIABILITY");
@@ -168,8 +170,8 @@ function ConfirmModal({
         inventoryAccountId: inventoryAccountId || undefined,
       });
       onConfirmed(updated);
-    } catch {
-      setError("فشل تأكيد الفاتورة، تحقق من البيانات وحاول مجدداً");
+    } catch (err) {
+      setError(confirmErrorMessageAr(err));
     } finally {
       setSaving(false);
     }
