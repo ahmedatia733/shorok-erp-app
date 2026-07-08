@@ -75,6 +75,7 @@ Replace `paid_from_account VARCHAR` → `paid_from_account_id FK→accounts | ap
 ### ✏️ product_variants
 Add: `avg_cost NUMERIC(14,4) DEFAULT 0, cost_updated_at?, uom_base VARCHAR(20), uom_alt VARCHAR(20)?, uom_conversion NUMERIC(12,4)?` (boards/meters becomes uom config; `size_meters_per_board` migrates into `uom_conversion`).
 Rule: avg_cost server-maintained only, updated under the same row lock as the balance row.
+**UoM semantics (Elshrouq paint-board catalog):** the unit is **area, not linear length**. `size_meters_per_board` (despite its name) holds the **area of one board in square metres** (كبير 5.25, صغير 4, or custom طول×عرض); the stocked/priced quantity is عدد الألواح × area. On the Phase 7 UoM migration, `uom_base` for this catalog should read **م² (square metres)** and `uom_conversion` should carry the per-board area — see A10. The `_meters_` column name is a legacy misnomer to be renamed in that migration (T090); it is NOT linear metres.
 
 ### ✏️ customer_orders
 `customer_name VARCHAR` → `customer_id FK→customers` (migration maps names, unmatched → created customers flagged for review). Collections flow replaced by receipt vouchers linked to orders (`order_id?` on receipt_vouchers).

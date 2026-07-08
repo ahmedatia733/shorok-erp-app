@@ -21,6 +21,8 @@
 | A8 | Single-currency EGP v1; `Company` table from day 1 (one row) for branding/config | Productization without multi-tenant complexity |
 | A9 | Warehouse decoupled from Branch (`warehouses` table; branch may have N warehouses) | Client Q7; product-generic |
 | A10 | UoM: keep boards/meters for Elshrouq but as variant-level config (`uom_base`, `uom_alt`, `conversion_factor`) | De-hardcodes the domain |
+
+**A10 naming-mismatch note (discovered in Phase 1 manual testing, 2026-07-08):** the paint-board business quantity is an **area in square metres (م²)** — a board has an area (كبير 5.25, صغير 4, or custom طول×عرض) and the line quantity is عدد الألواح × مساحة اللوح. However, existing columns/code still use **linear-metre naming** (`product_variants.size_meters_per_board`, invoice-line `metersQuantity`, the frontend `SIZE_*`/`metersQuantity` fields). This is a naming-only defect: the maths is correct, the labels were wrong. **Phase 1 corrected the UI labels only** (مساحة اللوح (م²) / إجمالي المساحة (م²)); the frontend sizing logic was extracted to a unit-tested pure helper (`apps/web/lib/purchase-sizing.ts`) that documents the mismatch. **Full rename/data-model cleanup is deferred to Phase 7 UoM migration (T090)** — do not assume "meters" means linear length anywhere in this catalog.
 | A11 | i18n: all UI strings via next-intl keys; **zero Arabic literals in API business logic** — API returns message codes, web maps to glossary terms | Current code violates this everywhere; blocks EN locale |
 
 ### F.2 Database entities (target)

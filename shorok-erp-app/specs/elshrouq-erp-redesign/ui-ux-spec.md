@@ -40,6 +40,20 @@ Header: customer combobox (search by name/code, shows current balance + credit s
 
 Mirror of G.4: supplier header, unit cost column instead of price/margin; after-post side note: "متوسط تكلفة الصنف تحدّث من X إلى Y" per line (transparency the accountant will love). No account pickers anywhere.
 
+#### G.5.1 Board-size entry (paint-board catalog)
+
+The Elshrouq catalog is priced by **board area in square metres (م²)**, not by count or linear length. A purchase line therefore captures how many boards were bought and the area of each board. The current screen exposes too many raw fields (عدد + كبير + صغير + طول + عرض + م² + الكمية + الوحدة); the redesign MUST reduce this to the minimum a buyer actually thinks about:
+
+- **عدد الألواح** — number of boards purchased (the count the user enters).
+- **مقاس اللوح** — one choice, presented as three clear options:
+  - **كبير = 5.25 م²** (standard large board area)
+  - **صغير = 4 م²** (standard small board area)
+  - **مخصص = طول × عرض** (custom board: enter طول and عرض, area is computed)
+- **مساحة اللوح (م²)** — derived, read-only: 5.25 / 4 / (طول×عرض). MUST always display the selected standard value, not only for custom sizes (the Phase 1 bug).
+- **إجمالي المساحة (م²)** — derived, read-only: عدد الألواح × مساحة اللوح. This is the line quantity that drives price and stock.
+
+Design intent: the two derived fields (مساحة اللوح، إجمالي المساحة) are clearly labelled read-only outputs, visually separated from the inputs (عدد الألواح، مقاس اللوح), so the buyer never has to guess whether they are entering boards, length, or area. Standard vs custom must behave identically — both produce a per-board area and a total. The unit throughout is **م²**; avoid any "متر/م" label that implies linear metres. See A10 / T090 for the underlying naming-cleanup debt.
+
 ### G.6 Customer statement page
 
 Party header card (balance, oldest open invoice, aging chips) · filters (period, نوع الحركة) · table: التاريخ | المستند (linked) | البيان | مدين | دائن | الرصيد — رصيد افتتاحي first row, رصيد ختامي footer · actions: طباعة / PDF / سند قبض shortcut.

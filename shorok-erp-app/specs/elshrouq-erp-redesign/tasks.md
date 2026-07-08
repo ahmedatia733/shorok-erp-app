@@ -6,15 +6,16 @@
 **⛔ EXECUTION GATE: No task in this file may be executed until Ahmed Attia explicitly approves implementation. Phase 1 additionally requires its own named approval.**
 **Paths**: repo-relative from `shorok-erp-app/`. Script note: always run Spec Kit scripts with `SPECIFY_FEATURE=elshrouq-erp-redesign` (git root is the parent directory; branch detection fails without it).
 
-## Phase 1: Quarantine hotfixes — ✅ APPROVED & IMPLEMENTED 2026-07-07 (Ahmed Attia)
+## Phase 1: Quarantine hotfixes & stabilization — ✅ APPROVED & IMPLEMENTED (T001–T004 2026-07-07; T005 2026-07-08, Ahmed Attia)
 
-**Goal**: stop live data corruption; change nothing else.
+**Goal**: stop live data corruption and make the existing purchase-invoice flow usable/explicit; no schema change, no Phase 2 work.
 **Independent test**: post a purchase invoice on staging → `branch_inventory_balances` increases; malformed confirm payload cannot produce an unbalanced entry.
 
 - [x] T001 [P1-hotfix] [US1] Route purchase-invoice confirm inventory writes through InventoryEngine.apply (replace direct `tx.inventoryMovement.create` loop) in apps/api/src/modules/purchase-invoices/purchase-invoices.controller.ts
 - [x] T002 [P1-hotfix] [US1] Add Σdebit==Σcredit assertion (Decimal) before journal creation in purchase-invoice confirm in apps/api/src/modules/purchase-invoices/purchase-invoices.controller.ts
 - [x] T003 [P1-hotfix] Integration test: purchase confirm updates balance + rejects unbalanced payload in apps/api/tests/integration/purchase-invoices-hotfix.spec.ts (repo integration-test convention)
 - [x] T004 [P1-hotfix] [P] Mark legacy ledger UIs read-only with migration-notice banner (payments page, factory-orders mutations) in apps/web/app/[locale]/(app)/factory-orders/page.tsx and apps/web/app/[locale]/(app)/purchasing/supplier-payments/page.tsx
+- [x] T005 [P1-hotfix] [US1] Purchase-invoice UI/validation stabilization (commit b165dfc): (a) show board area (م²) for كبير/صغير — was blank; total = عدد الألواح × مساحة اللوح; (b) clearer item-line Arabic labels (عدد الألواح، مساحة اللوح (م²)، إجمالي المساحة (م²)، size tooltips); (c) surface backend confirm errors in Arabic via `confirmErrorMessageAr`; (d) detail-page confirm modal with AP/inventory/tax account selectors; (e) `getLeafAccounts` tree-flatten fix so nested VAT account 2300 is found. Pure logic extracted + unit-tested (apps/web/lib/purchase-sizing.ts + .test.ts, purchase-confirm-error.ts + .test.ts, getLeafAccounts in accounts-client.ts). Frontend-only; no schema. Scope note: full field-count simplification is Phase 6 (T072); the meters→م² rename is Phase 7 (T090).
 
 ## Phase 2: Foundation — engine, periods, configuration
 
@@ -90,7 +91,7 @@
 
 - [ ] T070 Design tokens → CSS variables (brandable per company) + IBM Plex Sans Arabic self-hosted per design-system.md in apps/web/tailwind.config.ts + apps/web/app/globals.css
 - [ ] T071 [US1] Posting-preview component (G.20 anatomy) shared across all post actions in apps/web/components/features/posting/posting-preview.tsx
-- [ ] T072 [US1] Rebuild sales & purchase invoice pages per ui-ux-spec G.4/G.5 (stock chips, margin preview, zero account pickers) in apps/web/app/[locale]/(app)/sales/invoices/ + purchasing/invoices/
+- [ ] T072 [US1] Rebuild sales & purchase invoice pages per ui-ux-spec G.4/G.5 (stock chips, margin preview, zero account pickers). **Purchase line MUST follow G.5.1 board-size entry**: reduce field clutter (drop the raw عدد+كبير+صغير+طول+عرض+م²+الكمية+الوحدة spread) to inputs (عدد الألواح، مقاس اللوح: كبير 5.25 / صغير 4 / مخصص طول×عرض) + read-only derived outputs (مساحة اللوح م²، إجمالي المساحة م²); standard and custom sizes behave identically. In apps/web/app/[locale]/(app)/sales/invoices/ + purchasing/invoices/
 - [ ] T073 [P] [US1] Voucher pages G.8/G.9 with allocation panel in apps/web/app/[locale]/(app)/treasury/
 - [ ] T074 [P] [US1] Statements/report shells G.6–G.16 incl. drill-down in apps/web/app/[locale]/(app)/reports/
 - [ ] T075 [US3] Settings module: 15 screens + shared (form|versions|change-log) pattern per G.16 in apps/web/app/[locale]/(app)/settings/
@@ -105,7 +106,7 @@
 **Goal**: second tenant deployable in <1 day (SC-005).
 **Independent test**: provision demo tenant from scratch using wizard + seed pack only.
 
-- [ ] T090 [US3] UoM config on variants (uom_base/alt/conversion) replacing boards/meters hardcode; migrate size_meters_per_board in apps/api/prisma/migrations/<ts>_uom_config/migration.sql + affected services
+- [ ] T090 [US3] UoM config on variants (uom_base/alt/conversion) replacing boards/meters hardcode; migrate size_meters_per_board. **Resolve the meters→م² naming mismatch (A10, data-model.md)**: for the paint-board catalog the quantity is an AREA in square metres, not linear metres — rename the misnamed `size_meters_per_board` / `metersQuantity` columns/fields, set uom_base = م², and carry the per-board area in uom_conversion. In apps/api/prisma/migrations/<ts>_uom_config/migration.sql + affected services (and remove the Phase-1 label workaround in apps/web/lib/purchase-sizing.ts)
 - [ ] T091 [P] [US3] Tenant provisioning script (empty DB + migrations + shared seed + optional tenant pack) in scripts/provision-tenant.sh
 - [ ] T092 [P] [US3] Move all Elshrouq catalog data into tenant seed pack; CI grep gate for client literals in apps/api/prisma/tenant-seeds/ + .github/workflows
 - [ ] T093 [US3] Demo-tenant dry run + SC-005 checklist report in specs/elshrouq-erp-redesign/ (documentation task)
@@ -121,4 +122,4 @@
 
 US1 (trading cycle) = Phases 2–5 minimum. US3 wizard (T075–T076, Phase 7) can ship after client go-live without blocking it.
 
-**Totals**: 62 tasks — Phase 1: 4 · Phase 2: 15 · Phase 3: 15 · Phase 4: 7 · Phase 5: 6 · Phase 6: 11 · Phase 7: 4 (includes analyze-remediation tasks T024, T042–T044). Parallelizable [P]: 23. Per-story: US1 28 · US2 5 · US3 8 · US4 3 · unlabeled infrastructure 18.
+**Totals**: 63 tasks — Phase 1: 5 (T001–T005, all done) · Phase 2: 15 · Phase 3: 15 · Phase 4: 7 · Phase 5: 6 · Phase 6: 11 · Phase 7: 4 (includes analyze-remediation tasks T024, T042–T044). Parallelizable [P]: 23. Per-story: US1 29 · US2 5 · US3 8 · US4 3 · unlabeled infrastructure 18.

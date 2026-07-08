@@ -100,6 +100,8 @@ Full field detail: `technical-spec-en.md` §Data Model + `admin-configuration.md
 
 RA-1 Egyptian-market Arabic glossary (ratified in `glossary-ar-en.md`) · RA-2 VAT 14% default via versioned tax profiles, per-line rate snapshot at posting · RA-3 moving weighted-average costing (FIFO reserved) · RA-4 one GL, control accounts + party dimensions, Egyptian trading COA template · RA-5 four roles (OWNER, ACCOUNTANT, SALES, STORE); definitions in code, assignments in config · RA-6 two-tier configuration model with effective-date versioning only where posting-affecting · RA-7 single-tenant-per-DB, CompanyProfile from day 1, brand tokens, tenant seed packs · RA-8 returns + invoice-level discounts in v1.0 · RA-9 numbering series pattern (prefix + padded counter + optional yearly reset) · RA-10 UI/UX per `ui-ux-spec.md`.
 
+**Phase 1 manual-testing discoveries (2026-07-08, traceability):** the purchase-invoice board-size entry UX (كبير 5.25 / صغير 4 / مخصص طول×عرض, and the مساحة اللوح vs إجمالي المساحة distinction) and the **"meters" → "م²" naming mismatch** surfaced while manually testing Phase 1. The immediate confusions (empty م² field for standard sizes, generic confirm error, missing-account handling) were fixed as **Phase 1 stabilization** (tasks.md T005). The **full field-simplification** of the purchase-invoice line is **Phase 6** (G.5 / G.5.1 / T072); the **column/field rename and area-based UoM cleanup** is **Phase 7** (A10 / T090). No schema change was made in Phase 1.
+
 ## Client Confirmation Needed (blocking items only)
 
 1. Opening-balance cut-over date + authoritative figures (customers, suppliers, banks, vaults, stock).
