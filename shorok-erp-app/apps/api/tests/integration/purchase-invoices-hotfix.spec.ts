@@ -59,6 +59,12 @@ describe("purchase invoices — Phase 1 hotfixes", () => {
     apAccountId = (await mkAccount("2101", "ذمم موردين اختبار", "LIABILITY", "LIABILITY")).id;
     inventoryAccountId = (await mkAccount("1201", "مخزون اختبار", "ASSET", "CURRENT_ASSET")).id;
     taxAccountId = (await mkAccount("2301", "ضريبة مدخلات اختبار", "LIABILITY", "LIABILITY")).id;
+
+    // Phase 3A: confirm now posts through the PostingEngine, which requires an
+    // OPEN financial period for the invoice date (2026-07). The Phase 1
+    // behaviors (engine stock, balanced entry, cancel) are unchanged — they
+    // just need the period precondition now.
+    await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
   });
 
   afterAll(async () => {

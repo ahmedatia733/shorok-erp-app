@@ -7,6 +7,7 @@ import {
   type CreatePurchaseInvoiceRequest,
   type PurchaseInvoiceQuery,
   type ConfirmPurchaseInvoice,
+  type PostingLine,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -16,6 +17,9 @@ import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
+import { PostingEngine } from "../posting/posting.engine";
+import { EffectiveConfigService } from "../configuration/effective-config.service";
+import { weightedAverageCost, unitCostPerBoard } from "./costing";
 
 @Controller("purchase-invoices")
 export class PurchaseInvoicesController {
@@ -23,6 +27,8 @@ export class PurchaseInvoicesController {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly inventoryEngine: InventoryEngine,
+    private readonly postingEngine: PostingEngine,
+    private readonly effectiveConfig: EffectiveConfigService,
   ) {}
 
   private formatInvoice(inv: any) {
@@ -319,79 +325,76 @@ export class PurchaseInvoicesController {
       throw new ValidationError({ reason: "invoice_not_draft", status: existing.status });
     }
 
-    // Hotfix T002 (Constitution I & VI): the inventory debit line used to be
-    // conditional while the AP credit was not, so omitting inventoryAccountId
-    // produced an unbalanced journal entry. Both debit-side accounts are now
-    // required up front, and the entry is asserted balanced before creation.
-    if (!body.inventoryAccountId) {
-      throw new ValidationError({ reason: "inventory_account_required" });
-    }
-    const preTax = new Decimal(existing.taxAmount.toString());
-    if (preTax.gt(0) && !body.taxAccountId) {
+    // Phase 3A (T030): confirm now posts through the PostingEngine.
+    // Accounts resolve from the PostingProfile in force on the invoice date;
+    // if a slot is missing we TEMPORARILY fall back to the account IDs the
+    // current UI still sends (to be removed when the UI is rebuilt in Phase 6).
+    // If neither exists, a clear typed error is returned.
+    const subtotal   = new Decimal(existing.subtotal.toString());
+    const taxAmount  = new Decimal(existing.taxAmount.toString());
+    const grandTotal = new Decimal(existing.grandTotal.toString());
+    const invoiceNumber = existing.invoiceNumber;
+    const invoiceDateStr = existing.invoiceDate.toISOString().slice(0, 10);
+
+    const profile = await this.effectiveConfig.postingProfileAsOf(invoiceDateStr);
+    const inventoryAccountId = profile?.inventoryAccountId ?? body.inventoryAccountId ?? null;
+    const apAccountId        = profile?.apAccountId        ?? body.apAccountId        ?? null;
+    const vatInputAccountId  = profile?.vatInputAccountId  ?? body.taxAccountId       ?? null;
+
+    if (!inventoryAccountId) throw new ValidationError({ reason: "inventory_account_required" });
+    if (!apAccountId)        throw new ValidationError({ reason: "accounts_payable_account_required" });
+    if (taxAmount.gt(0) && !vatInputAccountId) {
       throw new ValidationError({ reason: "tax_account_required_when_tax_exists" });
     }
 
     return this.prisma.runInTransaction(async (tx) => {
-      // ── 1. Journal entry: DR Inventory + DR Tax / CR AP ──────────────────
-      const subtotal   = new Decimal(existing.subtotal.toString());
-      const taxAmount  = new Decimal(existing.taxAmount.toString());
-      const grandTotal = new Decimal(existing.grandTotal.toString());
-      const invoiceNumber = existing.invoiceNumber;
-
-      const journalLines: Array<{ accountId: string; debit: string; credit: string; note: string }> = [];
-
-      journalLines.push({
-        accountId: body.inventoryAccountId!,
-        debit:  subtotal.toFixed(2),
-        credit: "0",
-        note: `مخزون — فاتورة مشتريات ${invoiceNumber}`,
-      });
-
-      if (body.taxAccountId && taxAmount.gt(0)) {
-        journalLines.push({
-          accountId: body.taxAccountId,
-          debit:  taxAmount.toFixed(2),
-          credit: "0",
-          note: `ضريبة مدخلات — فاتورة مشتريات ${invoiceNumber}`,
-        });
+      // ── 1. Journal entry via PostingEngine (balanced/period/idempotent) ──
+      const postingLines: PostingLine[] = [
+        { accountId: inventoryAccountId, debit: subtotal.toFixed(2), credit: "0", note: `مخزون — فاتورة مشتريات ${invoiceNumber}` },
+      ];
+      if (taxAmount.gt(0) && vatInputAccountId) {
+        postingLines.push({ accountId: vatInputAccountId, debit: taxAmount.toFixed(2), credit: "0", note: `ضريبة مدخلات — فاتورة مشتريات ${invoiceNumber}` });
       }
-
-      journalLines.push({
-        accountId: body.apAccountId,
-        debit:  "0",
+      postingLines.push({
+        accountId: apAccountId,
+        debit: "0",
         credit: grandTotal.toFixed(2),
         note: `ذمة للمورد — فاتورة مشتريات ${invoiceNumber}`,
+        partyType: "SUPPLIER",
+        partyId: existing.supplierId,
       });
 
-      const totalDebit  = journalLines.reduce((a, l) => a.add(l.debit),  new Decimal(0));
-      const totalCredit = journalLines.reduce((a, l) => a.add(l.credit), new Decimal(0));
-      if (!totalDebit.eq(totalCredit)) {
-        throw new ValidationError({
-          reason: "unbalanced_journal_entry",
-          totalDebit: totalDebit.toFixed(2),
-          totalCredit: totalCredit.toFixed(2),
-        });
-      }
-
-      const journalEntry = await tx.journalEntry.create({
-        data: {
-          entryType:     "PURCHASE_INVOICE",
-          entryDate:     existing.invoiceDate,
-          description:   `فاتورة مشتريات ${invoiceNumber}`,
-          referenceType: "purchase_invoice",
-          referenceId:   existing.id,
-          createdBy:     user.id,
-          lines: { create: journalLines },
-        },
+      const posted = await this.postingEngine.post({
+        tx,
+        actor: user,
+        sourceType: "PURCHASE_INVOICE",
+        sourceId: existing.id,
+        entryType: "PURCHASE_INVOICE",
+        entryDate: invoiceDateStr,
+        description: `فاتورة مشتريات ${invoiceNumber}`,
+        idempotencyKey: `PURCHASE_INVOICE:${existing.id}`,
+        lines: postingLines,
       });
 
-      // ── 2. Inventory movements ────────────────────────────────────────────
-      // Hotfix T001 (Constitution VI): movements MUST go through the
-      // InventoryEngine so the movement row and the BranchInventoryBalance
-      // update commit together — the old direct create left balances stale.
+      // ── 2. Inventory RECEIPT per line + forward WAC update (same tx) ──────
       for (const line of existing.lines) {
         const boards = new Decimal(line.boardsQuantity.toString());
         if (boards.isZero()) continue;
+
+        // WAC uses the global on-hand BEFORE this receipt; avg_cost builds
+        // forward from 0 (Phase 4 owns opening cost). Cost basis is ex-tax.
+        const unitCost = unitCostPerBoard(line.lineTotal.toString(), boards);
+        const agg = await tx.branchInventoryBalance.aggregate({
+          _sum: { boardsOnHand: true },
+          where: { productVariantId: line.productVariantId },
+        });
+        const onHand = new Decimal(agg._sum.boardsOnHand?.toString() ?? "0");
+        const variant = await tx.productVariant.findUnique({
+          where: { id: line.productVariantId },
+          select: { avgCost: true },
+        });
+        const newAvg = weightedAverageCost(onHand, variant?.avgCost.toString() ?? "0", boards, unitCost);
+
         await this.inventoryEngine.apply({
           branchId: existing.branchId,
           productVariantId: line.productVariantId,
@@ -404,17 +407,26 @@ export class PurchaseInvoicesController {
           humanReadableNote: `فاتورة مشتريات ${invoiceNumber}`,
           tx,
         });
+
+        await tx.productVariant.update({
+          where: { id: line.productVariantId },
+          data: { avgCost: newAvg.toFixed(4), costUpdatedAt: new Date() },
+        });
+        await tx.purchaseInvoiceLine.update({
+          where: { id: line.id },
+          data: { unitCostAtPosting: unitCost.toFixed(2), taxRateAtPosting: line.taxRate },
+        });
       }
 
-      // ── 3. Update invoice status + save account links ─────────────────────
+      // ── 3. Update invoice status + save resolved account links ────────────
       const invoice = await tx.purchaseInvoice.update({
         where: { id },
         data: {
           status:             "CONFIRMED",
-          apAccountId:        body.apAccountId,
-          taxAccountId:       body.taxAccountId       ?? null,
-          inventoryAccountId: body.inventoryAccountId ?? null,
-          journalEntryId:     journalEntry.id,
+          apAccountId,
+          taxAccountId:       vatInputAccountId,
+          inventoryAccountId,
+          journalEntryId:     posted.journalEntryId,
         },
         include: {
           supplier: { select: { id: true, nameAr: true, nameEn: true } },
@@ -432,13 +444,14 @@ export class PurchaseInvoicesController {
         afterSnapshot: {
           status: "CONFIRMED",
           invoiceNumber,
-          journalEntryId: journalEntry.id,
-          apAccountId:        body.apAccountId,
-          taxAccountId:       body.taxAccountId       ?? null,
-          inventoryAccountId: body.inventoryAccountId ?? null,
+          journalEntryId: posted.journalEntryId,
+          entryNumber: posted.entryNumber,
+          apAccountId,
+          taxAccountId: vatInputAccountId,
+          inventoryAccountId,
         },
-        summaryAr: `${user.name} أكّد فاتورة المشتريات رقم ${invoiceNumber} وتم إنشاء القيد المحاسبي وتحديث المخزون`,
-        summaryEn: `${user.name} confirmed purchase invoice ${invoiceNumber} — journal entry and inventory updated`,
+        summaryAr: `${user.name} أكّد فاتورة المشتريات رقم ${invoiceNumber} وتم ترحيل القيد وتحديث المخزون`,
+        summaryEn: `${user.name} confirmed purchase invoice ${invoiceNumber} — posted entry and updated inventory`,
       });
 
       return this.formatInvoice(invoice);

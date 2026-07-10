@@ -44,8 +44,12 @@ export const PurchaseInvoiceQuerySchema = z.object({
 });
 export type PurchaseInvoiceQuery = z.infer<typeof PurchaseInvoiceQuerySchema>;
 
+// Phase 3A: all account fields are optional. Accounts resolve from the
+// PostingProfile in force on the invoice date; these body fields are only a
+// transitional fallback for the current UI and are removed when the UI is
+// rebuilt in Phase 6.
 export const ConfirmPurchaseInvoiceSchema = z.object({
-  apAccountId:        z.string().uuid(),
+  apAccountId:        z.string().uuid().optional(),
   taxAccountId:       z.string().uuid().optional(),
   inventoryAccountId: z.string().uuid().optional(),
 });

@@ -335,6 +335,10 @@ model ProductVariant {
   defaultSalePricePerMeter      Decimal  @map("default_sale_price_per_meter") @db.Decimal(14, 2)
   defaultPurchasePricePerMeter  Decimal  @map("default_purchase_price_per_meter") @db.Decimal(14, 2)
   priceOverrideTolerancePercent Decimal? @map("price_override_tolerance_percent") @db.Decimal(5, 2)
+  // Phase 3A — weighted-average cost (WAC), server-maintained only. Starts at
+  // 0 and builds forward from purchase postings (opening value = Phase 4).
+  avgCost                       Decimal   @default(0) @map("avg_cost") @db.Decimal(14, 4)
+  costUpdatedAt                 DateTime? @map("cost_updated_at") @db.Timestamptz(6)
   active                        Boolean  @default(true)
   createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -727,6 +731,9 @@ model PurchaseInvoiceLine {
   taxRate          Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
   taxAmount        Decimal  @default(0) @map("tax_amount") @db.Decimal(14, 2)
   isFree           Boolean  @default(false) @map("is_free")
+  // Phase 3A — posting-time snapshots (server-stamped at confirm)
+  unitCostAtPosting Decimal? @map("unit_cost_at_posting") @db.Decimal(14, 2)
+  taxRateAtPosting  Decimal? @map("tax_rate_at_posting") @db.Decimal(5, 2)
 
   invoice        PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   productVariant ProductVariant  @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
