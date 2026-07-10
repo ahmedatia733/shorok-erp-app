@@ -190,9 +190,12 @@ export default function StatementPage() {
   const isAccountData = (d: SupplierStatement | AccountStatement): d is AccountStatement =>
     "totalIn" in d;
 
-  const isGLAccount = isAccountData(data!) && (data as AccountStatement)?.entity?.type === "gl_account";
+  // Guard against `data` being null on the initial render: `isAccountData`
+  // uses the `in` operator, and `"totalIn" in null` throws a TypeError that
+  // crashed the whole page. Short-circuit on `!!data` first.
+  const isGLAccount = !!data && isAccountData(data) && data.entity?.type === "gl_account";
 
-  const entries: StatementEntry[] = data ? data.entries : [];
+  const entries: StatementEntry[] = data?.entries ?? [];
 
   const entityOptions =
     entityType === "supplier"
