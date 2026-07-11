@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { PostingResult } from "@shorok/shared";
 import { AuditService } from "../audit/audit.service";
-import { PrismaService } from "../../prisma/prisma.service";
+import { Prisma, PrismaService } from "../../prisma/prisma.service";
 import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PostingEngine } from "./posting.engine";
@@ -11,6 +11,12 @@ export interface ReverseInput {
   reason: string;
   reversalDate?: string; // ISO date; defaults to today
   actor: AuthenticatedUser;
+  /**
+   * Optional outer transaction. Document cancels pass their tx so the reversal
+   * (status flip, link, mirrored entry, audit) commits atomically with the
+   * document status update and stock compensation — no nested independent tx.
+   */
+  tx?: Prisma.TransactionClient;
 }
 
 /**
@@ -30,12 +36,37 @@ export class ReversalService {
   ) {}
 
   async reverse(input: ReverseInput): Promise<PostingResult> {
-    return this.prisma.runInTransaction(async (tx) => {
+    if (input.tx) return this.reverseInTx(input.tx, input);
+    return this.prisma.runInTransaction((tx) => this.reverseInTx(tx, input));
+  }
+
+  private async reverseInTx(
+    tx: Prisma.TransactionClient,
+    input: ReverseInput,
+  ): Promise<PostingResult> {
+    {
       const original = await tx.journalEntry.findUnique({
         where: { id: input.entryId },
         include: { lines: true },
       });
       if (!original) throw new NotFoundError({ entryId: input.entryId });
+
+      // Idempotency: if we already reversed this entry, return that reversal —
+      // a repeat cancel/reverse is a no-op. This is checked BEFORE the status
+      // guard so a second call on an entry we flipped to REVERSED returns the
+      // existing reversal instead of throwing entry_not_reversible.
+      const existingReversal = await tx.journalEntry.findUnique({
+        where: { idempotencyKey: `reversal:${original.id}` },
+        select: { id: true, entryNumber: true },
+      });
+      if (existingReversal) {
+        return {
+          journalEntryId: existingReversal.id,
+          entryNumber: Number(existingReversal.entryNumber),
+          idempotent: true,
+        };
+      }
+
       if (original.status !== "POSTED") {
         throw new ValidationError({ reason: "entry_not_reversible", status: original.status });
       }
@@ -93,6 +124,6 @@ export class ReversalService {
       });
 
       return result;
-    });
+    }
   }
 }

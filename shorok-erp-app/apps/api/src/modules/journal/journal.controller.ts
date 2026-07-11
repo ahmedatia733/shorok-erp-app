@@ -1,10 +1,12 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import {
   CreateJournalEntryRequestSchema,
   JournalQuerySchema,
+  ReverseEntrySchema,
   type CreateJournalEntryRequest,
   type JournalQuery,
+  type ReverseEntry,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -13,12 +15,14 @@ import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { ReversalService } from "../posting/reversal.service";
 
 @Controller("journal")
 export class JournalController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly reversal: ReversalService,
   ) {}
 
   /**
@@ -177,36 +181,39 @@ export class JournalController {
   }
 
   /**
-   * DELETE /journal/:id — OWNER only: hard delete (lines cascade).
+   * POST /journal/:id/reverse — OWNER, ACCOUNTANT: correct a posted entry by
+   * reversal (Constitution VII — posted-record immutability). Creates a
+   * mirrored entry through the PostingEngine, links it via reversalOfId, and
+   * marks the original REVERSED. Idempotent: a repeat call returns the existing
+   * reversal without creating a duplicate.
+   */
+  @Post(":id/reverse")
+  @Roles("OWNER", "ACCOUNTANT")
+  async reverseEntry(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(ReverseEntrySchema)) body: ReverseEntry,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const result = await this.reversal.reverse({
+      entryId: id,
+      reason: body.reason,
+      reversalDate: body.reversalDate,
+      actor: user,
+    });
+    return result;
+  }
+
+  /**
+   * DELETE /journal/:id — journals are never hard-deleted (Constitution VII).
+   * The route is kept for compatibility but refuses posted/reversed entries;
+   * corrections must go through POST /journal/:id/reverse.
    */
   @Delete(":id")
   @Roles("OWNER")
-  @HttpCode(204)
-  async remove(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.prisma.runInTransaction(async (tx) => {
-      const entry = await tx.journalEntry.findUnique({
-        where: { id },
-        include: { lines: true },
-      });
-      if (!entry) throw new NotFoundError({ id });
-
-      await tx.journalEntry.delete({ where: { id } });
-
-      await this.audit.write({
-        tx,
-        actorId: user.id,
-        action: "DELETE",
-        entityType: "journal_entry",
-        entityId: id,
-        beforeSnapshot: {
-          entryDate: entry.entryDate,
-          description: entry.description,
-          lineCount: entry.lines.length,
-        },
-        summaryAr: `${user.name} حذف قيد يومي: ${entry.description}`,
-        summaryEn: `${user.name} deleted journal entry: ${entry.description}`,
-      });
-    });
+  async remove(@Param("id") id: string) {
+    const entry = await this.prisma.journalEntry.findUnique({ where: { id }, select: { id: true } });
+    if (!entry) throw new NotFoundError({ id });
+    throw new ValidationError({ reason: "use_reverse_instead" });
   }
 
   private _formatEntry(
