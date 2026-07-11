@@ -30,6 +30,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
 import { PostingEngine } from "../posting/posting.engine";
+import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 import { lineCogs } from "./sales-cogs";
 
@@ -40,6 +41,7 @@ export class SalesInvoicesController {
     private readonly audit: AuditService,
     private readonly inventoryEngine: InventoryEngine,
     private readonly postingEngine: PostingEngine,
+    private readonly reversal: ReversalService,
     private readonly effectiveConfig: EffectiveConfigService,
   ) {}
 
@@ -648,44 +650,48 @@ export class SalesInvoicesController {
     return this.prisma.runInTransaction(async (tx) => {
       const invoiceNumber = existing.invoiceNumber.toString();
 
-      // Clear FK references and set status FIRST so the deletes below cannot
-      // violate the FKs. (Bug fix: CustomerTransaction was deleted while the
-      // invoice still referenced it via customer_tx_id → Prisma P2003 / 500.)
+      // Set status + clear ONLY the legacy CustomerTransaction FK (that row is
+      // still hard-deleted per Phase-4 plan). journalEntryId / cogsJournalEntryId
+      // stay LINKED — the posted entries are reversed, never deleted
+      // (Constitution VII), so there is no FK to clear for them.
       await tx.salesInvoice.update({
         where: { id },
         data: {
           status: "CANCELLED",
-          journalEntryId: null,
-          cogsJournalEntryId: null,
           customerTxId: null,
         },
       });
 
       if (existing.status === "CONFIRMED") {
-        // Delete CustomerTransaction (DR) — leaves no accounting trace
+        // Reverse the revenue entry and the COGS entry (when present) through
+        // the engine — mirror entries net them to zero, originals stay linked
+        // and marked REVERSED. Never delete a posted entry.
+        if (existing.journalEntryId) {
+          await this.reversal.reverse({
+            entryId: existing.journalEntryId,
+            reason: `إلغاء فاتورة مبيعات ${invoiceNumber}`,
+            actor: user,
+            tx,
+          });
+        }
+        if (existing.cogsJournalEntryId) {
+          await this.reversal.reverse({
+            entryId: existing.cogsJournalEntryId,
+            reason: `إلغاء تكلفة مبيعات ${invoiceNumber}`,
+            actor: user,
+            tx,
+          });
+        }
+
+        // Legacy CustomerTransaction (DR) — still deleted in 3D; the legacy AR
+        // ledger is removed in Phase 4. FK already cleared above.
         if (existing.customerTxId) {
           await tx.customerTransaction.delete({ where: { id: existing.customerTxId } });
         }
 
-        // Delete journal entry + its lines (lines cascade via onDelete: Cascade)
-        if (existing.journalEntryId) {
-          await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
-        }
-
-        // Delete COGS journal entry + its lines
-        if (existing.cogsJournalEntryId) {
-          await tx.journalEntry.delete({ where: { id: existing.cogsJournalEntryId } });
-        }
-
-        // Delete inventory SALE movements (reverse the stock deduction)
-        await tx.inventoryMovement.deleteMany({
-          where: { referenceType: "sales_invoice", referenceId: id },
-        });
-
-        // Restore inventory balance for each movement (re-add the boards)
-        // Since we use InventoryEngine which updates branchInventoryBalance, we need to add back.
-        // Re-query deleted movements quantities: we already deleted them, so restore via engine.
-        // Simpler: update balance directly since we know the lines.
+        // Restore inventory via a compensating ADJUSTMENT — the original SALE
+        // movements are RETAINED (history stays intact), matching the purchase
+        // cancel. We add the boards back per line.
         const siLines = await tx.salesInvoiceLine.findMany({
           where: { invoiceId: id },
           include: { productVariant: { select: { id: true, sizeMetersPerBoard: true } } },
@@ -717,8 +723,8 @@ export class SalesInvoicesController {
         entityType: "sales_invoice",
         entityId: id,
         afterSnapshot: { status: "CANCELLED", invoiceNumber, wasConfirmed: existing.status === "CONFIRMED" },
-        summaryAr: `${user.name} ألغى فاتورة المبيعات رقم ${invoiceNumber} وتم حذف القيود المحاسبية`,
-        summaryEn: `${user.name} cancelled sales invoice ${invoiceNumber} and deleted all accounting entries`,
+        summaryAr: `${user.name} ألغى فاتورة المبيعات رقم ${invoiceNumber} وعكس القيود المحاسبية`,
+        summaryEn: `${user.name} cancelled sales invoice ${invoiceNumber} and reversed all accounting entries`,
       });
 
       return { success: true };

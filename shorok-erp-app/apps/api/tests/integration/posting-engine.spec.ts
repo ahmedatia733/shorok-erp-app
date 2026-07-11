@@ -188,13 +188,32 @@ describe("PostingEngine (Phase 2 foundation)", () => {
     expect(new Decimal(cashLine!.credit.toString()).toString()).toBe("100");
   });
 
-  it("refuses to reverse an already-reversed entry (sequential re-reverse is an error)", async () => {
+  it("re-reversing the same entry is idempotent — returns the existing reversal, no duplicate", async () => {
     const posted = await engine.post(mkEntry());
-    await reversal.reverse({ entryId: posted.journalEntryId, reason: "once", actor });
-    // The original is now REVERSED; a second sequential reverse hits the
-    // status guard (the idempotency key only protects concurrent races).
+    const first = await reversal.reverse({ entryId: posted.journalEntryId, reason: "once", actor });
+    // Phase 3D: the idempotency pre-check (reversal:<id>) fires before the
+    // status guard, so a repeat reverse returns the existing reversal instead
+    // of throwing — a cancel/reverse is a safe no-op on repeat.
+    const second = await reversal.reverse({ entryId: posted.journalEntryId, reason: "twice", actor });
+    expect(second.journalEntryId).toBe(first.journalEntryId);
+    expect(second.idempotent).toBe(true);
+    expect(await handle.prisma.journalEntry.count({ where: { reversalOfId: posted.journalEntryId } })).toBe(1);
+  });
+
+  it("refuses to reverse a non-POSTED entry with no existing reversal → entry_not_reversible", async () => {
+    // A REVERSED entry we never produced a reversal for (no reversal:<id> key).
+    const stale = await handle.prisma.journalEntry.create({
+      data: {
+        entryType: "JOURNAL",
+        entryDate: new Date("2026-07-05"),
+        description: "reversed elsewhere",
+        status: "REVERSED",
+        createdBy: handle.ownerId,
+        lines: { create: [{ accountId: cash, debit: "5.00", credit: "0" }, { accountId: revenue, debit: "0", credit: "5.00" }] },
+      },
+    });
     await expect(
-      reversal.reverse({ entryId: posted.journalEntryId, reason: "twice", actor }),
+      reversal.reverse({ entryId: stale.id, reason: "no", actor }),
     ).rejects.toMatchObject({ details: { reason: "entry_not_reversible" } });
   });
 

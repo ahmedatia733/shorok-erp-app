@@ -127,6 +127,14 @@ enum JournalEntryStatus {
   REVERSED
 }
 
+// Phase 3D: expense lifecycle. RECORDED = legacy/record-only (no GL entry);
+// POSTED = has a GL entry; REVERSED = GL entry reversed, row retained.
+enum ExpenseStatus {
+  RECORDED
+  POSTED
+  REVERSED
+}
+
 enum JournalSourceType {
   SALES_INVOICE
   PURCHASE_INVOICE
@@ -493,6 +501,11 @@ model Expense {
   supplierId         String?  @map("supplier_id") @db.Uuid
   taxable            Boolean  @default(false)
   taxRateAtPosting   Decimal? @map("tax_rate_at_posting") @db.Decimal(5, 2)
+  // Phase 3D: reversal-hardening. status distinguishes record-only from
+  // posted/reversed; reversalJournalEntryId points to the reversal entry
+  // (the original journalEntryId stays linked to the original, now REVERSED).
+  status                 ExpenseStatus @default(RECORDED)
+  reversalJournalEntryId String?       @map("reversal_journal_entry_id") @db.Uuid
   createdBy          String   @map("created_by") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 

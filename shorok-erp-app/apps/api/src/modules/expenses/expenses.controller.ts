@@ -5,10 +5,12 @@ import {
   CreateExpenseRequestSchema,
   ExpensesQuerySchema,
   UpdateExpenseRequestSchema,
+  ReverseEntrySchema,
   type CreateExpenseRequest,
   type ExpensesQuery,
   type UpdateExpenseRequest,
   type PostingLine,
+  type ReverseEntry,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -18,6 +20,7 @@ import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { PostingEngine } from "../posting/posting.engine";
+import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 
 @Controller("expenses")
@@ -27,6 +30,7 @@ export class ExpensesController {
     private readonly audit: AuditService,
     private readonly i18n: I18nService,
     private readonly postingEngine: PostingEngine,
+    private readonly reversal: ReversalService,
     private readonly effectiveConfig: EffectiveConfigService,
   ) {}
 
@@ -193,6 +197,7 @@ export class ExpensesController {
           supplierId:         body.supplierId         ?? null,
           taxable:            plan?.isTaxable ?? false,
           taxRateAtPosting:   plan && plan.isTaxable && plan.rate.gt(0) ? plan.rate.toFixed(2) : null,
+          status:             plan ? "POSTED" : "RECORDED",
           journalEntryId:     null,
           createdBy: user.id,
         },
@@ -277,6 +282,7 @@ export class ExpensesController {
         expenseCategoryId: expense.expenseCategoryId ?? null,
         supplierId: expense.supplierId ?? null,
         taxable: expense.taxable,
+        status: expense.status,
         journalEntryId,
         createdAt: expense.createdAt,
       };
@@ -348,7 +354,12 @@ export class ExpensesController {
     });
   }
 
-  /** DELETE /expenses/:id — OWNER only: hard delete. */
+  /**
+   * DELETE /expenses/:id — OWNER only. Only RECORDED (record-only, no GL entry)
+   * expenses — including OWNER negative corrections — may be hard-deleted. A
+   * POSTED/REVERSED expense carries a GL entry and is immutable (Constitution
+   * VII): it must be corrected via POST /expenses/:id/reverse.
+   */
   @Delete(":id")
   @Roles("OWNER")
   @HttpCode(204)
@@ -356,14 +367,11 @@ export class ExpensesController {
     return this.prisma.runInTransaction(async (tx) => {
       const expense = await tx.expense.findUnique({ where: { id } });
       if (!expense) throw new NotFoundError({ id });
-
-      // Clear FK reference before deleting journal entry (avoid FK constraint violation)
-      const journalEntryId = expense.journalEntryId;
-      await tx.expense.update({ where: { id }, data: { journalEntryId: null } });
-      await tx.expense.delete({ where: { id } });
-      if (journalEntryId) {
-        await tx.journalEntry.delete({ where: { id: journalEntryId } });
+      if (expense.status !== "RECORDED") {
+        throw new ValidationError({ reason: "use_reverse_instead", status: expense.status });
       }
+
+      await tx.expense.delete({ where: { id } });
 
       await this.audit.write({
         tx,
@@ -383,6 +391,56 @@ export class ExpensesController {
         summaryAr: `${user.name} حذف مصروف: ${expense.description} — ${expense.amount} ج.م`,
         summaryEn: `${user.name} deleted expense: ${expense.description} — ${expense.amount} EGP`,
       });
+    });
+  }
+
+  /**
+   * POST /expenses/:id/reverse — OWNER: reverse a POSTED expense's GL entry
+   * and retain the row (Constitution VII). The original journalEntryId stays
+   * linked (now REVERSED); reversalJournalEntryId points to the mirror entry;
+   * status becomes REVERSED. Idempotent — a repeat reverse returns the same
+   * reversal. Record-only expenses have no GL entry to reverse.
+   */
+  @Post(":id/reverse")
+  @Roles("OWNER")
+  async reverseExpense(
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(ReverseEntrySchema)) body: ReverseEntry,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.prisma.runInTransaction(async (tx) => {
+      const expense = await tx.expense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundError({ id });
+      if (expense.status === "RECORDED" || !expense.journalEntryId) {
+        throw new ValidationError({ reason: "expense_not_posted", status: expense.status });
+      }
+
+      const result = await this.reversal.reverse({
+        entryId: expense.journalEntryId,
+        reason: body.reason,
+        reversalDate: body.reversalDate,
+        actor: user,
+        tx,
+      });
+
+      await tx.expense.update({
+        where: { id },
+        data: { status: "REVERSED", reversalJournalEntryId: result.journalEntryId },
+      });
+
+      await this.audit.write({
+        tx,
+        actorId: user.id,
+        action: "CANCEL",
+        entityType: "expense",
+        entityId: id,
+        beforeSnapshot: { status: expense.status, journalEntryId: expense.journalEntryId },
+        afterSnapshot: { status: "REVERSED", reversalJournalEntryId: result.journalEntryId, reason: body.reason },
+        summaryAr: `${user.name} عكس مصروف: ${expense.description} — ${expense.amount} ج.م`,
+        summaryEn: `${user.name} reversed expense: ${expense.description} — ${expense.amount} EGP`,
+      });
+
+      return { id, status: "REVERSED", journalEntryId: expense.journalEntryId, reversalJournalEntryId: result.journalEntryId, idempotent: result.idempotent };
     });
   }
 }

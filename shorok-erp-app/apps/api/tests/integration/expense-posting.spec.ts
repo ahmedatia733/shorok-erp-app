@@ -166,16 +166,19 @@ describe("expense posting (Phase 3C)", () => {
     expect(await handle.prisma.expense.count({ where: { expenseDate: new Date("2026-03-10") } })).toBe(0);
   });
 
-  it("delete posted expense: clears FK then deletes journal entry, no P2003", async () => {
+  it("delete posted expense is blocked (Phase 3D) → use_reverse_instead, row retained", async () => {
     const created = await post({ amount: "300.00", glAccountId: expenseAccountId, paymentGlAccountId: cashAccountId });
     expect(created.status).toBe(201);
+    expect(created.body.status).toBe("POSTED");
     const jeId = created.body.journalEntryId as string;
     expect(jeId).not.toBeNull();
 
     const del = await request(server()).delete(`/api/v1/expenses/${created.body.id}`).set(auth());
-    expect(del.status).toBe(204);
-    expect(await handle.prisma.expense.findUnique({ where: { id: created.body.id } })).toBeNull();
-    expect(await handle.prisma.journalEntry.findUnique({ where: { id: jeId } })).toBeNull();
+    expect(del.status).toBe(409);
+    expect(del.body.details?.reason).toBe("use_reverse_instead");
+    // Row + GL entry retained.
+    expect(await handle.prisma.expense.findUnique({ where: { id: created.body.id } })).not.toBeNull();
+    expect(await handle.prisma.journalEntry.findUnique({ where: { id: jeId } })).not.toBeNull();
   });
 
   it("typed error: taxable but no VAT account → vat_input_account_required", async () => {

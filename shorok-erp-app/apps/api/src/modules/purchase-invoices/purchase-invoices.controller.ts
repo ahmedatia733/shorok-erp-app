@@ -18,6 +18,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
 import { PostingEngine } from "../posting/posting.engine";
+import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 import { weightedAverageCost, unitCostPerBoard } from "./costing";
 
@@ -28,6 +29,7 @@ export class PurchaseInvoicesController {
     private readonly audit: AuditService,
     private readonly inventoryEngine: InventoryEngine,
     private readonly postingEngine: PostingEngine,
+    private readonly reversal: ReversalService,
     private readonly effectiveConfig: EffectiveConfigService,
   ) {}
 
@@ -475,22 +477,17 @@ export class PurchaseInvoicesController {
     return this.prisma.runInTransaction(async (tx) => {
       const invoiceNumber = existing.invoiceNumber;
 
-      // Clear FK references first so we can safely delete journal entry
-      await tx.purchaseInvoice.update({
-        where: { id },
-        data: {
-          status:             "CANCELLED",
-          journalEntryId:     null,
-          apAccountId:        null,
-          taxAccountId:       null,
-          inventoryAccountId: null,
-        },
-      });
-
       if (existing.status === "CONFIRMED") {
-        // Delete journal entry (lines cascade via onDelete: Cascade)
+        // Reverse the purchase journal entry — never delete a posted entry
+        // (Constitution VII). The original stays linked to the invoice (now
+        // REVERSED); a mirror entry created through the engine nets it to zero.
         if (existing.journalEntryId) {
-          await tx.journalEntry.delete({ where: { id: existing.journalEntryId } });
+          await this.reversal.reverse({
+            entryId: existing.journalEntryId,
+            reason: `إلغاء فاتورة مشتريات ${invoiceNumber}`,
+            actor: user,
+            tx,
+          });
         }
 
         // Hotfix T001 (Constitution I & VI): stock reversal goes through the
@@ -528,6 +525,10 @@ export class PurchaseInvoicesController {
         }
       }
 
+      // Mark cancelled only after the reversal + stock compensation succeed;
+      // keep journalEntryId linked to the (now REVERSED) original entry.
+      await tx.purchaseInvoice.update({ where: { id }, data: { status: "CANCELLED" } });
+
       await this.audit.write({
         tx,
         actorId: user.id,
@@ -535,8 +536,8 @@ export class PurchaseInvoicesController {
         entityType: "purchase_invoice",
         entityId: id,
         afterSnapshot: { status: "CANCELLED", invoiceNumber, wasConfirmed: existing.status === "CONFIRMED" },
-        summaryAr: `${user.name} ألغى فاتورة المشتريات رقم ${invoiceNumber} وتم حذف القيود المحاسبية والمخزون`,
-        summaryEn: `${user.name} cancelled purchase invoice ${invoiceNumber} and deleted all accounting + inventory entries`,
+        summaryAr: `${user.name} ألغى فاتورة المشتريات رقم ${invoiceNumber} وعكس القيود المحاسبية والمخزون`,
+        summaryEn: `${user.name} cancelled purchase invoice ${invoiceNumber} and reversed all accounting + inventory entries`,
       });
 
       return { success: true };

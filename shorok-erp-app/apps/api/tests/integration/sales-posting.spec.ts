@@ -215,16 +215,27 @@ describe("sales invoice posting (Phase 3B)", () => {
 
     const cancelled = await handle.prisma.salesInvoice.findUnique({ where: { id: draft.id } });
     expect(cancelled!.status).toBe("CANCELLED");
-    // FK references cleared on the invoice.
+    // Phase 3D: journal entries are REVERSED, not deleted — the links stay.
+    expect(cancelled!.journalEntryId).toBe(journalEntryId);
+    expect(cancelled!.cogsJournalEntryId).toBe(cogsJournalEntryId);
+    // Legacy CustomerTransaction FK cleared and the row still hard-deleted (Phase 4 owns it).
     expect(cancelled!.customerTxId).toBeNull();
-    expect(cancelled!.journalEntryId).toBeNull();
-    expect(cancelled!.cogsJournalEntryId).toBeNull();
-    // Referenced rows removed — no dangling accounting trace.
     expect(await handle.prisma.customerTransaction.findUnique({ where: { id: customerTxId } })).toBeNull();
-    expect(await handle.prisma.journalEntry.findUnique({ where: { id: journalEntryId } })).toBeNull();
-    expect(await handle.prisma.journalEntry.findUnique({ where: { id: cogsJournalEntryId } })).toBeNull();
-    // SALE movements removed; stock restored to the pre-confirm level.
-    expect(await handle.prisma.inventoryMovement.count({ where: { referenceId: draft.id, movementType: "SALE" } })).toBe(0);
+    // Originals retained + marked REVERSED; a mirror entry links back to each.
+    const rev = await handle.prisma.journalEntry.findUnique({ where: { id: journalEntryId } });
+    const cogs = await handle.prisma.journalEntry.findUnique({ where: { id: cogsJournalEntryId } });
+    expect(rev!.status).toBe("REVERSED");
+    expect(cogs!.status).toBe("REVERSED");
+    expect(await handle.prisma.journalEntry.count({ where: { reversalOfId: journalEntryId } })).toBe(1);
+    expect(await handle.prisma.journalEntry.count({ where: { reversalOfId: cogsJournalEntryId } })).toBe(1);
+    // Net GL zero for the revenue entry across original + reversal.
+    const revPair = await handle.prisma.journalLine.findMany({
+      where: { journalEntry: { OR: [{ id: journalEntryId }, { reversalOfId: journalEntryId }] } },
+    });
+    const netRev = revPair.reduce((a, l) => a.add(l.debit.toString()).sub(l.credit.toString()), new Decimal(0));
+    expect(netRev.toString()).toBe("0");
+    // SALE movements RETAINED; stock restored via compensating ADJUSTMENT.
+    expect(await handle.prisma.inventoryMovement.count({ where: { referenceId: draft.id, movementType: "SALE" } })).toBe(1);
     const balAfter = await handle.prisma.branchInventoryBalance.findUnique({ where: { branchId_productVariantId: { branchId: handle.branchId, productVariantId: variantId } } });
     expect(new Decimal(balAfter!.boardsOnHand.toString()).toString()).toBe("10");
   });
