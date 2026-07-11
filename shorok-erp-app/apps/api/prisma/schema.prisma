@@ -920,6 +920,10 @@ model SalesInvoiceLine {
   lineTotal        Decimal  @map("line_total") @db.Decimal(14, 2)
   lineCost         Decimal  @default(0) @map("line_cost") @db.Decimal(14, 2)
   note             String?  @db.VarChar(300)
+  // Phase 3B — posting-time snapshots (server-stamped at confirm; COGS uses
+  // product_variants.avg_cost, never the user-entered cost_price above)
+  unitCostAtPosting Decimal? @map("unit_cost_at_posting") @db.Decimal(14, 2)
+  taxRateAtPosting  Decimal? @map("tax_rate_at_posting") @db.Decimal(5, 2)
 
   invoice        SalesInvoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])

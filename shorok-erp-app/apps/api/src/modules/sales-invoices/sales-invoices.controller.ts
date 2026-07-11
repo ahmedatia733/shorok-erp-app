@@ -19,6 +19,7 @@ import {
   type UpdateSalesInvoice,
   type SalesInvoiceQuery,
   type ConfirmSalesInvoice,
+  type PostingLine,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -28,6 +29,9 @@ import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
+import { PostingEngine } from "../posting/posting.engine";
+import { EffectiveConfigService } from "../configuration/effective-config.service";
+import { lineCogs } from "./sales-cogs";
 
 @Controller("sales-invoices")
 export class SalesInvoicesController {
@@ -35,6 +39,8 @@ export class SalesInvoicesController {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly inventoryEngine: InventoryEngine,
+    private readonly postingEngine: PostingEngine,
+    private readonly effectiveConfig: EffectiveConfigService,
   ) {}
 
   // ─── helpers ─────────────────────────────────────────────────────────
@@ -439,7 +445,14 @@ export class SalesInvoicesController {
   ) {
     const existing = await this.prisma.salesInvoice.findUnique({
       where: { id },
-      include: { customer: true },
+      include: {
+        customer: true,
+        lines: {
+          include: {
+            productVariant: { select: { id: true, sizeMetersPerBoard: true, avgCost: true } },
+          },
+        },
+      },
     });
     if (!existing) throw new NotFoundError({ id });
     if (existing.status !== "DRAFT") {
@@ -449,57 +462,44 @@ export class SalesInvoicesController {
     const grandTotal = new Decimal(existing.grandTotal.toString());
     const subtotal = new Decimal(existing.subtotal.toString());
     const taxAmount = new Decimal(existing.taxAmount.toString());
-    const totalCost = new Decimal(existing.totalCost.toString());
     const invoiceNumber = existing.invoiceNumber.toString();
 
-    // Validate accounts
-    const arAccount = await this.prisma.account.findUnique({ where: { id: body.arAccountId } });
-    if (!arAccount || !arAccount.active || !arAccount.isLeaf) {
-      throw new ValidationError({ reason: "invalid_ar_account", id: body.arAccountId });
-    }
+    // Phase 3B (T032): accounts resolve from the PostingProfile in force on
+    // the invoice date; body fields are only a transitional fallback for the
+    // current UI. `postJournalEntry`/`postCogs` are ignored — posting and the
+    // stock SALE are mandatory.
+    const invoiceDateStr = existing.invoiceDate.toISOString().slice(0, 10);
+    const profile = await this.effectiveConfig.postingProfileAsOf(invoiceDateStr);
+    const arAccountId        = profile?.arAccountId        ?? body.arAccountId        ?? null;
+    const revenueAccountId   = profile?.revenueAccountId   ?? body.revenueAccountId   ?? null;
+    const vatOutputAccountId = profile?.vatOutputAccountId ?? body.taxAccountId       ?? null;
+    const cogsAccountId      = profile?.cogsAccountId      ?? body.cogsAccountId      ?? null;
+    const inventoryAccountId = profile?.inventoryAccountId ?? body.inventoryAccountId ?? null;
 
-    const revenueAccount = await this.prisma.account.findUnique({
-      where: { id: body.revenueAccountId },
+    // COGS from avg_cost (never the user-entered cost_price). Per line:
+    // boards = quantityMeters / sizeMetersPerBoard, cost = boards × avg_cost.
+    // When avg_cost is 0 the line contributes 0 and, if the whole invoice's
+    // COGS is 0, the COGS entry is skipped (a zero entry would break the
+    // engine's debit-XOR-credit invariant). Opening cost = Phase 4.
+    const lineCosts = existing.lines.map((l) => {
+      const avg = l.productVariant?.avgCost.toString() ?? "0";
+      const size = l.productVariant?.sizeMetersPerBoard.toString() ?? "0";
+      return { lineId: l.id, unitCost: new Decimal(avg), cogs: lineCogs(l.quantity.toString(), size, avg) };
     });
-    if (!revenueAccount || !revenueAccount.active || !revenueAccount.isLeaf) {
-      throw new ValidationError({ reason: "invalid_revenue_account", id: body.revenueAccountId });
-    }
+    const totalCogs = lineCosts.reduce((a, x) => a.add(x.cogs), new Decimal(0));
 
-    if (taxAmount.gt(0) && body.postJournalEntry) {
-      if (!body.taxAccountId) {
-        throw new ValidationError({ reason: "tax_account_required_when_tax_exists" });
-      }
-      const taxAccount = await this.prisma.account.findUnique({
-        where: { id: body.taxAccountId },
-      });
-      if (!taxAccount || !taxAccount.active || !taxAccount.isLeaf) {
-        throw new ValidationError({ reason: "invalid_tax_account", id: body.taxAccountId });
-      }
+    if (!arAccountId)      throw new ValidationError({ reason: "accounts_receivable_account_required" });
+    if (!revenueAccountId) throw new ValidationError({ reason: "revenue_account_required" });
+    if (taxAmount.gt(0) && !vatOutputAccountId) {
+      throw new ValidationError({ reason: "tax_account_required_when_tax_exists" });
     }
-
-    if (body.postCogs) {
-      if (!body.cogsAccountId || !body.inventoryAccountId) {
-        throw new ValidationError({ reason: "cogs_accounts_required_when_post_cogs" });
-      }
-      const cogsAccount = await this.prisma.account.findUnique({
-        where: { id: body.cogsAccountId },
-      });
-      if (!cogsAccount || !cogsAccount.active || !cogsAccount.isLeaf) {
-        throw new ValidationError({ reason: "invalid_cogs_account", id: body.cogsAccountId });
-      }
-      const inventoryAccount = await this.prisma.account.findUnique({
-        where: { id: body.inventoryAccountId },
-      });
-      if (!inventoryAccount || !inventoryAccount.active || !inventoryAccount.isLeaf) {
-        throw new ValidationError({
-          reason: "invalid_inventory_account",
-          id: body.inventoryAccountId,
-        });
-      }
-    }
+    if (totalCogs.gt(0) && !cogsAccountId)      throw new ValidationError({ reason: "cogs_account_required" });
+    if (totalCogs.gt(0) && !inventoryAccountId) throw new ValidationError({ reason: "inventory_account_required" });
 
     return this.prisma.runInTransaction(async (tx) => {
-      // 1. Create CustomerTransaction (always)
+      // 1. CustomerTransaction (LEGACY — kept for the current customer
+      //    statement views; the AR journal line below is the real source of
+      //    truth via its party dimension. Removed in Phase 4 migration.)
       const customerTx = await tx.customerTransaction.create({
         data: {
           customerId: existing.customerId,
@@ -513,128 +513,76 @@ export class SalesInvoicesController {
         },
       });
 
-      // 2. Create JournalEntry #1 (Revenue & Receivables)
-      let journalEntry: { id: string } | null = null;
-      if (body.postJournalEntry) {
-        // Build lines
-        const jeLines: Array<{ accountId: string; debit: string; credit: string; note: string }> = [];
+      // 2. Revenue entry via PostingEngine (Dr AR[party] / Cr Revenue + VAT-out)
+      const revenueLines: PostingLine[] = [
+        { accountId: arAccountId!, debit: grandTotal.toFixed(2), credit: "0", note: `مديونية ${existing.customer.nameAr} - SI-${invoiceNumber}`, partyType: "CUSTOMER", partyId: existing.customerId },
+        { accountId: revenueAccountId!, debit: "0", credit: subtotal.toFixed(2), note: `إيرادات مبيعات - SI-${invoiceNumber}` },
+      ];
+      if (taxAmount.gt(0) && vatOutputAccountId) {
+        revenueLines.push({ accountId: vatOutputAccountId, debit: "0", credit: taxAmount.toFixed(2), note: `ضريبة قيمة مضافة - SI-${invoiceNumber}` });
+      }
+      const revenuePosted = await this.postingEngine.post({
+        tx,
+        actor: user,
+        sourceType: "SALES_INVOICE",
+        sourceId: existing.id,
+        entryType: "SALES_INVOICE",
+        entryDate: invoiceDateStr,
+        reference: `SI-${invoiceNumber}`,
+        description: `فاتورة مبيعات رقم ${invoiceNumber} — ${existing.customer.nameAr}`,
+        idempotencyKey: `SALES_INVOICE:${existing.id}`,
+        lines: revenueLines,
+      });
 
-        jeLines.push({
-          accountId: body.arAccountId,
-          debit: grandTotal.toFixed(2),
-          credit: "0.00",
-          note: `مديونية ${existing.customer.nameAr} - SI-${invoiceNumber}`,
+      // 3. COGS entry via PostingEngine — ONLY when COGS > 0 (avg_cost basis
+      //    exists). Skipped for items without a cost basis yet (Phase 4).
+      let cogsJournalEntryId: string | null = null;
+      if (totalCogs.gt(0) && cogsAccountId && inventoryAccountId) {
+        const cogsPosted = await this.postingEngine.post({
+          tx,
+          actor: user,
+          sourceType: "SALES_INVOICE",
+          sourceId: existing.id,
+          entryType: "JOURNAL",
+          entryDate: invoiceDateStr,
+          reference: `SI-${invoiceNumber}-COGS`,
+          description: `تكلفة البضاعة المباعة - فاتورة ${invoiceNumber}`,
+          idempotencyKey: `SALES_INVOICE:${existing.id}:COGS`,
+          lines: [
+            { accountId: cogsAccountId, debit: totalCogs.toFixed(2), credit: "0", note: `تكلفة مبيعات - SI-${invoiceNumber}` },
+            { accountId: inventoryAccountId, debit: "0", credit: totalCogs.toFixed(2), note: `صرف من المخزون - SI-${invoiceNumber}` },
+          ],
         });
+        cogsJournalEntryId = cogsPosted.journalEntryId;
+      }
 
-        jeLines.push({
-          accountId: body.revenueAccountId,
-          debit: "0.00",
-          credit: subtotal.toFixed(2),
-          note: `إيرادات مبيعات - SI-${invoiceNumber}`,
-        });
-
-        if (taxAmount.gt(0) && body.taxAccountId) {
-          jeLines.push({
-            accountId: body.taxAccountId,
-            debit: "0.00",
-            credit: taxAmount.toFixed(2),
-            note: `ضريبة قيمة مضافة - SI-${invoiceNumber}`,
+      // 4. Inventory SALE per line (always) + posting-time snapshots. The
+      //    engine's non-negative guard hard-blocks insufficient stock.
+      for (const line of existing.lines) {
+        if (!line.productVariant) continue;
+        const sizePerBoard = new Decimal(line.productVariant.sizeMetersPerBoard.toString());
+        const boardsDelta = sizePerBoard.gt(0)
+          ? new Decimal(line.quantity.toString()).div(sizePerBoard).negated()
+          : new Decimal(0);
+        if (!boardsDelta.isZero()) {
+          await this.inventoryEngine.apply({
+            branchId: existing.branchId,
+            productVariantId: line.productVariant.id,
+            movementType: "SALE",
+            boardsDelta: boardsDelta.toFixed(4),
+            reference: { type: "sales_invoice", id: existing.id },
+            actor: user,
+            summaryAr: `صرف من المخزون — فاتورة مبيعات ${invoiceNumber}`,
+            summaryEn: `Stock out — sales invoice ${invoiceNumber}`,
+            humanReadableNote: `فاتورة مبيعات ${invoiceNumber}`,
+            tx,
           });
         }
-
-        // Assert balance
-        const totalDebit = jeLines.reduce((a, l) => a.add(l.debit), new Decimal(0));
-        const totalCredit = jeLines.reduce((a, l) => a.add(l.credit), new Decimal(0));
-        if (!totalDebit.eq(totalCredit)) {
-          throw new ValidationError({ reason: "unbalanced" });
-        }
-
-        journalEntry = await tx.journalEntry.create({
-          data: {
-            entryType: "RECEIPT",
-            reference: `SI-${invoiceNumber}`,
-            entryDate: existing.invoiceDate,
-            description: `فاتورة مبيعات رقم ${invoiceNumber} — ${existing.customer.nameAr}`,
-            referenceType: "sales_invoice",
-            referenceId: existing.id,
-            createdBy: user.id,
-            lines: {
-              create: jeLines.map((l) => ({
-                accountId: l.accountId,
-                debit: l.debit,
-                credit: l.credit,
-                note: l.note,
-              })),
-            },
-          },
+        const cost = lineCosts.find((c) => c.lineId === line.id);
+        await tx.salesInvoiceLine.update({
+          where: { id: line.id },
+          data: { unitCostAtPosting: (cost?.unitCost ?? new Decimal(0)).toFixed(2), taxRateAtPosting: existing.taxRate },
         });
-      }
-
-      // 3. Create JournalEntry #2 (COGS) if requested
-      let cogsJournalEntry: { id: string } | null = null;
-      if (body.postCogs && body.cogsAccountId && body.inventoryAccountId) {
-        cogsJournalEntry = await tx.journalEntry.create({
-          data: {
-            entryType: "JOURNAL",
-            reference: `SI-${invoiceNumber}-COGS`,
-            entryDate: existing.invoiceDate,
-            description: `تكلفة البضاعة المباعة - فاتورة ${invoiceNumber}`,
-            referenceType: "sales_invoice",
-            referenceId: existing.id,
-            createdBy: user.id,
-            lines: {
-              create: [
-                {
-                  accountId: body.cogsAccountId,
-                  debit: totalCost.toFixed(2),
-                  credit: "0.00",
-                  note: `تكلفة مبيعات - SI-${invoiceNumber}`,
-                },
-                {
-                  accountId: body.inventoryAccountId,
-                  debit: "0.00",
-                  credit: totalCost.toFixed(2),
-                  note: `صرف من المخزون - SI-${invoiceNumber}`,
-                },
-              ],
-            },
-          },
-        });
-      }
-
-      // 4. Inventory SALE movements — reduce stock for each line
-      if (body.postCogs && body.inventoryAccountId) {
-        const siWithLines = await tx.salesInvoice.findUnique({
-          where: { id },
-          include: {
-            lines: {
-              include: { productVariant: { select: { id: true, sizeMetersPerBoard: true } } },
-            },
-          },
-        });
-        if (siWithLines) {
-          for (const line of siWithLines.lines) {
-            if (!line.productVariant) continue;
-            const sizePerBoard = new Decimal(line.productVariant.sizeMetersPerBoard.toString());
-            // quantity is in meters; convert to boards (negative = out)
-            const metersQty = new Decimal(line.quantity.toString());
-            const boardsDelta = metersQty.div(sizePerBoard).negated();
-            if (!boardsDelta.isZero()) {
-              await this.inventoryEngine.apply({
-                branchId: existing.branchId,
-                productVariantId: line.productVariant.id,
-                movementType: "SALE",
-                boardsDelta: boardsDelta.toFixed(4),
-                reference: { type: "sales_invoice", id: existing.id },
-                actor: user,
-                summaryAr: `صرف من المخزون — فاتورة مبيعات ${invoiceNumber}`,
-                summaryEn: `Stock out — sales invoice ${invoiceNumber}`,
-                humanReadableNote: `فاتورة مبيعات ${invoiceNumber}`,
-                tx,
-              });
-            }
-          }
-        }
       }
 
       // 5. Update invoice
@@ -643,13 +591,13 @@ export class SalesInvoicesController {
         data: {
           status: "CONFIRMED",
           customerTxId: customerTx.id,
-          journalEntryId: journalEntry?.id ?? null,
-          cogsJournalEntryId: cogsJournalEntry?.id ?? null,
-          arAccountId: body.arAccountId,
-          revenueAccountId: body.revenueAccountId,
-          taxAccountId: body.taxAccountId ?? null,
-          cogsAccountId: body.cogsAccountId ?? null,
-          inventoryAccountId: body.inventoryAccountId ?? null,
+          journalEntryId: revenuePosted.journalEntryId,
+          cogsJournalEntryId,
+          arAccountId,
+          revenueAccountId,
+          taxAccountId: vatOutputAccountId,
+          cogsAccountId: totalCogs.gt(0) ? cogsAccountId : null,
+          inventoryAccountId: totalCogs.gt(0) ? inventoryAccountId : null,
         },
         include: {
           customer: { select: { id: true, code: true, nameAr: true } },
@@ -673,12 +621,13 @@ export class SalesInvoicesController {
         afterSnapshot: {
           status: "CONFIRMED",
           invoiceNumber,
-          journalEntryId: journalEntry?.id ?? null,
-          cogsJournalEntryId: cogsJournalEntry?.id ?? null,
+          journalEntryId: revenuePosted.journalEntryId,
+          cogsJournalEntryId,
+          totalCogs: totalCogs.toFixed(2),
           customerTxId: customerTx.id,
         },
-        summaryAr: `${user.name} أكّد فاتورة المبيعات رقم ${invoiceNumber} وتم إنشاء القيود المحاسبية`,
-        summaryEn: `${user.name} confirmed sales invoice ${invoiceNumber} and created journal entries`,
+        summaryAr: `${user.name} أكّد فاتورة المبيعات رقم ${invoiceNumber} وتم ترحيل القيود وصرف المخزون`,
+        summaryEn: `${user.name} confirmed sales invoice ${invoiceNumber} — posted entries and stock out`,
       });
 
       return this.formatInvoice(invoice, true);

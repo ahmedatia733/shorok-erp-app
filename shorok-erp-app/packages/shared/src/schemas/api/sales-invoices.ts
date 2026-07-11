@@ -46,12 +46,18 @@ export const SalesInvoiceQuerySchema = z.object({
 });
 export type SalesInvoiceQuery = z.infer<typeof SalesInvoiceQuerySchema>;
 
+// Phase 3B: accounts resolve from the PostingProfile in force on the invoice
+// date; all account fields are optional and act only as a transitional
+// fallback for the current UI (removed when the UI is rebuilt in Phase 6).
+// `postJournalEntry`/`postCogs` are DEPRECATED and ignored — posting and the
+// stock SALE are now mandatory; they remain in the schema so the current UI
+// keeps validating.
 export const ConfirmSalesInvoiceSchema = z.object({
-  arAccountId:        z.string().uuid(),
-  revenueAccountId:   z.string().uuid(),
+  arAccountId:        z.string().uuid().optional(),
+  revenueAccountId:   z.string().uuid().optional(),
   taxAccountId:       z.string().uuid().optional(),
-  postJournalEntry:   z.boolean().default(true),
-  postCogs:           z.boolean().default(false),
+  postJournalEntry:   z.boolean().optional(), // deprecated, ignored
+  postCogs:           z.boolean().optional(), // deprecated, ignored
   cogsAccountId:      z.string().uuid().optional(),
   inventoryAccountId: z.string().uuid().optional(),
 });
