@@ -190,4 +190,42 @@ describe("sales invoice posting (Phase 3B)", () => {
     const rev = await handle.prisma.journalEntry.findUnique({ where: { id: inv!.journalEntryId! }, include: { lines: true } });
     expect(sum(rev!.lines, "debit").eq(sum(rev!.lines, "credit"))).toBe(true);
   });
+
+  it("cancel confirmed invoice: succeeds, CANCELLED, FKs cleared, CustomerTransaction deleted, stock restored (no P2003)", async () => {
+    await setProfile();
+    const variantId = await freshVariant("560", "10");
+    const draft = await createDraft(variantId, "4", "1000.00", "14");
+    const confirm = await request(server()).post(`/api/v1/sales-invoices/${draft.id}/confirm`).set(auth()).send({});
+    expect(confirm.status).toBeLessThan(300);
+
+    const confirmed = await handle.prisma.salesInvoice.findUnique({ where: { id: draft.id } });
+    expect(confirmed!.status).toBe("CONFIRMED");
+    // Preconditions for the FK-ordering bug: the invoice references a CustomerTransaction + journal entries.
+    expect(confirmed!.customerTxId).not.toBeNull();
+    expect(confirmed!.journalEntryId).not.toBeNull();
+    const customerTxId = confirmed!.customerTxId!;
+    const journalEntryId = confirmed!.journalEntryId!;
+    const cogsJournalEntryId = confirmed!.cogsJournalEntryId!;
+    // Stock was consumed on confirm (10 - 4 = 6).
+    const balBefore = await handle.prisma.branchInventoryBalance.findUnique({ where: { branchId_productVariantId: { branchId: handle.branchId, productVariantId: variantId } } });
+    expect(new Decimal(balBefore!.boardsOnHand.toString()).toString()).toBe("6");
+
+    const cancel = await request(server()).post(`/api/v1/sales-invoices/${draft.id}/cancel`).set(auth()).send({});
+    expect(cancel.status).toBeLessThan(300); // no 500 / P2003
+
+    const cancelled = await handle.prisma.salesInvoice.findUnique({ where: { id: draft.id } });
+    expect(cancelled!.status).toBe("CANCELLED");
+    // FK references cleared on the invoice.
+    expect(cancelled!.customerTxId).toBeNull();
+    expect(cancelled!.journalEntryId).toBeNull();
+    expect(cancelled!.cogsJournalEntryId).toBeNull();
+    // Referenced rows removed — no dangling accounting trace.
+    expect(await handle.prisma.customerTransaction.findUnique({ where: { id: customerTxId } })).toBeNull();
+    expect(await handle.prisma.journalEntry.findUnique({ where: { id: journalEntryId } })).toBeNull();
+    expect(await handle.prisma.journalEntry.findUnique({ where: { id: cogsJournalEntryId } })).toBeNull();
+    // SALE movements removed; stock restored to the pre-confirm level.
+    expect(await handle.prisma.inventoryMovement.count({ where: { referenceId: draft.id, movementType: "SALE" } })).toBe(0);
+    const balAfter = await handle.prisma.branchInventoryBalance.findUnique({ where: { branchId_productVariantId: { branchId: handle.branchId, productVariantId: variantId } } });
+    expect(new Decimal(balAfter!.boardsOnHand.toString()).toString()).toBe("10");
+  });
 });

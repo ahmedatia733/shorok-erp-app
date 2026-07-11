@@ -648,6 +648,19 @@ export class SalesInvoicesController {
     return this.prisma.runInTransaction(async (tx) => {
       const invoiceNumber = existing.invoiceNumber.toString();
 
+      // Clear FK references and set status FIRST so the deletes below cannot
+      // violate the FKs. (Bug fix: CustomerTransaction was deleted while the
+      // invoice still referenced it via customer_tx_id → Prisma P2003 / 500.)
+      await tx.salesInvoice.update({
+        where: { id },
+        data: {
+          status: "CANCELLED",
+          journalEntryId: null,
+          cogsJournalEntryId: null,
+          customerTxId: null,
+        },
+      });
+
       if (existing.status === "CONFIRMED") {
         // Delete CustomerTransaction (DR) — leaves no accounting trace
         if (existing.customerTxId) {
@@ -696,17 +709,6 @@ export class SalesInvoicesController {
           });
         }
       }
-
-      // Mark invoice cancelled and clear accounting references
-      await tx.salesInvoice.update({
-        where: { id },
-        data: {
-          status: "CANCELLED",
-          journalEntryId: null,
-          cogsJournalEntryId: null,
-          customerTxId: null,
-        },
-      });
 
       await this.audit.write({
         tx,
