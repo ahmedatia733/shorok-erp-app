@@ -368,6 +368,7 @@ model Supplier {
 
   factoryEntries FactoryLedgerEntry[]
   purchaseInvoices PurchaseInvoice[]
+  expenses Expense[]
 
   @@map("suppliers")
 }
@@ -485,14 +486,23 @@ model Expense {
   glAccountId        String?  @map("gl_account_id") @db.Uuid
   paymentGlAccountId String?  @map("payment_gl_account_id") @db.Uuid
   journalEntryId     String?  @map("journal_entry_id") @db.Uuid
+  // Phase 3C (additive): category→account mapping, on-credit AP supplier, and
+  // input-VAT metadata. All nullable/defaulted; legacy no-account expenses stay
+  // record-only (journalEntryId null) for backward compatibility.
+  expenseCategoryId  String?  @map("expense_category_id") @db.Uuid
+  supplierId         String?  @map("supplier_id") @db.Uuid
+  taxable            Boolean  @default(false)
+  taxRateAtPosting   Decimal? @map("tax_rate_at_posting") @db.Decimal(5, 2)
   createdBy          String   @map("created_by") @db.Uuid
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  branch           Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  creator          User          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
-  glAccount        Account?      @relation("ExpenseGlAccount",        fields: [glAccountId],        references: [id])
-  paymentGlAccount Account?      @relation("ExpensePaymentGlAccount", fields: [paymentGlAccountId], references: [id])
-  journalEntry     JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  branch           Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  creator          User             @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  glAccount        Account?         @relation("ExpenseGlAccount",        fields: [glAccountId],        references: [id])
+  paymentGlAccount Account?         @relation("ExpensePaymentGlAccount", fields: [paymentGlAccountId], references: [id])
+  journalEntry     JournalEntry?    @relation(fields: [journalEntryId], references: [id])
+  expenseCategory  ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id])
+  supplier         Supplier?        @relation(fields: [supplierId], references: [id])
 
   @@index([branchId, expenseDate(sort: Desc)])
   @@map("expenses")
@@ -1021,6 +1031,8 @@ model ExpenseCategory {
   taxableDefault Boolean  @default(false) @map("taxable_default")
   active         Boolean  @default(true)
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  expenses Expense[]
 
   @@map("expense_categories")
 }

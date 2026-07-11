@@ -8,6 +8,7 @@ import {
   type CreateExpenseRequest,
   type ExpensesQuery,
   type UpdateExpenseRequest,
+  type PostingLine,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -16,6 +17,8 @@ import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { PostingEngine } from "../posting/posting.engine";
+import { EffectiveConfigService } from "../configuration/effective-config.service";
 
 @Controller("expenses")
 export class ExpensesController {
@@ -23,6 +26,8 @@ export class ExpensesController {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly i18n: I18nService,
+    private readonly postingEngine: PostingEngine,
+    private readonly effectiveConfig: EffectiveConfigService,
   ) {}
 
   /**
@@ -90,7 +95,7 @@ export class ExpensesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const branch = await this.prisma.branch.findUnique({ where: { id: body.branchId } });
-    if (!branch) throw new NotFoundError({ branchId: body.branchId });
+    if (!branch || !branch.active) throw new NotFoundError({ branchId: body.branchId });
 
     const amount = new Decimal(body.amount);
     if (amount.isZero()) {
@@ -101,7 +106,79 @@ export class ExpensesController {
     }
 
     return this.prisma.runInTransaction(async (tx) => {
-      // Auto-post to GL if both GL accounts provided
+      // ── Phase 3C posting decision ──────────────────────────────────────────
+      // Negative amounts are OWNER corrections and stay record-only in 3C
+      // (refund/reversal semantics belong to Phase 3D). A positive expense with
+      // no posting signal at all is a legacy record-only expense (transitional
+      // backward-compat). Otherwise we resolve accounts and post through the
+      // PostingEngine, throwing typed errors on incomplete posting intent.
+      const isCorrection = amount.isNegative();
+      const hasPostingSignal =
+        !!body.expenseCategoryId ||
+        !!body.glAccountId ||
+        !!body.paymentGlAccountId ||
+        !!body.supplierId ||
+        body.taxable === true ||
+        !!body.taxRate ||
+        !!body.apAccountId ||
+        !!body.vatInputAccountId;
+
+      // Resolved plan (null when we take the record-only path).
+      let plan: {
+        expenseAccountId: string;
+        creditAccountId: string;
+        creditParty?: { partyType: "SUPPLIER"; partyId: string };
+        vatAccountId: string | null;
+        taxAmount: Decimal;
+        rate: Decimal;
+        isTaxable: boolean;
+      } | null = null;
+
+      if (!isCorrection && hasPostingSignal) {
+        const profile = await this.effectiveConfig.postingProfileAsOf(body.expenseDate, tx);
+        const taxProfile = await this.effectiveConfig.taxProfileAsOf(body.expenseDate, tx);
+
+        // Expense (debit) account: category mapping first, then body fallback.
+        let expenseAccountId: string;
+        if (body.expenseCategoryId) {
+          const cat = await tx.expenseCategory.findUnique({ where: { id: body.expenseCategoryId } });
+          if (!cat || !cat.active) throw new ValidationError({ reason: "expense_account_required" });
+          expenseAccountId = cat.accountId;
+        } else if (body.glAccountId) {
+          expenseAccountId = body.glAccountId;
+        } else {
+          throw new ValidationError({ reason: "expense_account_required" });
+        }
+
+        // Input VAT: only when taxable requested or an explicit rate > 0.
+        const rate = new Decimal(body.taxRate ?? taxProfile?.rate?.toString() ?? "0");
+        const isTaxable = body.taxable === true || rate.gt(0);
+        let vatAccountId: string | null = null;
+        let taxAmount = new Decimal(0);
+        if (isTaxable && rate.gt(0)) {
+          vatAccountId =
+            taxProfile?.inputAccountId ?? profile?.vatInputAccountId ?? body.vatInputAccountId ?? null;
+          if (!vatAccountId) throw new ValidationError({ reason: "vat_input_account_required" });
+          taxAmount = amount.mul(rate).div(100);
+        }
+
+        // Credit side: on-credit AP (with supplier party) or treasury payment.
+        let creditAccountId: string;
+        let creditParty: { partyType: "SUPPLIER"; partyId: string } | undefined;
+        if (body.supplierId) {
+          const ap = profile?.apAccountId ?? body.apAccountId ?? null;
+          if (!ap) throw new ValidationError({ reason: "ap_account_required" });
+          creditAccountId = ap;
+          creditParty = { partyType: "SUPPLIER", partyId: body.supplierId };
+        } else if (body.paymentGlAccountId) {
+          creditAccountId = body.paymentGlAccountId;
+        } else {
+          throw new ValidationError({ reason: "payment_account_required" });
+        }
+
+        plan = { expenseAccountId, creditAccountId, creditParty, vatAccountId, taxAmount, rate, isTaxable };
+      }
+
       let journalEntryId: string | null = null;
       const expense = await tx.expense.create({
         data: {
@@ -112,32 +189,44 @@ export class ExpensesController {
           paidFromAccount:    body.paidFromAccount,
           glAccountId:        body.glAccountId        ?? null,
           paymentGlAccountId: body.paymentGlAccountId ?? null,
+          expenseCategoryId:  body.expenseCategoryId  ?? null,
+          supplierId:         body.supplierId         ?? null,
+          taxable:            plan?.isTaxable ?? false,
+          taxRateAtPosting:   plan && plan.isTaxable && plan.rate.gt(0) ? plan.rate.toFixed(2) : null,
           journalEntryId:     null,
           createdBy: user.id,
         },
       });
 
-      if (body.glAccountId && body.paymentGlAccountId) {
-        const je = await tx.journalEntry.create({
-          data: {
-            entryType:     "EXPENSE",
-            entryDate:     new Date(body.expenseDate),
-            description:   body.description,
-            referenceType: "expense",
-            referenceId:   expense.id,
-            createdBy:     user.id,
-            lines: {
-              create: [
-                { accountId: body.glAccountId,        debit: amount.toFixed(2), credit: "0" },
-                { accountId: body.paymentGlAccountId, debit: "0", credit: amount.toFixed(2) },
-              ],
-            },
+      if (plan) {
+        const total = amount.add(plan.taxAmount);
+        const lines: PostingLine[] = [
+          { accountId: plan.expenseAccountId, debit: amount.toFixed(2), credit: "0" },
+          ...(plan.taxAmount.gt(0)
+            ? [{ accountId: plan.vatAccountId!, debit: plan.taxAmount.toFixed(2), credit: "0" }]
+            : []),
+          {
+            accountId: plan.creditAccountId,
+            debit: "0",
+            credit: total.toFixed(2),
+            ...(plan.creditParty ?? {}),
           },
+        ];
+        const result = await this.postingEngine.post({
+          sourceType: "EXPENSE",
+          sourceId: expense.id,
+          entryDate: body.expenseDate,
+          entryType: "EXPENSE",
+          description: body.description,
+          idempotencyKey: `EXPENSE:${expense.id}`,
+          lines,
+          actor: user,
+          tx,
         });
-        journalEntryId = je.id;
+        journalEntryId = result.journalEntryId;
         await tx.expense.update({
           where: { id: expense.id },
-          data:  { journalEntryId: je.id },
+          data:  { journalEntryId },
         });
       }
 
@@ -170,6 +259,7 @@ export class ExpensesController {
           description: body.description,
           paidFromAccount: body.paidFromAccount,
           isCorrection: amount.isNegative(),
+          journalEntryId,
         },
         summaryAr,
         summaryEn,
@@ -184,7 +274,10 @@ export class ExpensesController {
         paidFromAccount: expense.paidFromAccount,
         glAccountId: expense.glAccountId ?? null,
         paymentGlAccountId: expense.paymentGlAccountId ?? null,
-        journalEntryId: expense.journalEntryId ?? null,
+        expenseCategoryId: expense.expenseCategoryId ?? null,
+        supplierId: expense.supplierId ?? null,
+        taxable: expense.taxable,
+        journalEntryId,
         createdAt: expense.createdAt,
       };
     });

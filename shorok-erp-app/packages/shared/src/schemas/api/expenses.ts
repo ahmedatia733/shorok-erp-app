@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { DecimalStringSchema, IsoDateSchema, UuidSchema } from "../primitives";
 
+// Phase 3C (backward-compatible): when posting accounts are resolvable the
+// expense posts through the PostingEngine (Dr expense / [Dr VAT-in] / Cr
+// treasury|AP). All new fields are optional; a legacy request with no accounts
+// stays record-only (journalEntryId null). `glAccountId`/`paymentGlAccountId`
+// remain the current-UI transitional fallback for the expense/treasury legs.
 export const CreateExpenseRequestSchema = z.object({
   branchId: UuidSchema,
   expenseDate: IsoDateSchema,
@@ -9,6 +14,12 @@ export const CreateExpenseRequestSchema = z.object({
   paidFromAccount: z.string().min(1).max(120),
   glAccountId: UuidSchema.optional(),
   paymentGlAccountId: UuidSchema.optional(),
+  expenseCategoryId: UuidSchema.optional(),
+  supplierId: UuidSchema.optional(),
+  taxable: z.boolean().optional(),
+  taxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  vatInputAccountId: UuidSchema.optional(),
+  apAccountId: UuidSchema.optional(),
 });
 export type CreateExpenseRequest = z.infer<typeof CreateExpenseRequestSchema>;
 
