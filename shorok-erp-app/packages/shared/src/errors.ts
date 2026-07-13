@@ -16,6 +16,8 @@ export const ERROR_CODES = {
   PRICE_APPROVAL_REQUIRED: "price_approval_required",
   INVALID_STATE_TRANSITION: "invalid_state_transition",
   COLLECTION_EXCEEDS_REQUIRED: "collection_exceeds_required",
+  // Accounting
+  TREASURY_NEGATIVE_BALANCE_WARNING: "treasury_negative_balance_warning",
   // Generic conflict
   CONFLICT: "conflict",
   NOT_FOUND: "not_found",

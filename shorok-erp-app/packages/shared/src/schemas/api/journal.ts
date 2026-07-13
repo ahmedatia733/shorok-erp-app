@@ -19,6 +19,9 @@ export const CreateJournalEntryRequestSchema = z.object({
   referenceType: z.string().max(60).optional(),
   referenceId: z.string().uuid().optional(),
   lines: z.array(JournalLineSchema).min(2),
+  // Warn-only negative-treasury policy: set on the confirmed retry.
+  acknowledgeNegativeBalance: z.boolean().optional(),
+  negativeBalanceReason: z.string().max(500).optional(),
 });
 export type CreateJournalEntryRequest = z.infer<typeof CreateJournalEntryRequestSchema>;
 

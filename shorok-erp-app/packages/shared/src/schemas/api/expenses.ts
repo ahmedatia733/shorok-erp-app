@@ -20,6 +20,8 @@ export const CreateExpenseRequestSchema = z.object({
   taxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
   vatInputAccountId: UuidSchema.optional(),
   apAccountId: UuidSchema.optional(),
+  acknowledgeNegativeBalance: z.boolean().optional(),
+  negativeBalanceReason: z.string().max(500).optional(),
 });
 export type CreateExpenseRequest = z.infer<typeof CreateExpenseRequestSchema>;
 

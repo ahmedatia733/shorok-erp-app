@@ -227,6 +227,8 @@ export class ExpensesController {
           lines,
           actor: user,
           tx,
+          acknowledgeNegativeBalance: body.acknowledgeNegativeBalance,
+          negativeBalanceReason: body.negativeBalanceReason ?? null,
         });
         journalEntryId = result.journalEntryId;
         await tx.expense.update({

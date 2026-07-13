@@ -7,6 +7,8 @@ import { Alert } from "../../../../../components/ui/alert";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
+import { NegativeBalanceModal } from "../../../../../components/features/negative-balance-modal";
+import { parseTreasuryWarning, type TreasuryWarning } from "../../../../../lib/treasury-warning";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { useHasRole } from "../../../../../lib/auth";
 import {
@@ -167,6 +169,7 @@ export default function JournalPage() {
   const [loadingMore,     setLoadingMore]     = useState(false);
   const [expandedIds,     setExpandedIds]     = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [negWarning,      setNegWarning]      = useState<TreasuryWarning | null>(null);
 
   // ── Create modal state ────────────────────────────────────────────────────
   const [createOpen,    setCreateOpen]    = useState(false);
@@ -320,6 +323,10 @@ export default function JournalPage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
+    await submitJournal(false);
+  }
+
+  async function submitJournal(acknowledge: boolean) {
     setCreateLoading(true);
     setCreateError(null);
     try {
@@ -337,12 +344,16 @@ export default function JournalPage() {
             note: l.note || undefined,
           };
         }),
+        ...(acknowledge ? { acknowledgeNegativeBalance: true } : {}),
       });
+      setNegWarning(null);
       setCreateOpen(false);
       resetModal();
       await loadJournal();
-    } catch {
-      setCreateError(t("loadFailed"));
+    } catch (err) {
+      const w = parseTreasuryWarning(err);
+      if (w) setNegWarning(w); // open the confirmation modal; keep the form intact
+      else setCreateError(t("loadFailed"));
     } finally {
       setCreateLoading(false);
     }
@@ -953,6 +964,14 @@ export default function JournalPage() {
           </div>
         </form>
       </Modal>
+
+      <NegativeBalanceModal
+        warning={negWarning}
+        reference={reference.trim() || description}
+        submitting={createLoading}
+        onCancel={() => setNegWarning(null)}
+        onConfirm={() => void submitJournal(true)}
+      />
     </div>
   );
 }

@@ -347,7 +347,7 @@ export class ReceiptVouchersService {
       if (v.status === "REVERSED" && v.reversalJournalEntryId) return this.getById(id, tx); // idempotent
       if (v.status !== "POSTED" || !v.journalEntryId) throw new ValidationError({ reason: "receipt_voucher_not_posted", status: v.status });
 
-      const result = await this.reversal.reverse({ entryId: v.journalEntryId, reason: body.reason, reversalDate: body.reversalDate, actor: user, tx });
+      const result = await this.reversal.reverse({ entryId: v.journalEntryId, reason: body.reason, reversalDate: body.reversalDate, actor: user, tx, acknowledgeNegativeBalance: body.acknowledgeNegativeBalance, negativeBalanceReason: body.negativeBalanceReason ?? null });
 
       await tx.receiptVoucher.update({
         where: { id },

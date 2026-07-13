@@ -17,6 +17,9 @@ export interface ReverseInput {
    * document status update and stock compensation — no nested independent tx.
    */
   tx?: Prisma.TransactionClient;
+  /** Warn-only negative-treasury policy: set true on the confirmed retry. */
+  acknowledgeNegativeBalance?: boolean;
+  negativeBalanceReason?: string | null;
 }
 
 /**
@@ -95,6 +98,8 @@ export class ReversalService {
         description: `عكس قيد #${Number(original.entryNumber)} — ${input.reason}`,
         idempotencyKey: `reversal:${original.id}`,
         lines: mirroredLines,
+        acknowledgeNegativeBalance: input.acknowledgeNegativeBalance,
+        negativeBalanceReason: input.negativeBalanceReason,
       });
 
       // If this key already produced a reversal, the engine returned it as

@@ -11,6 +11,7 @@
   "price_approval_required": "يحتاج هذا السعر إلى موافقة المالك أو المدير قبل التأكيد.",
   "invalid_state_transition": "لا يمكن تنفيذ هذا الانتقال على حالة الطلب.",
   "collection_exceeds_required": "المبلغ المحصل أكبر من المبلغ المطلوب للطلب.",
+  "treasury_negative_balance_warning": "تحذير: هذه العملية ستجعل رصيد الخزنة/البنك سالبًا.",
   "conflict": "تعارض في البيانات.",
   "revert_not_supported": "لا يمكن التراجع عن هذا الإجراء.",
   "already_reverted": "تم التراجع عن هذا الإجراء بالفعل.",

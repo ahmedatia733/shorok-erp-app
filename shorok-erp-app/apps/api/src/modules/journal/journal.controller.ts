@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { ReversalService } from "../posting/reversal.service";
+import { TreasuryGuardService } from "../posting/treasury-guard.service";
 
 @Controller("journal")
 export class JournalController {
@@ -23,6 +24,7 @@ export class JournalController {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly reversal: ReversalService,
+    private readonly treasuryGuard: TreasuryGuardService,
   ) {}
 
   /**
@@ -61,6 +63,17 @@ export class JournalController {
     }
 
     return this.prisma.runInTransaction(async (tx) => {
+      // Negative treasury/bank balance protection (warn-only). Manual journals
+      // bypass the PostingEngine, so the guard is invoked here directly.
+      await this.treasuryGuard.check(tx, {
+        lines: body.lines,
+        acknowledge: body.acknowledgeNegativeBalance,
+        reason: body.negativeBalanceReason ?? null,
+        actor: user,
+        sourceType: "MANUAL",
+        sourceId: null,
+      });
+
       const entry = await tx.journalEntry.create({
         data: {
           entryType: body.entryType ?? "JOURNAL",
@@ -199,6 +212,8 @@ export class JournalController {
       reason: body.reason,
       reversalDate: body.reversalDate,
       actor: user,
+      acknowledgeNegativeBalance: body.acknowledgeNegativeBalance,
+      negativeBalanceReason: body.negativeBalanceReason ?? null,
     });
     return result;
   }

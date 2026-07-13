@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import type { PostingRequest, PostingResult } from "@shorok/shared";
 import { AuditService } from "../audit/audit.service";
+import { TreasuryGuardService } from "./treasury-guard.service";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
 import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
@@ -11,6 +12,10 @@ export interface PostInput extends PostingRequest {
   actor: AuthenticatedUser;
   /** Optional outer transaction (document flows in Phase 3 pass their tx). */
   tx?: Prisma.TransactionClient;
+  /** Warn-only negative-treasury policy: set true on the confirmed retry. */
+  acknowledgeNegativeBalance?: boolean;
+  /** Optional reason recorded with the acknowledgement audit row. */
+  negativeBalanceReason?: string | null;
 }
 
 /**
@@ -33,6 +38,7 @@ export class PostingEngine {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly treasuryGuard: TreasuryGuardService,
   ) {}
 
   async post(input: PostInput): Promise<PostingResult> {
@@ -118,6 +124,18 @@ export class PostingEngine {
         }
       }
     }
+
+    // ── 4.5 Negative treasury/bank balance protection (warn-only) ────────────
+    //    Runs in this tx, locks the affected treasury accounts, and either
+    //    throws a 409 warning (nothing posted) or audits the acknowledgement.
+    await this.treasuryGuard.check(tx, {
+      lines: input.lines,
+      acknowledge: input.acknowledgeNegativeBalance,
+      reason: input.negativeBalanceReason,
+      actor: input.actor,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId ?? null,
+    });
 
     // ── 5+6. Create entry — entry_number from the DB sequence (autoincrement)
     const entry = await tx.journalEntry.create({

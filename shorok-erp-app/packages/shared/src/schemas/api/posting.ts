@@ -63,5 +63,7 @@ export type PostingResult = z.infer<typeof PostingResultSchema>;
 export const ReverseEntrySchema = z.object({
   reason: z.string().min(3).max(500),
   reversalDate: IsoDateSchema.optional(), // defaults to today in an OPEN period
+  acknowledgeNegativeBalance: z.boolean().optional(),
+  negativeBalanceReason: z.string().max(500).optional(),
 });
 export type ReverseEntry = z.infer<typeof ReverseEntrySchema>;

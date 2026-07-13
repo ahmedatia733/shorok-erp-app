@@ -69,6 +69,8 @@ export type ReceiptVoucherPost = z.infer<typeof ReceiptVoucherPostSchema>;
 export const ReceiptVoucherReverseSchema = z.object({
   reason: z.string().min(3).max(500),
   reversalDate: IsoDateSchema.optional(),
+  acknowledgeNegativeBalance: z.boolean().optional(),
+  negativeBalanceReason: z.string().max(500).optional(),
 });
 export type ReceiptVoucherReverse = z.infer<typeof ReceiptVoucherReverseSchema>;
 

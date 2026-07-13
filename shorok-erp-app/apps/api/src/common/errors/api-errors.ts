@@ -119,3 +119,15 @@ export class ValidationError extends ApiError {
     super(ERROR_CODES.VALIDATION_FAILED, 409, "errors.validation_failed", details);
   }
 }
+
+/**
+ * Warning (HTTP 409) that a posting would drive a treasury/bank account below
+ * zero. Policy is warn-only: the client re-sends with acknowledgeNegativeBalance
+ * to proceed. Distinct code so the web can open the confirmation modal rather
+ * than treat it as a hard failure. `details` carries the balance breakdown.
+ */
+export class TreasuryNegativeBalanceWarning extends ApiError {
+  constructor(details: Record<string, unknown>) {
+    super(ERROR_CODES.TREASURY_NEGATIVE_BALANCE_WARNING, 409, "errors.treasury_negative_balance_warning", details);
+  }
+}

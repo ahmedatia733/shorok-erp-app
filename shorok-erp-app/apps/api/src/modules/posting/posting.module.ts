@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { PostingEngine } from "./posting.engine";
 import { ReversalService } from "./reversal.service";
+import { TreasuryGuardService } from "./treasury-guard.service";
 
 /**
  * Phase 2 accounting foundation. Exports the PostingEngine and ReversalService
@@ -9,7 +10,7 @@ import { ReversalService } from "./reversal.service";
  * PrismaService and AuditService come from their @Global modules.
  */
 @Module({
-  providers: [PostingEngine, ReversalService],
-  exports: [PostingEngine, ReversalService],
+  providers: [PostingEngine, ReversalService, TreasuryGuardService],
+  exports: [PostingEngine, ReversalService, TreasuryGuardService],
 })
 export class PostingModule {}

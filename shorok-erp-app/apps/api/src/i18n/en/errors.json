@@ -11,6 +11,7 @@
   "price_approval_required": "This price requires approval from an owner or administrator before confirmation.",
   "invalid_state_transition": "This transition is not allowed for the current order status.",
   "collection_exceeds_required": "The collection amount exceeds the order's required amount.",
+  "treasury_negative_balance_warning": "Warning: this operation will make the treasury/bank balance negative.",
   "conflict": "A data conflict occurred.",
   "revert_not_supported": "This action cannot be reverted.",
   "already_reverted": "This action has already been reverted.",
