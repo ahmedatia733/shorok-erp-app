@@ -135,6 +135,14 @@ enum ExpenseStatus {
   REVERSED
 }
 
+// Phase 4B: receipt/payment voucher lifecycle. DRAFT (no GL yet) → POSTED
+// (journal via engine) → REVERSED (mirror entry; original link retained).
+enum VoucherStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
 enum JournalSourceType {
   SALES_INVOICE
   PURCHASE_INVOICE
@@ -182,20 +190,22 @@ enum CostingMethod {
 
 model Branch {
   id        String   @id @default(uuid()) @db.Uuid
-  nameAr    String   @unique @db.VarChar(120) @map("name_ar")
-  nameEn    String   @unique @db.VarChar(120) @map("name_en")
+  nameAr    String   @unique @map("name_ar") @db.VarChar(120)
+  nameEn    String   @unique @map("name_en") @db.VarChar(120)
   location  String?  @db.VarChar(240)
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  userAccesses          UserBranchAccess[]
-  inventoryBalances     BranchInventoryBalance[]
-  inventoryMovements    InventoryMovement[]
-  customerOrders        CustomerOrder[]
-  expenses              Expense[]
-  purchaseInvoices      PurchaseInvoice[]    @relation("PurchaseInvoiceBranch")
-  salesInvoices         SalesInvoice[]       @relation("SalesInvoiceBranch")
+  userAccesses       UserBranchAccess[]
+  inventoryBalances  BranchInventoryBalance[]
+  inventoryMovements InventoryMovement[]
+  customerOrders     CustomerOrder[]
+  expenses           Expense[]
+  purchaseInvoices   PurchaseInvoice[]        @relation("PurchaseInvoiceBranch")
+  salesInvoices      SalesInvoice[]           @relation("SalesInvoiceBranch")
+  receiptVouchers    ReceiptVoucher[]         @relation("ReceiptVoucherBranch")
+  paymentVouchers    PaymentVoucher[]         @relation("PaymentVoucherBranch")
 
   @@map("branches")
 }
@@ -214,23 +224,29 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  branchAccesses    UserBranchAccess[]
-  refreshTokens     RefreshToken[]
-  inventoryWrites   InventoryMovement[] @relation("InventoryMovementCreatedBy")
-  ordersCreated     CustomerOrder[]      @relation("CustomerOrderCreatedBy")
-  pricesApproved    CustomerOrder[]      @relation("CustomerOrderPriceApprovedBy")
-  collectionsCreated OrderCollection[]
-  expensesCreated   Expense[]
-  factoryEntries    FactoryLedgerEntry[]
-  auditLogs         AuditLog[]
-  journalEntries    JournalEntry[]       @relation("JournalEntryCreatedBy")
-  purchaseInvoicesCreated PurchaseInvoice[] @relation("PurchaseInvoiceCreatedBy")
-  salesInvoicesCreated    SalesInvoice[]   @relation("SalesInvoiceCreatedBy")
+  branchAccesses          UserBranchAccess[]
+  refreshTokens           RefreshToken[]
+  inventoryWrites         InventoryMovement[]   @relation("InventoryMovementCreatedBy")
+  ordersCreated           CustomerOrder[]       @relation("CustomerOrderCreatedBy")
+  pricesApproved          CustomerOrder[]       @relation("CustomerOrderPriceApprovedBy")
+  collectionsCreated      OrderCollection[]
+  expensesCreated         Expense[]
+  factoryEntries          FactoryLedgerEntry[]
+  auditLogs               AuditLog[]
+  journalEntries          JournalEntry[]        @relation("JournalEntryCreatedBy")
+  purchaseInvoicesCreated PurchaseInvoice[]     @relation("PurchaseInvoiceCreatedBy")
+  salesInvoicesCreated    SalesInvoice[]        @relation("SalesInvoiceCreatedBy")
   payments                Payment[]
   journalTemplates        JournalTemplate[]
   customerTransactions    CustomerTransaction[]
-  fixedAssets             FixedAsset[]         @relation("FixedAssetCreatedBy")
-  depreciationEntries     DepreciationEntry[]  @relation("DepreciationEntryCreatedBy")
+  fixedAssets             FixedAsset[]          @relation("FixedAssetCreatedBy")
+  depreciationEntries     DepreciationEntry[]   @relation("DepreciationEntryCreatedBy")
+  receiptVouchersCreated  ReceiptVoucher[]      @relation("ReceiptVoucherCreatedBy")
+  receiptVouchersPosted   ReceiptVoucher[]      @relation("ReceiptVoucherPostedBy")
+  receiptVouchersReversed ReceiptVoucher[]      @relation("ReceiptVoucherReversedBy")
+  paymentVouchersCreated  PaymentVoucher[]      @relation("PaymentVoucherCreatedBy")
+  paymentVouchersPosted   PaymentVoucher[]      @relation("PaymentVoucherPostedBy")
+  paymentVouchersReversed PaymentVoucher[]      @relation("PaymentVoucherReversedBy")
 
   @@map("users")
 }
@@ -259,7 +275,7 @@ model PaymentAccount {
   createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  payments Payment[]
+  payments             Payment[]
   customerTransactions CustomerTransaction[]
 
   @@map("payment_accounts")
@@ -303,13 +319,13 @@ model UserBranchAccess {
 // ============================ RefreshToken ===========================
 
 model RefreshToken {
-  id         String    @id @default(uuid()) @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  tokenHash  String    @unique @map("token_hash") @db.VarChar(120)
-  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  userAgent  String?   @map("user_agent") @db.VarChar(240)
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(120)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  userAgent String?   @map("user_agent") @db.VarChar(240)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -320,14 +336,14 @@ model RefreshToken {
 // ============================== ProductSku ===========================
 
 model ProductSku {
-  id           String          @id @default(uuid()) @db.Uuid
-  code         String          @unique @db.VarChar(60)
-  colorNameAr  String          @db.VarChar(120) @map("color_name_ar")
-  colorNameEn  String          @db.VarChar(120) @map("color_name_en")
-  category     ProductCategory @default(NORMAL)
-  active       Boolean         @default(true)
-  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String          @id @default(uuid()) @db.Uuid
+  code        String          @unique @db.VarChar(60)
+  colorNameAr String          @map("color_name_ar") @db.VarChar(120)
+  colorNameEn String          @map("color_name_en") @db.VarChar(120)
+  category    ProductCategory @default(NORMAL)
+  active      Boolean         @default(true)
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   variants ProductVariant[]
 
@@ -337,19 +353,19 @@ model ProductSku {
 // =========================== ProductVariant ==========================
 
 model ProductVariant {
-  id                            String   @id @default(uuid()) @db.Uuid
-  skuId                         String   @map("sku_id") @db.Uuid
-  sizeMetersPerBoard            Decimal  @map("size_meters_per_board") @db.Decimal(10, 4)
-  defaultSalePricePerMeter      Decimal  @map("default_sale_price_per_meter") @db.Decimal(14, 2)
-  defaultPurchasePricePerMeter  Decimal  @map("default_purchase_price_per_meter") @db.Decimal(14, 2)
-  priceOverrideTolerancePercent Decimal? @map("price_override_tolerance_percent") @db.Decimal(5, 2)
+  id                            String    @id @default(uuid()) @db.Uuid
+  skuId                         String    @map("sku_id") @db.Uuid
+  sizeMetersPerBoard            Decimal   @map("size_meters_per_board") @db.Decimal(10, 4)
+  defaultSalePricePerMeter      Decimal   @map("default_sale_price_per_meter") @db.Decimal(14, 2)
+  defaultPurchasePricePerMeter  Decimal   @map("default_purchase_price_per_meter") @db.Decimal(14, 2)
+  priceOverrideTolerancePercent Decimal?  @map("price_override_tolerance_percent") @db.Decimal(5, 2)
   // Phase 3A — weighted-average cost (WAC), server-maintained only. Starts at
   // 0 and builds forward from purchase postings (opening value = Phase 4).
   avgCost                       Decimal   @default(0) @map("avg_cost") @db.Decimal(14, 4)
   costUpdatedAt                 DateTime? @map("cost_updated_at") @db.Timestamptz(6)
-  active                        Boolean  @default(true)
-  createdAt                     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  active                        Boolean   @default(true)
+  createdAt                     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   sku                  ProductSku               @relation(fields: [skuId], references: [id], onDelete: Restrict)
   inventoryBalances    BranchInventoryBalance[]
@@ -368,15 +384,16 @@ model ProductVariant {
 
 model Supplier {
   id        String   @id @default(uuid()) @db.Uuid
-  nameAr    String   @unique @db.VarChar(160) @map("name_ar")
-  nameEn    String   @unique @db.VarChar(160) @map("name_en")
+  nameAr    String   @unique @map("name_ar") @db.VarChar(160)
+  nameEn    String   @unique @map("name_en") @db.VarChar(160)
   active    Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  factoryEntries FactoryLedgerEntry[]
+  factoryEntries   FactoryLedgerEntry[]
   purchaseInvoices PurchaseInvoice[]
-  expenses Expense[]
+  expenses         Expense[]
+  paymentVouchers  PaymentVoucher[]
 
   @@map("suppliers")
 }
@@ -424,33 +441,33 @@ model InventoryMovement {
 // ============================ CustomerOrder ==========================
 
 model CustomerOrder {
-  id                       String              @id @default(uuid()) @db.Uuid
-  branchId                 String              @map("branch_id") @db.Uuid
-  orderDate                DateTime            @default(now()) @map("order_date") @db.Date
-  customerName             String              @map("customer_name") @db.VarChar(160)
-  productVariantId         String              @map("product_variant_id") @db.Uuid
-  boardsQuantity           Decimal             @map("boards_quantity") @db.Decimal(14, 4)
-  metersQuantity           Decimal             @map("meters_quantity") @db.Decimal(14, 4)
-  salePricePerMeter        Decimal             @map("sale_price_per_meter") @db.Decimal(14, 2)
-  priceOverrideStatus      PriceOverrideStatus @default(WITHIN_TOLERANCE) @map("price_override_status")
-  priceApprovedByUserId    String?             @map("price_approved_by_user_id") @db.Uuid
-  priceApprovedAt          DateTime?           @map("price_approved_at") @db.Timestamptz(6)
-  requiredAmount           Decimal             @map("required_amount") @db.Decimal(14, 2)
-  collectedAmount          Decimal             @default(0) @map("collected_amount") @db.Decimal(14, 2)
-  remainingAmount          Decimal             @map("remaining_amount") @db.Decimal(14, 2)
-  receiverName             String?             @map("receiver_name") @db.VarChar(160)
-  status                   OrderStatus         @default(DRAFT)
-  salesInvoiceId           String?             @map("sales_invoice_id") @db.Uuid
-  createdBy                String              @map("created_by") @db.Uuid
-  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                    String              @id @default(uuid()) @db.Uuid
+  branchId              String              @map("branch_id") @db.Uuid
+  orderDate             DateTime            @default(now()) @map("order_date") @db.Date
+  customerName          String              @map("customer_name") @db.VarChar(160)
+  productVariantId      String              @map("product_variant_id") @db.Uuid
+  boardsQuantity        Decimal             @map("boards_quantity") @db.Decimal(14, 4)
+  metersQuantity        Decimal             @map("meters_quantity") @db.Decimal(14, 4)
+  salePricePerMeter     Decimal             @map("sale_price_per_meter") @db.Decimal(14, 2)
+  priceOverrideStatus   PriceOverrideStatus @default(WITHIN_TOLERANCE) @map("price_override_status")
+  priceApprovedByUserId String?             @map("price_approved_by_user_id") @db.Uuid
+  priceApprovedAt       DateTime?           @map("price_approved_at") @db.Timestamptz(6)
+  requiredAmount        Decimal             @map("required_amount") @db.Decimal(14, 2)
+  collectedAmount       Decimal             @default(0) @map("collected_amount") @db.Decimal(14, 2)
+  remainingAmount       Decimal             @map("remaining_amount") @db.Decimal(14, 2)
+  receiverName          String?             @map("receiver_name") @db.VarChar(160)
+  status                OrderStatus         @default(DRAFT)
+  salesInvoiceId        String?             @map("sales_invoice_id") @db.Uuid
+  createdBy             String              @map("created_by") @db.Uuid
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  branch          Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  productVariant  ProductVariant   @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
-  creator         User             @relation("CustomerOrderCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
-  priceApprover   User?            @relation("CustomerOrderPriceApprovedBy", fields: [priceApprovedByUserId], references: [id], onDelete: SetNull)
-  salesInvoice    SalesInvoice?    @relation("OrderSalesInvoice", fields: [salesInvoiceId], references: [id], onDelete: SetNull)
-  collections     OrderCollection[]
+  branch         Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  productVariant ProductVariant    @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  creator        User              @relation("CustomerOrderCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  priceApprover  User?             @relation("CustomerOrderPriceApprovedBy", fields: [priceApprovedByUserId], references: [id], onDelete: SetNull)
+  salesInvoice   SalesInvoice?     @relation("OrderSalesInvoice", fields: [salesInvoiceId], references: [id], onDelete: SetNull)
+  collections    OrderCollection[]
 
   @@index([branchId, orderDate(sort: Desc)])
   @@index([status])
@@ -475,7 +492,7 @@ model OrderCollection {
   order        CustomerOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
   creator      User          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
   cashAccount  Account?      @relation("CollectionCashAccount", fields: [cashAccountId], references: [id])
-  arAccount    Account?      @relation("CollectionArAccount",   fields: [arAccountId],   references: [id])
+  arAccount    Account?      @relation("CollectionArAccount", fields: [arAccountId], references: [id])
   journalEntry JournalEntry? @relation("CollectionJournalEntry", fields: [journalEntryId], references: [id])
 
   @@index([orderId])
@@ -485,33 +502,33 @@ model OrderCollection {
 // =============================== Expense =============================
 
 model Expense {
-  id                 String   @id @default(uuid()) @db.Uuid
-  branchId           String   @map("branch_id") @db.Uuid
-  expenseDate        DateTime @map("expense_date") @db.Date
-  description        String   @db.VarChar(240)
-  amount             Decimal  @db.Decimal(14, 2)
-  paidFromAccount    String   @map("paid_from_account") @db.VarChar(120)
-  glAccountId        String?  @map("gl_account_id") @db.Uuid
-  paymentGlAccountId String?  @map("payment_gl_account_id") @db.Uuid
-  journalEntryId     String?  @map("journal_entry_id") @db.Uuid
+  id                     String        @id @default(uuid()) @db.Uuid
+  branchId               String        @map("branch_id") @db.Uuid
+  expenseDate            DateTime      @map("expense_date") @db.Date
+  description            String        @db.VarChar(240)
+  amount                 Decimal       @db.Decimal(14, 2)
+  paidFromAccount        String        @map("paid_from_account") @db.VarChar(120)
+  glAccountId            String?       @map("gl_account_id") @db.Uuid
+  paymentGlAccountId     String?       @map("payment_gl_account_id") @db.Uuid
+  journalEntryId         String?       @map("journal_entry_id") @db.Uuid
   // Phase 3C (additive): category→account mapping, on-credit AP supplier, and
   // input-VAT metadata. All nullable/defaulted; legacy no-account expenses stay
   // record-only (journalEntryId null) for backward compatibility.
-  expenseCategoryId  String?  @map("expense_category_id") @db.Uuid
-  supplierId         String?  @map("supplier_id") @db.Uuid
-  taxable            Boolean  @default(false)
-  taxRateAtPosting   Decimal? @map("tax_rate_at_posting") @db.Decimal(5, 2)
+  expenseCategoryId      String?       @map("expense_category_id") @db.Uuid
+  supplierId             String?       @map("supplier_id") @db.Uuid
+  taxable                Boolean       @default(false)
+  taxRateAtPosting       Decimal?      @map("tax_rate_at_posting") @db.Decimal(5, 2)
   // Phase 3D: reversal-hardening. status distinguishes record-only from
   // posted/reversed; reversalJournalEntryId points to the reversal entry
   // (the original journalEntryId stays linked to the original, now REVERSED).
   status                 ExpenseStatus @default(RECORDED)
   reversalJournalEntryId String?       @map("reversal_journal_entry_id") @db.Uuid
-  createdBy          String   @map("created_by") @db.Uuid
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy              String        @map("created_by") @db.Uuid
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
 
   branch           Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
   creator          User             @relation(fields: [createdBy], references: [id], onDelete: Restrict)
-  glAccount        Account?         @relation("ExpenseGlAccount",        fields: [glAccountId],        references: [id])
+  glAccount        Account?         @relation("ExpenseGlAccount", fields: [glAccountId], references: [id])
   paymentGlAccount Account?         @relation("ExpensePaymentGlAccount", fields: [paymentGlAccountId], references: [id])
   journalEntry     JournalEntry?    @relation(fields: [journalEntryId], references: [id])
   expenseCategory  ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id])
@@ -524,29 +541,29 @@ model Expense {
 // ======================== FactoryLedgerEntry =========================
 
 model FactoryLedgerEntry {
-  id                     String    @id @default(uuid()) @db.Uuid
-  supplierId             String    @map("supplier_id") @db.Uuid
-  orderDate              DateTime  @map("order_date") @db.Date
-  productVariantId       String?   @map("product_variant_id") @db.Uuid
-  boardsQuantity         Decimal?  @map("boards_quantity") @db.Decimal(14, 4)
-  metersQuantity         Decimal?  @map("meters_quantity") @db.Decimal(14, 4)
-  purchasePricePerMeter  Decimal?  @map("purchase_price_per_meter") @db.Decimal(14, 2)
-  totalAmount            Decimal   @default(0) @map("total_amount") @db.Decimal(14, 2)
-  paidAmount             Decimal   @default(0) @map("paid_amount") @db.Decimal(14, 2)
-  runningBalance         Decimal   @default(0) @map("running_balance") @db.Decimal(14, 2)
-  notes                  String?   @db.Text
-  debitAccountId         String?   @map("debit_account_id") @db.Uuid
-  creditAccountId        String?   @map("credit_account_id") @db.Uuid
-  journalEntryId         String?   @map("journal_entry_id") @db.Uuid
-  createdBy              String    @map("created_by") @db.Uuid
-  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                    String   @id @default(uuid()) @db.Uuid
+  supplierId            String   @map("supplier_id") @db.Uuid
+  orderDate             DateTime @map("order_date") @db.Date
+  productVariantId      String?  @map("product_variant_id") @db.Uuid
+  boardsQuantity        Decimal? @map("boards_quantity") @db.Decimal(14, 4)
+  metersQuantity        Decimal? @map("meters_quantity") @db.Decimal(14, 4)
+  purchasePricePerMeter Decimal? @map("purchase_price_per_meter") @db.Decimal(14, 2)
+  totalAmount           Decimal  @default(0) @map("total_amount") @db.Decimal(14, 2)
+  paidAmount            Decimal  @default(0) @map("paid_amount") @db.Decimal(14, 2)
+  runningBalance        Decimal  @default(0) @map("running_balance") @db.Decimal(14, 2)
+  notes                 String?  @db.Text
+  debitAccountId        String?  @map("debit_account_id") @db.Uuid
+  creditAccountId       String?  @map("credit_account_id") @db.Uuid
+  journalEntryId        String?  @map("journal_entry_id") @db.Uuid
+  createdBy             String   @map("created_by") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  supplier        Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  productVariant  ProductVariant? @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
-  creator         User            @relation(fields: [createdBy], references: [id], onDelete: Restrict)
-  debitAccount    Account?        @relation("FactoryEntryDebitAccount",  fields: [debitAccountId],  references: [id])
-  creditAccount   Account?        @relation("FactoryEntryCreditAccount", fields: [creditAccountId], references: [id])
-  journalEntry    JournalEntry?   @relation("FactoryEntryJournal",       fields: [journalEntryId],  references: [id])
+  supplier         Supplier          @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  productVariant   ProductVariant?   @relation(fields: [productVariantId], references: [id], onDelete: SetNull)
+  creator          User              @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  debitAccount     Account?          @relation("FactoryEntryDebitAccount", fields: [debitAccountId], references: [id])
+  creditAccount    Account?          @relation("FactoryEntryCreditAccount", fields: [creditAccountId], references: [id])
+  journalEntry     JournalEntry?     @relation("FactoryEntryJournal", fields: [journalEntryId], references: [id])
   purchaseInvoices PurchaseInvoice[]
 
   @@index([supplierId, orderDate])
@@ -556,16 +573,16 @@ model FactoryLedgerEntry {
 // =============================== AuditLog ============================
 
 model AuditLog {
-  id                       String      @id @default(uuid()) @db.Uuid
-  actorId                  String?     @map("actor_id") @db.Uuid
-  action                   AuditAction
-  entityType               String      @map("entity_type") @db.VarChar(60)
-  entityId                 String?     @map("entity_id") @db.Uuid
-  beforeSnapshot           Json?       @map("before_snapshot")
-  afterSnapshot            Json?       @map("after_snapshot")
-  humanReadableSummaryAr   String      @map("human_readable_summary_ar") @db.Text
-  humanReadableSummaryEn   String      @map("human_readable_summary_en") @db.Text
-  createdAt                DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                     String      @id @default(uuid()) @db.Uuid
+  actorId                String?     @map("actor_id") @db.Uuid
+  action                 AuditAction
+  entityType             String      @map("entity_type") @db.VarChar(60)
+  entityId               String?     @map("entity_id") @db.Uuid
+  beforeSnapshot         Json?       @map("before_snapshot")
+  afterSnapshot          Json?       @map("after_snapshot")
+  humanReadableSummaryAr String      @map("human_readable_summary_ar") @db.Text
+  humanReadableSummaryEn String      @map("human_readable_summary_en") @db.Text
+  createdAt              DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
   actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
@@ -577,11 +594,11 @@ model AuditLog {
 // =========================== SystemSettings ==========================
 
 model SystemSettings {
-  id                                       Int      @id @default(1)
-  defaultPriceOverrideTolerancePercent     Decimal  @default(5.00) @map("default_price_override_tolerance_percent") @db.Decimal(5, 2)
-  lowStockThresholdBoards                  Decimal  @default(5) @map("low_stock_threshold_boards") @db.Decimal(14, 4)
-  createdAt                                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                                   Int      @id @default(1)
+  defaultPriceOverrideTolerancePercent Decimal  @default(5.00) @map("default_price_override_tolerance_percent") @db.Decimal(5, 2)
+  lowStockThresholdBoards              Decimal  @default(5) @map("low_stock_threshold_boards") @db.Decimal(14, 4)
+  createdAt                            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("system_settings")
 }
@@ -605,35 +622,37 @@ model IdempotencyKey {
 // ============================== Account ==============================
 
 model Account {
-  id          String          @id @default(uuid()) @db.Uuid
-  code        String          @unique @db.VarChar(20)
-  nameAr      String          @map("name_ar") @db.VarChar(160)
-  nameEn      String          @map("name_en") @db.VarChar(160)
-  category    AccountCategory
-  accountType AccountType     @map("account_type")
-  parentId    String?         @map("parent_id") @db.Uuid
-  isLeaf      Boolean         @default(true) @map("is_leaf")
-  active      Boolean         @default(true)
-  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  id           String             @id @default(uuid()) @db.Uuid
+  code         String             @unique @db.VarChar(20)
+  nameAr       String             @map("name_ar") @db.VarChar(160)
+  nameEn       String             @map("name_en") @db.VarChar(160)
+  category     AccountCategory
+  accountType  AccountType        @map("account_type")
+  parentId     String?            @map("parent_id") @db.Uuid
+  isLeaf       Boolean            @default(true) @map("is_leaf")
+  active       Boolean            @default(true)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   // Phase 2 accounting foundation (additive)
   isCashOrBank Boolean            @default(false) @map("is_cash_or_bank")
   treasuryType TreasuryType?      @map("treasury_type")
   bankMeta     Json?              @map("bank_meta")
   systemRole   AccountSystemRole? @unique @map("system_role")
 
-  parent       Account?       @relation("AccountChildren", fields: [parentId], references: [id])
-  children     Account[]      @relation("AccountChildren")
-  journalLines JournalLine[]
-  templateLines JournalTemplateLine[]
-  fixedAssetsAsAsset      FixedAsset[] @relation("AssetAccount")
-  fixedAssetsAsAccumDep   FixedAsset[] @relation("AccumulatedDepAccount")
-  fixedAssetsAsDepExpense FixedAsset[] @relation("DepreciationExpenseAccount")
-  expensesAsGl            Expense[]    @relation("ExpenseGlAccount")
-  expensesAsPaymentGl     Expense[]    @relation("ExpensePaymentGlAccount")
-  collectionsAsCash       OrderCollection[] @relation("CollectionCashAccount")
-  collectionsAsAr         OrderCollection[] @relation("CollectionArAccount")
-  factoryEntriesAsDebit   FactoryLedgerEntry[] @relation("FactoryEntryDebitAccount")
-  factoryEntriesAsCredit  FactoryLedgerEntry[] @relation("FactoryEntryCreditAccount")
+  parent                  Account?              @relation("AccountChildren", fields: [parentId], references: [id])
+  children                Account[]             @relation("AccountChildren")
+  journalLines            JournalLine[]
+  templateLines           JournalTemplateLine[]
+  fixedAssetsAsAsset      FixedAsset[]          @relation("AssetAccount")
+  fixedAssetsAsAccumDep   FixedAsset[]          @relation("AccumulatedDepAccount")
+  fixedAssetsAsDepExpense FixedAsset[]          @relation("DepreciationExpenseAccount")
+  expensesAsGl            Expense[]             @relation("ExpenseGlAccount")
+  expensesAsPaymentGl     Expense[]             @relation("ExpensePaymentGlAccount")
+  collectionsAsCash       OrderCollection[]     @relation("CollectionCashAccount")
+  collectionsAsAr         OrderCollection[]     @relation("CollectionArAccount")
+  factoryEntriesAsDebit   FactoryLedgerEntry[]  @relation("FactoryEntryDebitAccount")
+  factoryEntriesAsCredit  FactoryLedgerEntry[]  @relation("FactoryEntryCreditAccount")
+  receiptVoucherTreasury  ReceiptVoucher[]      @relation("ReceiptVoucherTreasury")
+  paymentVoucherTreasury  PaymentVoucher[]      @relation("PaymentVoucherTreasury")
 
   @@index([category])
   @@index([parentId])
@@ -643,16 +662,16 @@ model Account {
 // =========================== JournalEntry ============================
 
 model JournalEntry {
-  id            String    @id @default(uuid()) @db.Uuid
-  entryNumber   BigInt    @unique @default(autoincrement()) @map("entry_number")
-  entryType     String    @default("JOURNAL") @map("entry_type") @db.VarChar(30)
-  reference     String?   @map("reference") @db.VarChar(100)
-  entryDate     DateTime  @map("entry_date") @db.Date
-  description   String    @db.VarChar(500)
-  referenceType String?   @map("reference_type") @db.VarChar(60)
-  referenceId   String?   @map("reference_id") @db.Uuid
-  createdBy     String    @map("created_by") @db.Uuid
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id             String             @id @default(uuid()) @db.Uuid
+  entryNumber    BigInt             @unique @default(autoincrement()) @map("entry_number")
+  entryType      String             @default("JOURNAL") @map("entry_type") @db.VarChar(30)
+  reference      String?            @map("reference") @db.VarChar(100)
+  entryDate      DateTime           @map("entry_date") @db.Date
+  description    String             @db.VarChar(500)
+  referenceType  String?            @map("reference_type") @db.VarChar(60)
+  referenceId    String?            @map("reference_id") @db.Uuid
+  createdBy      String             @map("created_by") @db.Uuid
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   // Phase 2 accounting foundation (additive; nullable/defaulted for legacy writers)
   status         JournalEntryStatus @default(POSTED)
   periodId       String?            @map("period_id") @db.Uuid
@@ -661,14 +680,18 @@ model JournalEntry {
   sourceId       String?            @map("source_id") @db.Uuid
   idempotencyKey String?            @unique @map("idempotency_key") @db.VarChar(120)
 
-  creator  User          @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
-  lines    JournalLine[]
-  expenses        Expense[]
-  collections     OrderCollection[]  @relation("CollectionJournalEntry")
-  factoryEntries  FactoryLedgerEntry[] @relation("FactoryEntryJournal")
-  period       FinancialPeriod? @relation(fields: [periodId], references: [id])
-  reversalOf   JournalEntry?    @relation("JournalEntryReversal", fields: [reversalOfId], references: [id])
-  reversedBy   JournalEntry[]   @relation("JournalEntryReversal")
+  creator                User                 @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
+  lines                  JournalLine[]
+  expenses               Expense[]
+  collections            OrderCollection[]    @relation("CollectionJournalEntry")
+  factoryEntries         FactoryLedgerEntry[] @relation("FactoryEntryJournal")
+  period                 FinancialPeriod?     @relation(fields: [periodId], references: [id])
+  reversalOf             JournalEntry?        @relation("JournalEntryReversal", fields: [reversalOfId], references: [id])
+  reversedBy             JournalEntry[]       @relation("JournalEntryReversal")
+  receiptVoucher         ReceiptVoucher?      @relation("ReceiptVoucherJournal")
+  receiptVoucherReversal ReceiptVoucher?      @relation("ReceiptVoucherReversalJournal")
+  paymentVoucher         PaymentVoucher?      @relation("PaymentVoucherJournal")
+  paymentVoucherReversal PaymentVoucher?      @relation("PaymentVoucherReversalJournal")
 
   @@index([entryDate(sort: Desc)])
   @@index([periodId])
@@ -679,16 +702,16 @@ model JournalEntry {
 // =========================== JournalLine =============================
 
 model JournalLine {
-  id             String  @id @default(uuid()) @db.Uuid
-  journalEntryId String  @map("journal_entry_id") @db.Uuid
-  accountId      String  @map("account_id") @db.Uuid
-  debit          Decimal @default(0) @db.Decimal(14, 2)
-  credit         Decimal @default(0) @db.Decimal(14, 2)
-  note           String? @db.VarChar(300)
+  id             String            @id @default(uuid()) @db.Uuid
+  journalEntryId String            @map("journal_entry_id") @db.Uuid
+  accountId      String            @map("account_id") @db.Uuid
+  debit          Decimal           @default(0) @db.Decimal(14, 2)
+  credit         Decimal           @default(0) @db.Decimal(14, 2)
+  note           String?           @db.VarChar(300)
   // Phase 2 party/branch dimensions (additive; nullable for legacy writers)
-  partyType JournalPartyType? @map("party_type")
-  partyId   String?           @map("party_id") @db.Uuid
-  branchId  String?           @map("branch_id") @db.Uuid
+  partyType      JournalPartyType? @map("party_type")
+  partyId        String?           @map("party_id") @db.Uuid
+  branchId       String?           @map("branch_id") @db.Uuid
 
   journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account      Account      @relation(fields: [accountId], references: [id])
@@ -702,34 +725,35 @@ model JournalLine {
 // ========================= PurchaseInvoice ===========================
 
 model PurchaseInvoice {
-  id                    String                @id @default(uuid()) @db.Uuid
-  invoiceNumber         String                @unique @map("invoice_number") @db.VarChar(30)
-  invoiceDate           DateTime              @map("invoice_date") @db.Date
-  dueDate               DateTime?             @map("due_date") @db.Date
-  supplierId            String                @map("supplier_id") @db.Uuid
-  branchId              String                @map("branch_id") @db.Uuid
-  factoryLedgerEntryId  String?               @map("factory_ledger_entry_id") @db.Uuid
-  basedOn               String?               @map("based_on") @db.VarChar(300)
-  docDirection          String?               @map("doc_direction") @db.VarChar(100)
-  customsNumber         String?               @map("customs_number") @db.VarChar(100)
-  notes                 String?               @db.VarChar(1000)
-  status                PurchaseInvoiceStatus @default(DRAFT)
-  subtotal              Decimal               @default(0) @db.Decimal(14, 2)
-  taxAmount             Decimal               @default(0) @map("tax_amount") @db.Decimal(14, 2)
-  grandTotal            Decimal               @default(0) @map("grand_total") @db.Decimal(14, 2)
-  apAccountId           String?               @map("ap_account_id") @db.Uuid
-  taxAccountId          String?               @map("tax_account_id") @db.Uuid
-  inventoryAccountId    String?               @map("inventory_account_id") @db.Uuid
-  journalEntryId        String?               @map("journal_entry_id") @db.Uuid
-  createdBy             String                @map("created_by") @db.Uuid
-  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                   String                @id @default(uuid()) @db.Uuid
+  invoiceNumber        String                @unique @map("invoice_number") @db.VarChar(30)
+  invoiceDate          DateTime              @map("invoice_date") @db.Date
+  dueDate              DateTime?             @map("due_date") @db.Date
+  supplierId           String                @map("supplier_id") @db.Uuid
+  branchId             String                @map("branch_id") @db.Uuid
+  factoryLedgerEntryId String?               @map("factory_ledger_entry_id") @db.Uuid
+  basedOn              String?               @map("based_on") @db.VarChar(300)
+  docDirection         String?               @map("doc_direction") @db.VarChar(100)
+  customsNumber        String?               @map("customs_number") @db.VarChar(100)
+  notes                String?               @db.VarChar(1000)
+  status               PurchaseInvoiceStatus @default(DRAFT)
+  subtotal             Decimal               @default(0) @db.Decimal(14, 2)
+  taxAmount            Decimal               @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  grandTotal           Decimal               @default(0) @map("grand_total") @db.Decimal(14, 2)
+  apAccountId          String?               @map("ap_account_id") @db.Uuid
+  taxAccountId         String?               @map("tax_account_id") @db.Uuid
+  inventoryAccountId   String?               @map("inventory_account_id") @db.Uuid
+  journalEntryId       String?               @map("journal_entry_id") @db.Uuid
+  createdBy            String                @map("created_by") @db.Uuid
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  supplier             Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  branch               Branch               @relation("PurchaseInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
-  creator              User                 @relation("PurchaseInvoiceCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
-  factoryLedgerEntry   FactoryLedgerEntry?  @relation(fields: [factoryLedgerEntryId], references: [id], onDelete: SetNull)
-  lines                PurchaseInvoiceLine[]
+  supplier           Supplier                   @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  branch             Branch                     @relation("PurchaseInvoiceBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  creator            User                       @relation("PurchaseInvoiceCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  factoryLedgerEntry FactoryLedgerEntry?        @relation(fields: [factoryLedgerEntryId], references: [id], onDelete: SetNull)
+  lines              PurchaseInvoiceLine[]
+  paymentAllocations PaymentVoucherAllocation[]
 
   @@index([supplierId])
   @@index([branchId])
@@ -739,21 +763,21 @@ model PurchaseInvoice {
 }
 
 model PurchaseInvoiceLine {
-  id               String   @id @default(uuid()) @db.Uuid
-  invoiceId        String   @map("invoice_id") @db.Uuid
-  productVariantId String   @map("product_variant_id") @db.Uuid
-  boardsQuantity   Decimal  @map("boards_quantity") @db.Decimal(14, 4)
-  lengthM          Decimal? @map("length_m") @db.Decimal(14, 4)
-  widthM           Decimal? @map("width_m") @db.Decimal(14, 4)
-  metersQuantity   Decimal  @map("meters_quantity") @db.Decimal(14, 4)
-  colorCode        String?  @map("color_code") @db.VarChar(20)
-  heightM          Decimal? @map("height_m") @db.Decimal(14, 4)
-  unitLabel        String?  @map("unit_label") @db.VarChar(30)
-  unitPrice        Decimal  @map("unit_price") @db.Decimal(14, 2)
-  lineTotal        Decimal  @map("line_total") @db.Decimal(14, 2)
-  taxRate          Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
-  taxAmount        Decimal  @default(0) @map("tax_amount") @db.Decimal(14, 2)
-  isFree           Boolean  @default(false) @map("is_free")
+  id                String   @id @default(uuid()) @db.Uuid
+  invoiceId         String   @map("invoice_id") @db.Uuid
+  productVariantId  String   @map("product_variant_id") @db.Uuid
+  boardsQuantity    Decimal  @map("boards_quantity") @db.Decimal(14, 4)
+  lengthM           Decimal? @map("length_m") @db.Decimal(14, 4)
+  widthM            Decimal? @map("width_m") @db.Decimal(14, 4)
+  metersQuantity    Decimal  @map("meters_quantity") @db.Decimal(14, 4)
+  colorCode         String?  @map("color_code") @db.VarChar(20)
+  heightM           Decimal? @map("height_m") @db.Decimal(14, 4)
+  unitLabel         String?  @map("unit_label") @db.VarChar(30)
+  unitPrice         Decimal  @map("unit_price") @db.Decimal(14, 2)
+  lineTotal         Decimal  @map("line_total") @db.Decimal(14, 2)
+  taxRate           Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount         Decimal  @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  isFree            Boolean  @default(false) @map("is_free")
   // Phase 3A — posting-time snapshots (server-stamped at confirm)
   unitCostAtPosting Decimal? @map("unit_cost_at_posting") @db.Decimal(14, 2)
   taxRateAtPosting  Decimal? @map("tax_rate_at_posting") @db.Decimal(5, 2)
@@ -803,15 +827,16 @@ model JournalTemplateLine {
 // =============================== Customer =============================
 
 model Customer {
-  id           String   @id @default(uuid()) @db.Uuid
-  code         String   @unique @db.VarChar(20)
-  nameAr       String   @map("name_ar") @db.VarChar(200)
-  phone        String?  @db.VarChar(30)
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique @db.VarChar(20)
+  nameAr    String   @map("name_ar") @db.VarChar(200)
+  phone     String?  @db.VarChar(30)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  transactions   CustomerTransaction[]
-  salesInvoices  SalesInvoice[]
+  transactions    CustomerTransaction[]
+  salesInvoices   SalesInvoice[]
+  receiptVouchers ReceiptVoucher[]
 
   @@map("customers")
 }
@@ -861,10 +886,10 @@ model FixedAsset {
   createdAt                    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  assetAccount               Account   @relation("AssetAccount", fields: [assetAccountId], references: [id])
-  accumulatedDepAccount      Account   @relation("AccumulatedDepAccount", fields: [accumulatedDepAccountId], references: [id])
-  depreciationExpenseAccount Account   @relation("DepreciationExpenseAccount", fields: [depreciationExpenseAccountId], references: [id])
-  creator                    User      @relation("FixedAssetCreatedBy", fields: [createdBy], references: [id])
+  assetAccount               Account             @relation("AssetAccount", fields: [assetAccountId], references: [id])
+  accumulatedDepAccount      Account             @relation("AccumulatedDepAccount", fields: [accumulatedDepAccountId], references: [id])
+  depreciationExpenseAccount Account             @relation("DepreciationExpenseAccount", fields: [depreciationExpenseAccountId], references: [id])
+  creator                    User                @relation("FixedAssetCreatedBy", fields: [createdBy], references: [id])
   depreciationEntries        DepreciationEntry[]
 
   @@index([active])
@@ -894,37 +919,38 @@ model DepreciationEntry {
 // ========================= SalesInvoice ==============================
 
 model SalesInvoice {
-  id                  String    @id @default(uuid()) @db.Uuid
-  invoiceNumber       BigInt    @unique @default(autoincrement()) @map("invoice_number")
-  invoiceDate         DateTime  @map("invoice_date") @db.Date
-  dueDate             DateTime? @map("due_date") @db.Date
-  customerId          String    @map("customer_id") @db.Uuid
-  branchId            String    @map("branch_id") @db.Uuid
-  status              String    @default("DRAFT") @db.VarChar(20)
-  notes               String?   @db.VarChar(1000)
-  subtotal            Decimal   @default(0) @db.Decimal(14, 2)
-  discountAmount      Decimal   @default(0) @map("discount_amount") @db.Decimal(14, 2)
-  taxRate             Decimal   @default(0) @map("tax_rate") @db.Decimal(5, 2)
-  taxAmount           Decimal   @default(0) @map("tax_amount") @db.Decimal(14, 2)
-  grandTotal          Decimal   @default(0) @map("grand_total") @db.Decimal(14, 2)
-  totalCost           Decimal   @default(0) @map("total_cost") @db.Decimal(14, 2)
-  arAccountId         String?   @map("ar_account_id") @db.Uuid
-  revenueAccountId    String?   @map("revenue_account_id") @db.Uuid
-  taxAccountId        String?   @map("tax_account_id") @db.Uuid
-  cogsAccountId       String?   @map("cogs_account_id") @db.Uuid
-  inventoryAccountId  String?   @map("inventory_account_id") @db.Uuid
-  journalEntryId      String?   @map("journal_entry_id") @db.Uuid
-  cogsJournalEntryId  String?   @map("cogs_journal_entry_id") @db.Uuid
-  customerTxId        String?   @map("customer_tx_id") @db.Uuid
-  createdBy           String    @map("created_by") @db.Uuid
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                 String    @id @default(uuid()) @db.Uuid
+  invoiceNumber      BigInt    @unique @default(autoincrement()) @map("invoice_number")
+  invoiceDate        DateTime  @map("invoice_date") @db.Date
+  dueDate            DateTime? @map("due_date") @db.Date
+  customerId         String    @map("customer_id") @db.Uuid
+  branchId           String    @map("branch_id") @db.Uuid
+  status             String    @default("DRAFT") @db.VarChar(20)
+  notes              String?   @db.VarChar(1000)
+  subtotal           Decimal   @default(0) @db.Decimal(14, 2)
+  discountAmount     Decimal   @default(0) @map("discount_amount") @db.Decimal(14, 2)
+  taxRate            Decimal   @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  taxAmount          Decimal   @default(0) @map("tax_amount") @db.Decimal(14, 2)
+  grandTotal         Decimal   @default(0) @map("grand_total") @db.Decimal(14, 2)
+  totalCost          Decimal   @default(0) @map("total_cost") @db.Decimal(14, 2)
+  arAccountId        String?   @map("ar_account_id") @db.Uuid
+  revenueAccountId   String?   @map("revenue_account_id") @db.Uuid
+  taxAccountId       String?   @map("tax_account_id") @db.Uuid
+  cogsAccountId      String?   @map("cogs_account_id") @db.Uuid
+  inventoryAccountId String?   @map("inventory_account_id") @db.Uuid
+  journalEntryId     String?   @map("journal_entry_id") @db.Uuid
+  cogsJournalEntryId String?   @map("cogs_journal_entry_id") @db.Uuid
+  customerTxId       String?   @map("customer_tx_id") @db.Uuid
+  createdBy          String    @map("created_by") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  customer  Customer         @relation(fields: [customerId], references: [id])
-  branch    Branch           @relation("SalesInvoiceBranch", fields: [branchId], references: [id])
-  creator   User             @relation("SalesInvoiceCreatedBy", fields: [createdBy], references: [id])
-  lines     SalesInvoiceLine[]
-  orders    CustomerOrder[]  @relation("OrderSalesInvoice")
+  customer           Customer                   @relation(fields: [customerId], references: [id])
+  branch             Branch                     @relation("SalesInvoiceBranch", fields: [branchId], references: [id])
+  creator            User                       @relation("SalesInvoiceCreatedBy", fields: [createdBy], references: [id])
+  lines              SalesInvoiceLine[]
+  orders             CustomerOrder[]            @relation("OrderSalesInvoice")
+  receiptAllocations ReceiptVoucherAllocation[]
 
   @@index([customerId])
   @@index([invoiceDate(sort: Desc)])
@@ -932,17 +958,17 @@ model SalesInvoice {
 }
 
 model SalesInvoiceLine {
-  id               String   @id @default(uuid()) @db.Uuid
-  invoiceId        String   @map("invoice_id") @db.Uuid
-  productVariantId String   @map("product_variant_id") @db.Uuid
-  quantity         Decimal  @db.Decimal(14, 4)
-  unitLabel        String   @default("وحدة") @map("unit_label") @db.VarChar(30)
-  unitPrice        Decimal  @map("unit_price") @db.Decimal(14, 2)
-  costPrice        Decimal  @default(0) @map("cost_price") @db.Decimal(14, 2)
-  discountPct      Decimal  @default(0) @map("discount_pct") @db.Decimal(5, 2)
-  lineTotal        Decimal  @map("line_total") @db.Decimal(14, 2)
-  lineCost         Decimal  @default(0) @map("line_cost") @db.Decimal(14, 2)
-  note             String?  @db.VarChar(300)
+  id                String   @id @default(uuid()) @db.Uuid
+  invoiceId         String   @map("invoice_id") @db.Uuid
+  productVariantId  String   @map("product_variant_id") @db.Uuid
+  quantity          Decimal  @db.Decimal(14, 4)
+  unitLabel         String   @default("وحدة") @map("unit_label") @db.VarChar(30)
+  unitPrice         Decimal  @map("unit_price") @db.Decimal(14, 2)
+  costPrice         Decimal  @default(0) @map("cost_price") @db.Decimal(14, 2)
+  discountPct       Decimal  @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  lineTotal         Decimal  @map("line_total") @db.Decimal(14, 2)
+  lineCost          Decimal  @default(0) @map("line_cost") @db.Decimal(14, 2)
+  note              String?  @db.VarChar(300)
   // Phase 3B — posting-time snapshots (server-stamped at confirm; COGS uses
   // product_variants.avg_cost, never the user-entered cost_price above)
   unitCostAtPosting Decimal? @map("unit_cost_at_posting") @db.Decimal(14, 2)
@@ -960,38 +986,40 @@ model SalesInvoiceLine {
 // ═══════════════════════════════════════════════════════════════════
 
 model CompanyProfile {
-  id                   String   @id @default(uuid()) @db.Uuid
-  nameAr               String   @map("name_ar") @db.VarChar(200)
-  nameEn               String   @map("name_en") @db.VarChar(200)
-  logoUrl              String?  @map("logo_url")
-  brandPrimaryColor    String?  @map("brand_primary_color") @db.VarChar(20)
-  currency             String   @default("EGP") @db.Char(3)
-  currencyLockedAt     DateTime? @map("currency_locked_at") @db.Timestamptz(6)
-  taxRegistrationNo    String?  @map("tax_registration_no") @db.VarChar(60)
-  fiscalYearStartMonth Int      @default(1) @map("fiscal_year_start_month")
-  defaultLocale        String   @default("ar") @db.VarChar(5)
-  printFooterAr        String?  @map("print_footer_ar")
-  printFooterEn        String?  @map("print_footer_en")
+  id                   String              @id @default(uuid()) @db.Uuid
+  nameAr               String              @map("name_ar") @db.VarChar(200)
+  nameEn               String              @map("name_en") @db.VarChar(200)
+  logoUrl              String?             @map("logo_url")
+  brandPrimaryColor    String?             @map("brand_primary_color") @db.VarChar(20)
+  currency             String              @default("EGP") @db.Char(3)
+  currencyLockedAt     DateTime?           @map("currency_locked_at") @db.Timestamptz(6)
+  taxRegistrationNo    String?             @map("tax_registration_no") @db.VarChar(60)
+  fiscalYearStartMonth Int                 @default(1) @map("fiscal_year_start_month")
+  defaultLocale        String              @default("ar") @db.VarChar(5)
+  printFooterAr        String?             @map("print_footer_ar")
+  printFooterEn        String?             @map("print_footer_en")
   printBrandingPolicy  PrintBrandingPolicy @default(CURRENT) @map("print_branding_policy")
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("company_profile")
 }
 
 model FinancialPeriod {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String                @id @default(uuid()) @db.Uuid
   year         Int
   month        Int
   status       FinancialPeriodStatus @default(OPEN)
-  closedBy     String?  @map("closed_by") @db.Uuid
-  closedAt     DateTime? @map("closed_at") @db.Timestamptz(6)
-  reopenedBy   String?  @map("reopened_by") @db.Uuid
-  reopenedAt   DateTime? @map("reopened_at") @db.Timestamptz(6)
-  reopenReason String?  @map("reopen_reason") @db.VarChar(500)
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  closedBy     String?               @map("closed_by") @db.Uuid
+  closedAt     DateTime?             @map("closed_at") @db.Timestamptz(6)
+  reopenedBy   String?               @map("reopened_by") @db.Uuid
+  reopenedAt   DateTime?             @map("reopened_at") @db.Timestamptz(6)
+  reopenReason String?               @map("reopen_reason") @db.VarChar(500)
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  journalEntries JournalEntry[]
+  journalEntries  JournalEntry[]
+  receiptVouchers ReceiptVoucher[]
+  paymentVouchers PaymentVoucher[]
 
   @@unique([year, month])
   @@map("financial_periods")
@@ -1020,17 +1048,17 @@ model PostingProfile {
 }
 
 model TaxProfile {
-  id                 String   @id @default(uuid()) @db.Uuid
-  nameKey            String   @map("name_key") @db.VarChar(100)
-  rate               Decimal  @db.Decimal(5, 2)
-  inputAccountId     String?  @map("input_account_id") @db.Uuid
-  outputAccountId    String?  @map("output_account_id") @db.Uuid
+  id                 String                @id @default(uuid()) @db.Uuid
+  nameKey            String                @map("name_key") @db.VarChar(100)
+  rate               Decimal               @db.Decimal(5, 2)
+  inputAccountId     String?               @map("input_account_id") @db.Uuid
+  outputAccountId    String?               @map("output_account_id") @db.Uuid
   registrationStatus TaxRegistrationStatus @default(REGISTERED) @map("registration_status")
-  filingCycle        TaxFilingCycle @default(MONTHLY) @map("filing_cycle")
-  effectiveFrom      DateTime @map("effective_from") @db.Date
-  active             Boolean  @default(true)
-  createdBy          String   @map("created_by") @db.Uuid
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  filingCycle        TaxFilingCycle        @default(MONTHLY) @map("filing_cycle")
+  effectiveFrom      DateTime              @map("effective_from") @db.Date
+  active             Boolean               @default(true)
+  createdBy          String                @map("created_by") @db.Uuid
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([effectiveFrom(sort: Desc)])
   @@map("tax_profiles")
@@ -1051,41 +1079,41 @@ model ExpenseCategory {
 }
 
 model NumberingSeries {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String            @id @default(uuid()) @db.Uuid
   documentType JournalSourceType @map("document_type")
-  prefix       String   @default("") @db.VarChar(10)
-  padWidth     Int      @default(5) @map("pad_width")
-  nextNumber   BigInt   @default(1) @map("next_number")
-  resetYearly  Boolean  @default(false) @map("reset_yearly")
-  perBranch    Boolean  @default(false) @map("per_branch")
-  branchId     String?  @map("branch_id") @db.Uuid
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  prefix       String            @default("") @db.VarChar(10)
+  padWidth     Int               @default(5) @map("pad_width")
+  nextNumber   BigInt            @default(1) @map("next_number")
+  resetYearly  Boolean           @default(false) @map("reset_yearly")
+  perBranch    Boolean           @default(false) @map("per_branch")
+  branchId     String?           @map("branch_id") @db.Uuid
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("numbering_series")
 }
 
 model PrintTemplate {
-  id             String   @id @default(uuid()) @db.Uuid
-  documentType   JournalSourceType @map("document_type")
-  version        Int      @default(1)
-  fieldToggles   Json?    @map("field_toggles")
-  footerAr       String?  @map("footer_ar")
-  footerEn       String?  @map("footer_en")
-  signatureSlots Json?    @map("signature_slots")
-  paper          PaperSize @default(A4)
+  id             String              @id @default(uuid()) @db.Uuid
+  documentType   JournalSourceType   @map("document_type")
+  version        Int                 @default(1)
+  fieldToggles   Json?               @map("field_toggles")
+  footerAr       String?             @map("footer_ar")
+  footerEn       String?             @map("footer_en")
+  signatureSlots Json?               @map("signature_slots")
+  paper          PaperSize           @default(A4)
   brandingPolicy PrintBrandingPolicy @default(CURRENT) @map("branding_policy")
-  effectiveFrom  DateTime @default(now()) @map("effective_from") @db.Date
-  active         Boolean  @default(true)
+  effectiveFrom  DateTime            @default(now()) @map("effective_from") @db.Date
+  active         Boolean             @default(true)
 
   @@map("print_templates")
 }
 
 model CostingSettings {
-  id                   String   @id @default(uuid()) @db.Uuid
+  id                   String        @id @default(uuid()) @db.Uuid
   method               CostingMethod @default(WAC)
-  effectiveFrom        DateTime @default(now()) @map("effective_from") @db.Date
-  changedBy            String?  @map("changed_by") @db.Uuid
-  valuationSnapshotUrl String?  @map("valuation_snapshot_url")
+  effectiveFrom        DateTime      @default(now()) @map("effective_from") @db.Date
+  changedBy            String?       @map("changed_by") @db.Uuid
+  valuationSnapshotUrl String?       @map("valuation_snapshot_url")
 
   @@map("costing_settings")
 }
@@ -1099,4 +1127,122 @@ model Warehouse {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("warehouses")
+}
+
+// ======================== Phase 4B: Vouchers ==========================
+// Receipt/payment vouchers post through the PostingEngine in 4B-2/4B-3 (not
+// here). Schema-only foundation: DRAFT rows may have no period/journal metadata.
+
+model ReceiptVoucher {
+  id                     String        @id @default(uuid()) @db.Uuid
+  voucherNumber          BigInt        @unique @default(autoincrement()) @map("voucher_number")
+  voucherDate            DateTime      @map("voucher_date") @db.Date
+  branchId               String        @map("branch_id") @db.Uuid
+  customerId             String        @map("customer_id") @db.Uuid
+  treasuryAccountId      String        @map("treasury_account_id") @db.Uuid
+  amount                 Decimal       @db.Decimal(18, 2)
+  reference              String?       @db.VarChar(100)
+  memo                   String?       @db.VarChar(300)
+  status                 VoucherStatus @default(DRAFT)
+  periodId               String?       @map("period_id") @db.Uuid
+  journalEntryId         String?       @unique @map("journal_entry_id") @db.Uuid
+  reversalJournalEntryId String?       @unique @map("reversal_journal_entry_id") @db.Uuid
+  createdBy              String        @map("created_by") @db.Uuid
+  postedBy               String?       @map("posted_by") @db.Uuid
+  reversedBy             String?       @map("reversed_by") @db.Uuid
+  postedAt               DateTime?     @map("posted_at") @db.Timestamptz(6)
+  reversedAt             DateTime?     @map("reversed_at") @db.Timestamptz(6)
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch               Branch                     @relation("ReceiptVoucherBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  customer             Customer                   @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  treasuryAccount      Account                    @relation("ReceiptVoucherTreasury", fields: [treasuryAccountId], references: [id], onDelete: Restrict)
+  period               FinancialPeriod?           @relation(fields: [periodId], references: [id])
+  journalEntry         JournalEntry?              @relation("ReceiptVoucherJournal", fields: [journalEntryId], references: [id])
+  reversalJournalEntry JournalEntry?              @relation("ReceiptVoucherReversalJournal", fields: [reversalJournalEntryId], references: [id])
+  creator              User                       @relation("ReceiptVoucherCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  poster               User?                      @relation("ReceiptVoucherPostedBy", fields: [postedBy], references: [id])
+  reverser             User?                      @relation("ReceiptVoucherReversedBy", fields: [reversedBy], references: [id])
+  allocations          ReceiptVoucherAllocation[]
+
+  @@index([customerId])
+  @@index([treasuryAccountId])
+  @@index([status])
+  @@index([periodId])
+  @@index([branchId, voucherDate(sort: Desc)])
+  @@map("receipt_vouchers")
+}
+
+model PaymentVoucher {
+  id                     String        @id @default(uuid()) @db.Uuid
+  voucherNumber          BigInt        @unique @default(autoincrement()) @map("voucher_number")
+  voucherDate            DateTime      @map("voucher_date") @db.Date
+  branchId               String        @map("branch_id") @db.Uuid
+  supplierId             String        @map("supplier_id") @db.Uuid
+  treasuryAccountId      String        @map("treasury_account_id") @db.Uuid
+  amount                 Decimal       @db.Decimal(18, 2)
+  reference              String?       @db.VarChar(100)
+  memo                   String?       @db.VarChar(300)
+  status                 VoucherStatus @default(DRAFT)
+  periodId               String?       @map("period_id") @db.Uuid
+  journalEntryId         String?       @unique @map("journal_entry_id") @db.Uuid
+  reversalJournalEntryId String?       @unique @map("reversal_journal_entry_id") @db.Uuid
+  createdBy              String        @map("created_by") @db.Uuid
+  postedBy               String?       @map("posted_by") @db.Uuid
+  reversedBy             String?       @map("reversed_by") @db.Uuid
+  postedAt               DateTime?     @map("posted_at") @db.Timestamptz(6)
+  reversedAt             DateTime?     @map("reversed_at") @db.Timestamptz(6)
+  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  branch               Branch                     @relation("PaymentVoucherBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  supplier             Supplier                   @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  treasuryAccount      Account                    @relation("PaymentVoucherTreasury", fields: [treasuryAccountId], references: [id], onDelete: Restrict)
+  period               FinancialPeriod?           @relation(fields: [periodId], references: [id])
+  journalEntry         JournalEntry?              @relation("PaymentVoucherJournal", fields: [journalEntryId], references: [id])
+  reversalJournalEntry JournalEntry?              @relation("PaymentVoucherReversalJournal", fields: [reversalJournalEntryId], references: [id])
+  creator              User                       @relation("PaymentVoucherCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  poster               User?                      @relation("PaymentVoucherPostedBy", fields: [postedBy], references: [id])
+  reverser             User?                      @relation("PaymentVoucherReversedBy", fields: [reversedBy], references: [id])
+  allocations          PaymentVoucherAllocation[]
+
+  @@index([supplierId])
+  @@index([treasuryAccountId])
+  @@index([status])
+  @@index([periodId])
+  @@index([branchId, voucherDate(sort: Desc)])
+  @@map("payment_vouchers")
+}
+
+model ReceiptVoucherAllocation {
+  id               String   @id @default(uuid()) @db.Uuid
+  receiptVoucherId String   @map("receipt_voucher_id") @db.Uuid
+  salesInvoiceId   String   @map("sales_invoice_id") @db.Uuid
+  amount           Decimal  @db.Decimal(18, 2)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  receiptVoucher ReceiptVoucher @relation(fields: [receiptVoucherId], references: [id], onDelete: Cascade)
+  salesInvoice   SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([receiptVoucherId, salesInvoiceId])
+  @@index([receiptVoucherId])
+  @@index([salesInvoiceId])
+  @@map("receipt_voucher_allocations")
+}
+
+model PaymentVoucherAllocation {
+  id                String   @id @default(uuid()) @db.Uuid
+  paymentVoucherId  String   @map("payment_voucher_id") @db.Uuid
+  purchaseInvoiceId String   @map("purchase_invoice_id") @db.Uuid
+  amount            Decimal  @db.Decimal(18, 2)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  paymentVoucher  PaymentVoucher  @relation(fields: [paymentVoucherId], references: [id], onDelete: Cascade)
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([paymentVoucherId, purchaseInvoiceId])
+  @@index([paymentVoucherId])
+  @@index([purchaseInvoiceId])
+  @@map("payment_voucher_allocations")
 }
