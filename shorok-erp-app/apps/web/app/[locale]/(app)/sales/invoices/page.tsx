@@ -22,9 +22,9 @@ import {
   type SalesInvoiceRow,
   type SalesInvoiceDetail,
 } from "../../../../../lib/sales-invoices-client";
-import { listCustomers, type CustomerRow } from "../../../../../lib/customers-client";
+import { listCustomers, createCustomer, type CustomerRow } from "../../../../../lib/customers-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
-import { apiCall } from "../../../../../lib/api-client";
+import { apiCall, ApiClientError } from "../../../../../lib/api-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 import { AP_COLORS, apColorMap } from "../../../../../lib/ap-colors";
 
@@ -576,6 +576,7 @@ interface InvoiceFormProps {
   onBack: () => void;
   onSaved: (inv: SalesInvoiceDetail) => void;
   onConfirmed: (inv: SalesInvoiceDetail) => void;
+  onCustomerCreated: (c: CustomerRow) => void;
   locale: AppLocale;
 }
 
@@ -588,10 +589,42 @@ function InvoiceForm({
   onBack,
   onSaved,
   onConfirmed,
+  onCustomerCreated,
   locale,
 }: InvoiceFormProps) {
   const [customerId, setCustomerId] = useState(editInvoice?.customer?.id ?? "");
   const [branchId, setBranchId] = useState(editInvoice?.branch?.id ?? "");
+
+  // ── Inline "new customer" (reuses the canonical POST /customers) ──────────
+  const canCreateCustomer = useHasRole("ACCOUNTANT"); // OWNER (bypass) or ACCOUNTANT
+  const [showNewCust, setShowNewCust] = useState(false);
+  const [ncName, setNcName] = useState("");
+  const [ncPhone, setNcPhone] = useState("");
+  const [ncSaving, setNcSaving] = useState(false);
+  const [ncError, setNcError] = useState<string | null>(null);
+  const [custMsg, setCustMsg] = useState<string | null>(null);
+
+  function openNewCust() {
+    setNcName(""); setNcPhone(""); setNcError(null); setShowNewCust(true);
+  }
+
+  async function submitNewCust() {
+    if (ncSaving) return; // prevent double submission
+    if (!ncName.trim()) { setNcError("اسم العميل مطلوب"); return; }
+    setNcSaving(true); setNcError(null);
+    try {
+      const created = await createCustomer({ nameAr: ncName.trim(), phone: ncPhone.trim() || undefined });
+      onCustomerCreated(created); // add to the shared list (parent state)
+      setCustomerId(created.id);  // auto-select — invoice lines/prices are untouched
+      setShowNewCust(false);
+      setCustMsg(`تم إضافة العميل «${created.nameAr}» برقم ${created.code}`);
+    } catch (e) {
+      // keep the modal open with its values; show the typed server error
+      setNcError(e instanceof ApiClientError ? e.localizedMessage(locale) : "فشل إنشاء العميل");
+    } finally {
+      setNcSaving(false);
+    }
+  }
   const [invoiceDate, setInvoiceDate] = useState(
     editInvoice ? new Date(editInvoice.invoiceDate).toISOString().slice(0, 10) : todayStr(),
   );
@@ -720,16 +753,29 @@ function InvoiceForm({
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             <div>
               <label className="block text-xs text-gray-600 mb-1">العميل *</label>
-              <select
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-              >
-                <option value="">— اختر العميل —</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
-                ))}
-              </select>
+              <div className="flex gap-1">
+                <select
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                >
+                  <option value="">— اختر العميل —</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
+                  ))}
+                </select>
+                {canCreateCustomer && (
+                  <button
+                    type="button"
+                    onClick={openNewCust}
+                    title="إضافة عميل جديد"
+                    className="shrink-0 rounded border border-primary px-2 py-1.5 text-xs text-primary hover:bg-primary hover:text-white transition-colors"
+                  >
+                    + عميل جديد
+                  </button>
+                )}
+              </div>
+              {custMsg && <p className="mt-1 text-[11px] text-green-600">{custMsg}</p>}
             </div>
             <div>
               <label className="block text-xs text-gray-600 mb-1">الفرع *</label>
@@ -1033,6 +1079,28 @@ function InvoiceForm({
           locale={locale}
         />
       )}
+
+      <Modal open={showNewCust} onClose={() => !ncSaving && setShowNewCust(false)} title="عميل جديد" className="max-w-md w-full">
+        <div className="space-y-3">
+          {ncError && <Alert variant="error">{ncError}</Alert>}
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">اسم العميل *</label>
+            <Input value={ncName} onChange={(e) => setNcName(e.target.value)} placeholder="اسم العميل بالعربية" autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") submitNewCust(); }} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">رقم الهاتف (اختياري)</label>
+            <Input value={ncPhone} onChange={(e) => setNcPhone(e.target.value)} placeholder="01xxxxxxxxx" dir="ltr"
+              onKeyDown={(e) => { if (e.key === "Enter") submitNewCust(); }} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={() => setShowNewCust(false)} disabled={ncSaving}>إلغاء</Button>
+            <Button onClick={submitNewCust} disabled={ncSaving || !ncName.trim()}>
+              {ncSaving ? "جارٍ الحفظ…" : "حفظ العميل"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -1359,6 +1427,13 @@ export default function SalesInvoicesPage() {
         onBack={() => { setView("list"); setEditInvoice(null); }}
         onSaved={handleSaved}
         onConfirmed={handleConfirmed}
+        onCustomerCreated={(c) =>
+          setCustomers((prev) =>
+            prev.some((x) => x.id === c.id)
+              ? prev
+              : [...prev, c].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
+          )
+        }
         locale={locale}
       />
     );
