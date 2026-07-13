@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useLocale } from "next-intl";
 import { Alert } from "../../../../../components/ui/alert";
+import { sourceDocumentHref } from "../../../../../lib/source-document";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
@@ -15,7 +18,6 @@ import {
   updateCustomer,
   getCustomerStatement,
   createCustomerTransaction,
-  deleteCustomerTransaction,
   type CustomerRow,
   type CustomerStatement,
 } from "../../../../../lib/customers-client";
@@ -66,8 +68,7 @@ export default function CustomerStatementPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CustomerStatement | null>(null);
-
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const locale = useLocale();
 
   // ─── Customer create/edit modal ───────────────────────────────────────────
   const [custModalOpen,  setCustModalOpen]  = useState(false);
@@ -200,15 +201,6 @@ export default function CustomerStatementPage() {
     }
   }
 
-  async function handleDelete(id: string) {
-    try {
-      await deleteCustomerTransaction(id);
-      setDeleteConfirmId(null);
-      await load();
-    } catch {
-      setError("فشل حذف الحركة");
-    }
-  }
 
   const entries = data ? data.entries : [];
 
@@ -339,7 +331,6 @@ export default function CustomerStatementPage() {
                 <TH rowSpan={2}>الشرح</TH>
                 <TH colSpan={2} className="text-center">الحركة</TH>
                 <TH rowSpan={2}>الرصيد</TH>
-                {isOwner && <TH rowSpan={2}></TH>}
               </TR>
               <TR>
                 <TH className="text-center">مدين</TH>
@@ -349,19 +340,26 @@ export default function CustomerStatementPage() {
             <TBody>
               {entries.length === 0 ? (
                 <TR>
-                  <TD colSpan={isOwner ? 8 : 7} className="text-center text-textSecondary py-6">
+                  <TD colSpan={7} className="text-center text-textSecondary py-6">
                     لا توجد حركات في هذه الفترة
                   </TD>
                 </TR>
               ) : (
                 entries.map((e) => {
-                  const confirmingDelete = deleteConfirmId === e.id;
+                  const href = sourceDocumentHref({ sourceType: e.sourceType, sourceId: e.sourceId, journalEntryId: e.journalEntryId }, locale);
                   return (
                     <TR key={e.id}>
                       <TD>{e.rowNum}</TD>
                       <TD>{new Date(e.date).toLocaleDateString("ar-EG")}</TD>
-                      <TD className="font-mono text-xs">{e.reference ?? "—"}</TD>
-                      <TD>{e.description ?? "—"}</TD>
+                      <TD className="font-mono text-xs">
+                        {href ? <Link href={href} className="text-blue-600 hover:underline">{e.reference ?? "قيد"}</Link> : (e.reference ?? "—")}
+                      </TD>
+                      <TD>
+                        {href
+                          ? <Link href={href} className="text-blue-600 hover:underline">{e.description ?? "—"}</Link>
+                          : (e.description ?? "—")}
+                        {e.isReversal && <span className="ms-1 rounded bg-amber-100 px-1 text-[10px] text-amber-700">عكس</span>}
+                      </TD>
                       <TD className={parseFloat(e.debit) > 0 ? "text-red-600 font-medium text-center" : "text-textSecondary text-center"}>
                         {parseFloat(e.debit) > 0 ? fmt(e.debit) : "—"}
                       </TD>
@@ -369,37 +367,6 @@ export default function CustomerStatementPage() {
                         {parseFloat(e.credit) > 0 ? fmt(e.credit) : "—"}
                       </TD>
                       <TD><BalanceText v={e.balance} /></TD>
-                      {isOwner && (
-                        <TD>
-                          {confirmingDelete ? (
-                            <div className="flex items-center gap-1 text-xs">
-                              <span>تأكيد؟</span>
-                              <button
-                                type="button"
-                                className="text-red-600 hover:underline"
-                                onClick={() => void handleDelete(e.id)}
-                              >
-                                نعم
-                              </button>
-                              <button
-                                type="button"
-                                className="text-textSecondary hover:underline"
-                                onClick={() => setDeleteConfirmId(null)}
-                              >
-                                لا
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              className="text-xs text-red-500 hover:underline"
-                              onClick={() => setDeleteConfirmId(e.id)}
-                            >
-                              حذف
-                            </button>
-                          )}
-                        </TD>
-                      )}
                     </TR>
                   );
                 })

@@ -59,6 +59,9 @@ export const createJournalEntry = (body: {
 export const deleteJournalEntry = (id: string) =>
   apiCall<void>(`/journal/${id}`, { method: "DELETE" });
 
+export const getJournalEntry = (id: string) =>
+  apiCall<JournalEntryRow>(`/journal/${id}`);
+
 export interface ISAccountLine {
   accountId: string;
   code: string;

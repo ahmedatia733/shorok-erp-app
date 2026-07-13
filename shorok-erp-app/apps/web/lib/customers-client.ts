@@ -22,6 +22,11 @@ export interface CustomerStatementEntry {
   debit: string;
   credit: string;
   balance: string;
+  // GL drilldown fields
+  journalEntryId?: string | null;
+  sourceType?: string | null;
+  sourceId?: string | null;
+  isReversal?: boolean;
 }
 
 export interface CustomerStatement {
