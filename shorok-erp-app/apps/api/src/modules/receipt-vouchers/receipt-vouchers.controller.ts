@@ -26,17 +26,22 @@ export class ReceiptVouchersController {
   constructor(private readonly service: ReceiptVouchersService) {}
 
   @Get()
-  async list(@Query(new ZodValidationPipe(ReceiptVoucherQuerySchema)) query: ReceiptVoucherQuery) {
-    return this.service.list(query);
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
+  async list(
+    @Query(new ZodValidationPipe(ReceiptVoucherQuerySchema)) query: ReceiptVoucherQuery,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.list(query, user);
   }
 
   @Get(":id")
-  async detail(@Param("id") id: string) {
-    return this.service.getById(id);
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
+  async detail(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.getById(id, undefined, user);
   }
 
   @Post()
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
   async create(
     @Body(new ZodValidationPipe(CreateReceiptVoucherSchema)) body: CreateReceiptVoucher,
     @CurrentUser() user: AuthenticatedUser,
@@ -45,7 +50,7 @@ export class ReceiptVouchersController {
   }
 
   @Patch(":id")
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
   async update(
     @Param("id") id: string,
     @Body(new ZodValidationPipe(UpdateReceiptVoucherSchema)) body: UpdateReceiptVoucher,
@@ -55,14 +60,14 @@ export class ReceiptVouchersController {
   }
 
   @Delete(":id")
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
   @HttpCode(204)
   async remove(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     await this.service.remove(id, user);
   }
 
   @Post(":id/post")
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
   async post(
     @Param("id") id: string,
     @Body(new ZodValidationPipe(ReceiptVoucherPostSchema)) _body: unknown,

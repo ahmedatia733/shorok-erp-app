@@ -8,7 +8,7 @@ import type {
   PostingLine,
 } from "@shorok/shared";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
-import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
+import { BranchForbiddenError, NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { AuditService } from "../audit/audit.service";
 import { PostingEngine } from "../posting/posting.engine";
@@ -64,10 +64,28 @@ export class ReceiptVouchersService {
   }
 
   /**
+   * Non-OWNER users may only touch vouchers whose branch is in their
+   * `allowedBranches`. The global BranchScopeGuard covers requests that carry a
+   * `branchId` (create body, list query); this closes the gap for the `:id`
+   * routes (detail/update/delete/post/reverse) the guard cannot see, so a
+   * BRANCH_MANAGER cannot reach another branch's voucher by swapping the id.
+   */
+  private assertBranchAccess(user: AuthenticatedUser, branchId: string) {
+    if (user.role === "OWNER") return;
+    if (!user.allowedBranches.includes(branchId)) throw new BranchForbiddenError({ branchId });
+  }
+
+  /** Serialize concurrent operations on a single voucher row (SELECT … FOR UPDATE). */
+  private async lockVoucher(tx: Tx, id: string) {
+    await tx.$queryRaw`SELECT id FROM receipt_vouchers WHERE id = ${id}::uuid FOR UPDATE`;
+  }
+
+  /**
    * Validate allocations against the voucher's amount/customer/branch and each
-   * invoice's remaining allocatable balance. `excludeVoucherId` excludes the
-   * current voucher's own existing allocations from the "allocated elsewhere"
-   * sum (so an update/post is measured against OTHER vouchers only).
+   * invoice's remaining allocatable balance. Only allocations belonging to
+   * POSTED vouchers consume invoice balance — DRAFT allocations are provisional
+   * and REVERSED ones release their amount. `excludeVoucherId` excludes the
+   * current voucher so an update/post is measured against OTHER posted vouchers.
    */
   private async validateAllocations(
     tx: Tx,
@@ -95,7 +113,11 @@ export class ReceiptVouchersService {
 
       const otherAgg = await tx.receiptVoucherAllocation.aggregate({
         _sum: { amount: true },
-        where: { salesInvoiceId: alloc.salesInvoiceId, ...(args.excludeVoucherId ? { receiptVoucherId: { not: args.excludeVoucherId } } : {}) },
+        where: {
+          salesInvoiceId: alloc.salesInvoiceId,
+          receiptVoucher: { status: "POSTED" }, // only posted vouchers consume balance
+          ...(args.excludeVoucherId ? { receiptVoucherId: { not: args.excludeVoucherId } } : {}),
+        },
       });
       const allocatedElsewhere = new Decimal(otherAgg._sum.amount?.toString() ?? "0");
       const remaining = new Decimal(inv.grandTotal.toString()).sub(allocatedElsewhere);
@@ -153,6 +175,7 @@ export class ReceiptVouchersService {
   // ── create draft ─────────────────────────────────────────────────────
   async create(body: CreateReceiptVoucher, user: AuthenticatedUser) {
     return this.prisma.runInTransaction(async (tx) => {
+      this.assertBranchAccess(user, body.branchId);
       await this.requireBranch(tx, body.branchId);
       await this.requireCustomer(tx, body.customerId);
       await this.requireTreasury(tx, body.treasuryAccountId);
@@ -189,15 +212,20 @@ export class ReceiptVouchersService {
   // ── update draft ─────────────────────────────────────────────────────
   async update(id: string, body: UpdateReceiptVoucher, user: AuthenticatedUser) {
     return this.prisma.runInTransaction(async (tx) => {
+      await this.lockVoucher(tx, id);
       const existing = await tx.receiptVoucher.findUnique({ where: { id } });
       if (!existing) throw new NotFoundError({ reason: "receipt_voucher_not_found", id });
+      this.assertBranchAccess(user, existing.branchId);
       if (existing.status !== "DRAFT") throw new ValidationError({ reason: "receipt_voucher_not_draft", status: existing.status });
 
       const branchId = body.branchId ?? existing.branchId;
       const customerId = body.customerId ?? existing.customerId;
       const treasuryAccountId = body.treasuryAccountId ?? existing.treasuryAccountId;
       const amount = new Decimal(body.amount ?? existing.amount.toString());
-      if (body.branchId) await this.requireBranch(tx, branchId);
+      if (body.branchId) {
+        this.assertBranchAccess(user, branchId); // moving to a branch also requires access
+        await this.requireBranch(tx, branchId);
+      }
       if (body.customerId) await this.requireCustomer(tx, customerId);
       if (body.treasuryAccountId) await this.requireTreasury(tx, treasuryAccountId);
 
@@ -236,8 +264,10 @@ export class ReceiptVouchersService {
   // ── delete draft ─────────────────────────────────────────────────────
   async remove(id: string, user: AuthenticatedUser) {
     return this.prisma.runInTransaction(async (tx) => {
+      await this.lockVoucher(tx, id);
       const existing = await tx.receiptVoucher.findUnique({ where: { id } });
       if (!existing) throw new NotFoundError({ reason: "receipt_voucher_not_found", id });
+      this.assertBranchAccess(user, existing.branchId);
       if (existing.status !== "DRAFT") throw new ValidationError({ reason: "use_reverse_instead", status: existing.status });
 
       await tx.receiptVoucher.delete({ where: { id } }); // allocations cascade
@@ -253,8 +283,10 @@ export class ReceiptVouchersService {
   // ── post ─────────────────────────────────────────────────────────────
   async post(id: string, user: AuthenticatedUser) {
     return this.prisma.runInTransaction(async (tx) => {
+      await this.lockVoucher(tx, id);
       const v = await tx.receiptVoucher.findUnique({ where: { id }, include: { customer: true } });
       if (!v) throw new NotFoundError({ reason: "receipt_voucher_not_found", id });
+      this.assertBranchAccess(user, v.branchId);
       if (v.status !== "DRAFT") throw new ValidationError({ reason: "receipt_voucher_not_draft", status: v.status });
 
       await this.requireBranch(tx, v.branchId);
@@ -268,6 +300,15 @@ export class ReceiptVouchersService {
 
       // Revalidate allocations against current state inside the transaction.
       const allocs = (await tx.receiptVoucherAllocation.findMany({ where: { receiptVoucherId: id } })).map((a) => ({ salesInvoiceId: a.salesInvoiceId, amount: a.amount.toString() }));
+      // Lock the targeted invoice rows (sorted, to avoid deadlocks) so two
+      // concurrent posts to the same invoice serialize: the second blocks until
+      // the first commits its POSTED allocation, then re-checks and is rejected
+      // if it would over-allocate. Validation → post → status update stay atomic
+      // within this transaction; the locks release on commit/rollback.
+      const invoiceIds = [...new Set(allocs.map((a) => a.salesInvoiceId))].sort();
+      for (const invId of invoiceIds) {
+        await tx.$queryRaw`SELECT id FROM sales_invoices WHERE id = ${invId}::uuid FOR UPDATE`;
+      }
       await this.validateAllocations(tx, { allocations: allocs, amount, customerId: v.customerId, branchId: v.branchId, excludeVoucherId: id });
 
       const num = String(v.voucherNumber);
@@ -299,8 +340,10 @@ export class ReceiptVouchersService {
   // ── reverse ──────────────────────────────────────────────────────────
   async reverseVoucher(id: string, body: ReceiptVoucherReverse, user: AuthenticatedUser) {
     return this.prisma.runInTransaction(async (tx) => {
+      await this.lockVoucher(tx, id);
       const v = await tx.receiptVoucher.findUnique({ where: { id } });
       if (!v) throw new NotFoundError({ reason: "receipt_voucher_not_found", id });
+      this.assertBranchAccess(user, v.branchId);
       if (v.status === "REVERSED" && v.reversalJournalEntryId) return this.getById(id, tx); // idempotent
       if (v.status !== "POSTED" || !v.journalEntryId) throw new ValidationError({ reason: "receipt_voucher_not_posted", status: v.status });
 
@@ -321,9 +364,18 @@ export class ReceiptVouchersService {
   }
 
   // ── list / get ───────────────────────────────────────────────────────
-  async list(query: ReceiptVoucherQuery) {
+  async list(query: ReceiptVoucherQuery, user: AuthenticatedUser) {
+    // Branch scoping: OWNER sees all (optionally filtered); non-OWNER is confined
+    // to allowedBranches. A non-OWNER's explicit branchId is already validated by
+    // BranchScopeGuard, so here it is known-authorized.
+    const branchFilter: Prisma.ReceiptVoucherWhereInput =
+      user.role === "OWNER"
+        ? query.branchId
+          ? { branchId: query.branchId }
+          : {}
+        : { branchId: query.branchId ?? { in: user.allowedBranches } };
     const where: Prisma.ReceiptVoucherWhereInput = {
-      ...(query.branchId ? { branchId: query.branchId } : {}),
+      ...branchFilter,
       ...(query.customerId ? { customerId: query.customerId } : {}),
       ...(query.treasuryAccountId ? { treasuryAccountId: query.treasuryAccountId } : {}),
       ...(query.status ? { status: query.status } : {}),
@@ -349,7 +401,13 @@ export class ReceiptVouchersService {
     return { data: data.map((v) => this.fmtSummary(v)), nextCursor: hasMore ? data[data.length - 1]?.id ?? null : null };
   }
 
-  async getById(id: string, tx?: Tx) {
+  /**
+   * `actor` is passed only for the top-level detail endpoint, where the loaded
+   * voucher's branch must be authorized (the `:id` route has no branchId for the
+   * guard to see). Internal post-mutation calls omit it — branch was already
+   * asserted in the mutation.
+   */
+  async getById(id: string, tx?: Tx, actor?: AuthenticatedUser) {
     const db = tx ?? this.prisma;
     const v = await db.receiptVoucher.findUnique({
       where: { id },
@@ -361,6 +419,7 @@ export class ReceiptVouchersService {
       },
     });
     if (!v) throw new NotFoundError({ reason: "receipt_voucher_not_found", id });
+    if (actor) this.assertBranchAccess(actor, v.branchId);
     return this.fmtDetail(v);
   }
 }
