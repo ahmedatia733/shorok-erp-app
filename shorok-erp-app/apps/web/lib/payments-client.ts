@@ -77,6 +77,8 @@ export const createSupplierPayment = (body: {
   paymentDate: string;
   reference?: string;
   notes?: string;
+  acknowledgeNegativeBalance?: boolean;
+  negativeBalanceReason?: string;
 }) => apiCall<{ journalEntryId: string; entryNumber: number }>("/supplier-payments", { method: "POST", body });
 
 export const createPayment = (body: {

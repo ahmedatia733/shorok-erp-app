@@ -12,6 +12,8 @@ import { Label } from "../../../../../components/ui/label";
 import { BranchPicker } from "../../../../../components/features/inventory/branch-picker";
 import { ApiClientError } from "../../../../../lib/api-client";
 import { createExpense } from "../../../../../lib/expenses-client";
+import { NegativeBalanceModal } from "../../../../../components/features/negative-balance-modal";
+import { parseTreasuryWarning, type TreasuryWarning } from "../../../../../lib/treasury-warning";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 
 function todayISO(): string {
@@ -45,6 +47,7 @@ export default function NewExpensePage() {
   const [submitting,         setSubmitting]         = useState(false);
   const [error,              setError]              = useState<string | null>(null);
   const [success,            setSuccess]            = useState(false);
+  const [negWarning,         setNegWarning]         = useState<TreasuryWarning | null>(null);
 
   useEffect(() => {
     void listAccounts().then((all) => {
@@ -60,6 +63,11 @@ export default function NewExpensePage() {
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!branchId || !description.trim() || !amount || !paidFromAccount.trim()) return;
+    await submitExpense(false);
+  };
+
+  async function submitExpense(acknowledge: boolean) {
+    if (!branchId || !description.trim() || !amount || !paidFromAccount.trim()) return;
     setSubmitting(true);
     setError(null);
     setSuccess(false);
@@ -72,16 +80,20 @@ export default function NewExpensePage() {
         paidFromAccount: paidFromAccount.trim(),
         glAccountId:        glAccountId        || undefined,
         paymentGlAccountId: paymentGlAccountId || undefined,
+        ...(acknowledge ? { acknowledgeNegativeBalance: true } : {}),
       });
+      setNegWarning(null);
       setSuccess(true);
       setTimeout(() => router.push(`/${locale}/expenses?branchId=${branchId}`), 600);
     } catch (err) {
-      if (err instanceof ApiClientError) setError(err.localizedMessage(locale));
+      const w = parseTreasuryWarning(err);
+      if (w) setNegWarning(w); // open the confirmation modal; keep the form
+      else if (err instanceof ApiClientError) setError(err.localizedMessage(locale));
       else setError(null);
     } finally {
       setSubmitting(false);
     }
-  };
+  }
 
   return (
     <div className="max-w-xl">
@@ -202,6 +214,14 @@ export default function NewExpensePage() {
           </form>
         </CardBody>
       </Card>
+
+      <NegativeBalanceModal
+        warning={negWarning}
+        reference={description.trim()}
+        submitting={submitting}
+        onCancel={() => setNegWarning(null)}
+        onConfirm={() => void submitExpense(true)}
+      />
     </div>
   );
 }

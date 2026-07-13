@@ -20,6 +20,8 @@ export const CreateSupplierPaymentSchema = z.object({
   paymentDate: IsoDateSchema,
   reference: z.string().max(100).optional(),
   notes: z.string().max(500).optional(),
+  acknowledgeNegativeBalance: z.boolean().optional(),
+  negativeBalanceReason: z.string().max(500).optional(),
 });
 export type CreateSupplierPayment = z.infer<typeof CreateSupplierPaymentSchema>;
 

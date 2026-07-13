@@ -15,6 +15,8 @@ import { SupplierPicker } from "../../../../../components/features/factory-ledge
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 import { createSupplierPayment, getSupplierStatement, type SupplierStatement } from "../../../../../lib/payments-client";
 import { ApiClientError } from "../../../../../lib/api-client";
+import { NegativeBalanceModal } from "../../../../../components/features/negative-balance-modal";
+import { parseTreasuryWarning, type TreasuryWarning } from "../../../../../lib/treasury-warning";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -220,6 +222,7 @@ export default function SupplierPaymentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [success, setSuccess]       = useState<{ entryNumber: number } | null>(null);
+  const [negWarning, setNegWarning] = useState<TreasuryWarning | null>(null);
 
   useEffect(() => {
     listAccounts().then((rows) => setLeafAccounts(getAllLeafs(rows))).catch(() => {});
@@ -251,6 +254,10 @@ export default function SupplierPaymentsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
+    await submitPayment(false);
+  }
+
+  async function submitPayment(acknowledge: boolean) {
     setSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -263,14 +270,18 @@ export default function SupplierPaymentsPage() {
         paymentDate,
         reference: reference || undefined,
         notes: notes || undefined,
+        ...(acknowledge ? { acknowledgeNegativeBalance: true } : {}),
       });
+      setNegWarning(null);
       setSuccess(result);
       setAmount("");
       setReference("");
       setNotes("");
       setRefreshKey((k) => k + 1);
     } catch (err) {
-      if (err instanceof ApiClientError) setError(err.localizedMessage(locale));
+      const w = parseTreasuryWarning(err);
+      if (w) setNegWarning(w); // open the confirmation modal; keep the form
+      else if (err instanceof ApiClientError) setError(err.localizedMessage(locale));
       else setError("حدث خطأ أثناء تسجيل الدفعة");
     } finally {
       setSubmitting(false);
@@ -433,6 +444,14 @@ export default function SupplierPaymentsPage() {
           )}
         </div>
       </div>
+
+      <NegativeBalanceModal
+        warning={negWarning}
+        reference={reference || `دفعة مورد ${amount}`}
+        submitting={submitting}
+        onCancel={() => setNegWarning(null)}
+        onConfirm={() => void submitPayment(true)}
+      />
     </div>
   );
 }

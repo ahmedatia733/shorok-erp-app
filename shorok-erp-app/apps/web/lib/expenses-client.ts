@@ -46,6 +46,8 @@ export const createExpense = (body: {
   paidFromAccount: string;
   glAccountId?: string;
   paymentGlAccountId?: string;
+  acknowledgeNegativeBalance?: boolean;
+  negativeBalanceReason?: string;
 }) => apiCall<ExpenseRow>("/expenses", { method: "POST", body });
 
 export const updateExpense = (

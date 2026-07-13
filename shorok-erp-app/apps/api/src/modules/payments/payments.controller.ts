@@ -8,6 +8,7 @@ import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { StatementService } from "../accounting-statements/statement.service";
+import { TreasuryGuardService } from "../posting/treasury-guard.service";
 
 @Controller()
 export class PaymentsController {
@@ -15,6 +16,7 @@ export class PaymentsController {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly statements: StatementService,
+    private readonly treasuryGuard: TreasuryGuardService,
   ) {}
 
   // ── Payment Accounts ────────────────────────────────────────────────
@@ -151,6 +153,21 @@ export class PaymentsController {
     if (!bankAccount) throw new NotFoundError({ bankAccountId: body.bankAccountId });
 
     return this.prisma.runInTransaction(async (tx) => {
+      // Negative treasury/bank balance protection (warn-only). This flow posts
+      // directly (not via the PostingEngine), so the guard is invoked here for
+      // the bank credit (outflow).
+      await this.treasuryGuard.check(tx, {
+        lines: [
+          { accountId: body.apAccountId, debit: body.amount, credit: "0" },
+          { accountId: body.bankAccountId, debit: "0", credit: body.amount },
+        ],
+        acknowledge: body.acknowledgeNegativeBalance,
+        reason: body.negativeBalanceReason ?? null,
+        actor: user,
+        sourceType: "PAYMENT",
+        sourceId: body.supplierId,
+      });
+
       const counter = await tx.journalEntry.count();
       const entryNumber = BigInt(counter + 1);
 

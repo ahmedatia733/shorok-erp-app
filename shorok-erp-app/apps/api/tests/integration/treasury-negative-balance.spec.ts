@@ -206,6 +206,20 @@ describe("negative treasury balance warning (Increment C)", () => {
     expect(st.body.endingBalance).toBe("-300.00");
   });
 
+  it("supplier payment (posts directly, not via the engine) is guarded too", async () => {
+    const bank = await acc2("BANK");
+    await fund(bank, "500");
+    const supplierId = (await handle.prisma.supplier.create({ data: { nameAr: "مورد", nameEn: "S" } })).id;
+    const pay = (ack?: boolean) => request(server()).post("/api/v1/supplier-payments").set(H(ownerToken)).send({ supplierId, apAccountId: expenseId, bankAccountId: bank, amount: "800", paymentDate: "2026-07-15", ...(ack ? { acknowledgeNegativeBalance: true } : {}) });
+    const warn = await pay();
+    expect(warn.status).toBe(409);
+    expect(warn.body.code).toBe("treasury_negative_balance_warning");
+    expect(warn.body.details.treasuryType).toBe("BANK");
+    const ok = await pay(true);
+    expect(ok.status).toBeLessThan(300);
+    expect((await glBalance(bank)).toString()).toBe("-300");
+  });
+
   // helper: create an isolated treasury account so per-test balances don't interfere
   let seq = 0;
   async function acc2(type: "CASH" | "BANK"): Promise<string> {
