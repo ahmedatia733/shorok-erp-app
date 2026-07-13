@@ -14,14 +14,17 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { NotFoundError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
+import { Decimal } from "decimal.js";
 import { AuditService } from "../audit/audit.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { StatementService } from "../accounting-statements/statement.service";
 
 @Controller("customers")
 export class CustomersController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly statements: StatementService,
   ) {}
 
   private formatCustomer(c: { id: string; code: string; nameAr: string; phone: string | null; active: boolean; createdAt: Date }) {
@@ -104,6 +107,12 @@ export class CustomersController {
     });
   }
 
+  /**
+   * Customer statement — derived entirely from the General Ledger: AR_CONTROL
+   * journal lines with partyType=CUSTOMER, partyId=:id. Debit increases the
+   * receivable (invoice), credit reduces it (receipt); reversals show as their
+   * real opposite movement. Legacy customer_transactions are NOT read or summed.
+   */
   @Get("statement/:id")
   @Roles("OWNER", "ACCOUNTANT")
   async statement(
@@ -113,69 +122,41 @@ export class CustomersController {
     const customer = await this.prisma.customer.findUnique({ where: { id } });
     if (!customer) throw new NotFoundError({ id });
 
-    const allTransactions = await this.prisma.customerTransaction.findMany({
-      where: { customerId: id },
-      orderBy: [{ date: "asc" }, { id: "asc" }],
-    });
-
-    const fromDate = query.from ? new Date(query.from) : null;
-    const toDate = query.to ? new Date(query.to) : null;
-
-    const before: typeof allTransactions = [];
-    const period: typeof allTransactions = [];
-
-    for (const tx of allTransactions) {
-      const txDate = tx.date;
-      if (fromDate && txDate < fromDate) {
-        before.push(tx);
-        continue;
-      }
-      if (toDate && txDate > toDate) {
-        continue;
-      }
-      period.push(tx);
-    }
-
-    let openingBalance = 0;
-    for (const tx of before) {
-      const amount = parseFloat(tx.amount.toString());
-      openingBalance += tx.direction === "DR" ? amount : -amount;
-    }
-
-    let runningBalance = openingBalance;
-    let totalDR = 0;
-    let totalCR = 0;
-
-    const entries = period.map((tx, idx) => {
-      const amount = parseFloat(tx.amount.toString());
-      if (tx.direction === "DR") {
-        runningBalance += amount;
-        totalDR += amount;
-      } else {
-        runningBalance -= amount;
-        totalCR += amount;
-      }
-      return {
-        id: tx.id,
-        rowNum: idx + 1,
-        date: tx.date.toISOString().slice(0, 10),
-        reference: tx.reference ?? null,
-        description: tx.description ?? null,
-        type: tx.type,
-        direction: tx.direction,
-        debit: tx.direction === "DR" ? amount.toFixed(2) : "0.00",
-        credit: tx.direction === "CR" ? amount.toFixed(2) : "0.00",
-        balance: runningBalance.toFixed(2),
-      };
-    });
+    const result = await this.statements.compute(
+      { account: { systemRole: "AR_CONTROL" }, partyType: "CUSTOMER", partyId: id },
+      "DEBIT",
+      query.from,
+      query.to,
+    );
 
     return {
       customer: { id: customer.id, code: customer.code, nameAr: customer.nameAr },
-      openingBalance: openingBalance.toFixed(2),
-      totalDR: totalDR.toFixed(2),
-      totalCR: totalCR.toFixed(2),
-      closingBalance: runningBalance.toFixed(2),
-      entries,
+      // canonical GL fields
+      openingBalance: result.openingBalance,
+      periodDebit: result.periodDebit,
+      periodCredit: result.periodCredit,
+      endingBalance: result.endingBalance,
+      rows: result.rows,
+      // backward-compatible aliases for the current web statement view
+      totalDR: result.periodDebit,
+      totalCR: result.periodCredit,
+      closingBalance: result.endingBalance,
+      entries: result.rows.map((r, idx) => ({
+        id: r.journalLineId,
+        rowNum: idx + 1,
+        date: r.entryDate,
+        reference: r.reference,
+        description: r.description,
+        type: r.sourceType ?? "JOURNAL",
+        direction: new Decimal(r.debit).gt(0) ? "DR" : "CR",
+        debit: r.debit,
+        credit: r.credit,
+        balance: r.runningBalance,
+        journalEntryId: r.journalEntryId,
+        sourceType: r.sourceType,
+        sourceId: r.sourceId,
+        isReversal: r.isReversal,
+      })),
     };
   }
 

@@ -7,12 +7,14 @@ import { NotFoundError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
+import { StatementService } from "../accounting-statements/statement.service";
 
 @Controller()
 export class PaymentsController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly statements: StatementService,
   ) {}
 
   // ── Payment Accounts ────────────────────────────────────────────────
@@ -193,6 +195,12 @@ export class PaymentsController {
 
   // ── Statements ──────────────────────────────────────────────────────
 
+  /**
+   * Supplier statement — derived from the General Ledger: AP_CONTROL journal
+   * lines with partyType=SUPPLIER, partyId=:id. Credit increases the payable
+   * (purchase invoice), debit reduces it (payment); reversals show as their
+   * real opposite movement. Legacy purchase_invoices/payments are NOT summed.
+   */
   @Get("statements/supplier/:id")
   @Roles("OWNER", "ACCOUNTANT")
   async supplierStatement(
@@ -202,85 +210,38 @@ export class PaymentsController {
     const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId } });
     if (!supplier) throw new NotFoundError({ supplierId });
 
-    const dateFilter: any = {};
-    if (query.from) dateFilter.gte = new Date(query.from);
-    if (query.to) dateFilter.lte = new Date(query.to);
-
-    const [invoices, payments, journalPayments] = await Promise.all([
-      this.prisma.purchaseInvoice.findMany({
-        where: { supplierId, status: "CONFIRMED", ...(Object.keys(dateFilter).length ? { invoiceDate: dateFilter } : {}) },
-        orderBy: { invoiceDate: "asc" },
-      }),
-      this.prisma.payment.findMany({
-        where: { entityType: "SUPPLIER", entityId: supplierId, ...(Object.keys(dateFilter).length ? { paymentDate: dateFilter } : {}) },
-        include: { paymentAccount: true },
-        orderBy: { paymentDate: "asc" },
-      }),
-      this.prisma.journalEntry.findMany({
-        where: {
-          referenceType: "supplier_payment",
-          referenceId: supplierId,
-          ...(Object.keys(dateFilter).length ? { entryDate: dateFilter } : {}),
-        },
-        include: { lines: { include: { account: { select: { nameAr: true } } } } },
-        orderBy: { entryDate: "asc" },
-      }),
-    ]);
-
-    // In a supplier statement: invoices go to Credit (دائن = you owe the supplier),
-    // payments go to Debit (مدين = you paid back). Balance = credit - debit = amount still owed.
-    const entries: any[] = [
-      ...invoices.map((inv) => ({
-        date: inv.invoiceDate,
-        type: "invoice",
-        reference: inv.invoiceNumber,
-        description: "فاتورة مشتريات",
-        debit: "0.00",
-        credit: inv.grandTotal.toString(),
-      })),
-      ...payments.map((p) => ({
-        id: p.id,
-        date: p.paymentDate,
-        type: "payment",
-        reference: p.referenceNumber ?? "—",
-        description: `سداد — ${p.paymentAccount.name}${p.notes ? ` (${p.notes})` : ""}`,
-        debit: p.amount.toString(),
-        credit: "0.00",
-      })),
-      ...journalPayments.map((je) => {
-        // The AP line (debit side) is the payment amount
-        const apLine = je.lines.find((l) => parseFloat(l.debit.toString()) > 0);
-        const bankLine = je.lines.find((l) => parseFloat(l.credit.toString()) > 0);
-        const amount = apLine ? apLine.debit.toString() : "0.00";
-        const bankName = bankLine?.account?.nameAr ?? "";
-        return {
-          id: je.id,
-          date: je.entryDate,
-          type: "payment",
-          reference: je.reference ?? `قيد #${Number(je.entryNumber)}`,
-          description: `سداد — ${bankName}`,
-          debit: amount,
-          credit: "0.00",
-          journalEntryId: je.id,
-        };
-      }),
-    ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    let balance = 0;
-    const entriesWithBalance = entries.map((e) => {
-      balance += parseFloat(e.credit) - parseFloat(e.debit);
-      return { ...e, balance: balance.toFixed(2) };
-    });
-
-    const totalDebit = entries.reduce((s, e) => s + parseFloat(e.debit), 0);
-    const totalCredit = entries.reduce((s, e) => s + parseFloat(e.credit), 0);
+    const result = await this.statements.compute(
+      { account: { systemRole: "AP_CONTROL" }, partyType: "SUPPLIER", partyId: supplierId },
+      "CREDIT",
+      query.from,
+      query.to,
+    );
 
     return {
       entity: { id: supplier.id, nameAr: supplier.nameAr, nameEn: supplier.nameEn },
-      entries: entriesWithBalance,
-      totalDebit: totalDebit.toFixed(2),
-      totalCredit: totalCredit.toFixed(2),
-      closingBalance: (totalCredit - totalDebit).toFixed(2),
+      openingBalance: result.openingBalance,
+      periodDebit: result.periodDebit,
+      periodCredit: result.periodCredit,
+      endingBalance: result.endingBalance,
+      rows: result.rows,
+      // backward-compatible aliases
+      entries: result.rows.map((r) => ({
+        id: r.journalLineId,
+        date: r.entryDate,
+        type: r.sourceType ?? "JOURNAL",
+        reference: r.reference,
+        description: r.description,
+        debit: r.debit,
+        credit: r.credit,
+        balance: r.runningBalance,
+        journalEntryId: r.journalEntryId,
+        sourceType: r.sourceType,
+        sourceId: r.sourceId,
+        isReversal: r.isReversal,
+      })),
+      totalDebit: result.periodDebit,
+      totalCredit: result.periodCredit,
+      closingBalance: result.endingBalance,
     };
   }
 
@@ -290,11 +251,51 @@ export class PaymentsController {
     @Param("id") accountId: string,
     @Query(new ZodValidationPipe(StatementQuerySchema)) query: StatementQuery,
   ) {
+    // ── GL account first (covers treasury/cash/bank + every ledger account) ──
+    // Treasury movements are now derived from journal_lines, not the legacy
+    // payments/order_collections tables, so a receipt voucher / expense / manual
+    // journal that hits the treasury account appears automatically.
+    const glAccount = await this.prisma.account.findUnique({ where: { id: accountId } });
+    if (glAccount) {
+      const normalSide = StatementService.normalSideForCategory(glAccount.category as unknown as string);
+      const result = await this.statements.compute({ accountId }, normalSide, query.from, query.to);
+      return {
+        entity: {
+          id: glAccount.id, name: glAccount.nameAr, code: glAccount.code, type: "gl_account",
+          category: glAccount.category, isCashOrBank: glAccount.isCashOrBank,
+          treasuryType: glAccount.treasuryType, normalSide,
+        },
+        openingBalance: result.openingBalance,
+        periodDebit: result.periodDebit,
+        periodCredit: result.periodCredit,
+        endingBalance: result.endingBalance,
+        rows: result.rows,
+        // aliases: for treasury, debit = inflow, credit = outflow
+        totalIn: result.periodDebit,
+        totalOut: result.periodCredit,
+        closingBalance: result.endingBalance,
+        entries: result.rows.map((r) => ({
+          id: r.journalLineId,
+          date: r.entryDate,
+          type: r.sourceType ?? "journal",
+          reference: r.reference,
+          description: r.description,
+          debit: r.debit,
+          credit: r.credit,
+          balance: r.runningBalance,
+          journalEntryId: r.journalEntryId,
+          sourceType: r.sourceType,
+          sourceId: r.sourceId,
+          isReversal: r.isReversal,
+        })),
+      };
+    }
+
     const dateFilter: any = {};
     if (query.from) dateFilter.gte = new Date(query.from);
     if (query.to) dateFilter.lte = new Date(query.to);
 
-    // ── Payment account (bank / cash) ─────────────────────────────────────
+    // ── Legacy payment account (bank / cash) — fallback for pre-GL ids ─────
     const paymentAccount = await this.prisma.paymentAccount.findUnique({ where: { id: accountId } });
 
     if (paymentAccount) {
@@ -349,53 +350,7 @@ export class PaymentsController {
       };
     }
 
-    // ── General ledger account (AR, Revenue, Tax, COGS, …) ────────────────
-    const glAccount = await this.prisma.account.findUnique({ where: { id: accountId } });
-    if (!glAccount) throw new NotFoundError({ accountId });
-
-    const lines = await this.prisma.journalLine.findMany({
-      where: {
-        accountId,
-        ...(Object.keys(dateFilter).length ? { journalEntry: { entryDate: dateFilter } } : {}),
-      },
-      include: {
-        journalEntry: {
-          select: { id: true, entryNumber: true, entryDate: true, reference: true, description: true, referenceType: true, referenceId: true },
-        },
-      },
-      orderBy: [{ journalEntry: { entryDate: "asc" } }, { id: "asc" }],
-    });
-
-    let glBalance = 0;
-    const glEntries = lines.map((l) => {
-      const dr = parseFloat(l.debit.toString());
-      const cr = parseFloat(l.credit.toString());
-      glBalance += dr - cr;
-      return {
-        id: l.id,
-        date: l.journalEntry.entryDate,
-        type: "journal",
-        reference: `قيد #${l.journalEntry.entryNumber}${l.journalEntry.reference ? ` — ${l.journalEntry.reference}` : ""}`,
-        description: l.note ?? l.journalEntry.description,
-        debit: l.debit.toString(),
-        credit: l.credit.toString(),
-        balance: glBalance.toFixed(2),
-        referenceType: l.journalEntry.referenceType ?? undefined,
-        referenceId:   l.journalEntry.referenceId   ?? undefined,
-        journalEntryId: l.journalEntry.id,
-      };
-    });
-
-    const totalIn = lines.reduce((s, l) => s + parseFloat(l.debit.toString()), 0);
-    const totalOut = lines.reduce((s, l) => s + parseFloat(l.credit.toString()), 0);
-
-    return {
-      entity: { id: glAccount.id, name: glAccount.nameAr, code: glAccount.code, type: "gl_account" },
-      entries: glEntries,
-      totalIn: totalIn.toFixed(2),
-      totalOut: totalOut.toFixed(2),
-      closingBalance: glBalance.toFixed(2),
-    };
+    throw new NotFoundError({ accountId });
   }
 
   @Get("inventory/balance")
