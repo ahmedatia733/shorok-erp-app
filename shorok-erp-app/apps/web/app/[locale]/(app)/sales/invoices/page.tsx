@@ -10,6 +10,7 @@ import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { useHasRole } from "../../../../../lib/auth";
+import { resolveVariantCost, COST_MISSING_LABEL, type CostSource } from "../../../../../lib/variant-cost";
 import {
   listSalesInvoices,
   getSalesInvoice,
@@ -43,7 +44,9 @@ interface VariantOption {
   skuNameAr: string;
   sizeMetersPerBoard: string;
   defaultSalePrice: string;
-  defaultCostPrice: string;
+  /** Resolved informational cost (avg_cost → default → null); see resolveVariantCost. */
+  costValue: string | null;
+  costSource: CostSource;
 }
 
 interface LineFormState {
@@ -620,7 +623,9 @@ function InvoiceForm({
     updateLine(idx, {
       productVariantId: variantId,
       unitPrice: variant?.defaultSalePrice ?? "0",
-      costPrice: variant?.defaultCostPrice ?? "0",
+      // Empty (not "0") when no cost is recorded, so the informational cost is
+      // never a fabricated zero. COGS is unaffected (server uses avg_cost).
+      costPrice: variant?.costValue ?? "",
     });
   }
 
@@ -796,6 +801,9 @@ function InvoiceForm({
           </thead>
           <tbody>
             {lines.map((line, idx) => {
+              const selVariant = variantMap.get(line.productVariantId);
+              const costMissing = selVariant?.costSource === "missing";
+              const costEstimate = selVariant?.costSource === "estimate";
               const lineProfit =
                 (parseFloat(line.lineTotal) || 0) - (parseFloat(line.lineCost) || 0);
               const profitPct =
@@ -834,7 +842,7 @@ function InvoiceForm({
                       <option value="">اختر الصنف</option>
                       {variants.map((v) => (
                         <option key={v.id} value={v.id}>
-                          {v.skuCode} — {v.skuNameAr} ({v.sizeMetersPerBoard}م)
+                          {v.skuCode} — {v.skuNameAr} ({v.sizeMetersPerBoard}م) · بيع {v.defaultSalePrice} · تكلفة {v.costSource === "missing" ? "غير مسجل" : `${v.costValue}${v.costSource === "estimate" ? " (تقديري)" : ""}`}
                         </option>
                       ))}
                     </select>
@@ -909,7 +917,14 @@ function InvoiceForm({
                   <td className="border border-border px-1 py-1">
                     <input type="number" min="0" step="0.01" value={line.costPrice}
                       onChange={(e) => updateLine(idx, { costPrice: e.target.value })}
-                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                      placeholder={costMissing ? COST_MISSING_LABEL : ""}
+                      title={costMissing ? COST_MISSING_LABEL : costEstimate ? "تقديري — من سعر الشراء الافتراضي" : ""}
+                      className={
+                        "w-full text-center bg-transparent text-xs focus:outline-none " +
+                        (costMissing ? "placeholder:text-red-500 placeholder:text-[10px]" : costEstimate ? "text-amber-600" : "")
+                      }
+                      dir="ltr" />
+                    {costEstimate && <span className="block text-[9px] text-amber-600 text-center leading-none">تقديري</span>}
                   </td>
                   {/* الإجمالي */}
                   <td className="border border-border px-1 py-1 text-center font-semibold text-xs" dir="ltr">
@@ -1244,6 +1259,7 @@ export default function SalesInvoicesPage() {
             sizeMetersPerBoard: string;
             defaultSalePricePerMeter: string;
             defaultPurchasePricePerMeter: string;
+            avgCost: string;
             sku: { code: string; colorNameAr: string };
             sizeLabel?: string;
           }>>("/products/variants"),
@@ -1252,14 +1268,18 @@ export default function SalesInvoicesPage() {
         setBranches(brs);
         setLeafAccounts(accts.filter((a) => a.isLeaf && a.active));
         setVariants(
-          varRows.map((v) => ({
-            id: v.id,
-            skuCode: v.sku.code,
-            skuNameAr: v.sku.colorNameAr,
-            sizeMetersPerBoard: v.sizeMetersPerBoard,
-            defaultSalePrice: v.defaultSalePricePerMeter,
-            defaultCostPrice: v.defaultPurchasePricePerMeter,
-          })),
+          varRows.map((v) => {
+            const cost = resolveVariantCost(v.avgCost, v.defaultPurchasePricePerMeter);
+            return {
+              id: v.id,
+              skuCode: v.sku.code,
+              skuNameAr: v.sku.colorNameAr,
+              sizeMetersPerBoard: v.sizeMetersPerBoard,
+              defaultSalePrice: v.defaultSalePricePerMeter,
+              costValue: cost.value,
+              costSource: cost.source,
+            };
+          }),
         );
       } catch {
         // ignore
