@@ -19,6 +19,8 @@ export interface ResolvedCost {
 }
 
 export const COST_MISSING_LABEL = "سعر التكلفة غير مسجل";
+/** Shown when avg_cost is unavailable and the default purchase price is used instead. */
+export const COST_ESTIMATE_LABEL = "تكلفة تقديرية";
 
 const positive = (raw?: string | number | null): string | null => {
   if (raw === null || raw === undefined || raw === "") return null;

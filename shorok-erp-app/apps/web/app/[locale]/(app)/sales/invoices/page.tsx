@@ -10,7 +10,7 @@ import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { useHasRole } from "../../../../../lib/auth";
-import { resolveVariantCost, COST_MISSING_LABEL, type CostSource } from "../../../../../lib/variant-cost";
+import { resolveVariantCost, COST_MISSING_LABEL, COST_ESTIMATE_LABEL, type CostSource } from "../../../../../lib/variant-cost";
 import {
   listSalesInvoices,
   getSalesInvoice,
@@ -888,7 +888,7 @@ function InvoiceForm({
                       <option value="">اختر الصنف</option>
                       {variants.map((v) => (
                         <option key={v.id} value={v.id}>
-                          {v.skuCode} — {v.skuNameAr} ({v.sizeMetersPerBoard}م) · بيع {v.defaultSalePrice} · تكلفة {v.costSource === "missing" ? "غير مسجل" : `${v.costValue}${v.costSource === "estimate" ? " (تقديري)" : ""}`}
+                          {v.skuCode} — {v.skuNameAr} ({v.sizeMetersPerBoard}م) · بيع {v.defaultSalePrice} · تكلفة {v.costSource === "missing" ? "غير مسجل" : `${v.costValue}${v.costSource === "estimate" ? ` (${COST_ESTIMATE_LABEL})` : ""}`}
                         </option>
                       ))}
                     </select>
@@ -964,13 +964,13 @@ function InvoiceForm({
                     <input type="number" min="0" step="0.01" value={line.costPrice}
                       onChange={(e) => updateLine(idx, { costPrice: e.target.value })}
                       placeholder={costMissing ? COST_MISSING_LABEL : ""}
-                      title={costMissing ? COST_MISSING_LABEL : costEstimate ? "تقديري — من سعر الشراء الافتراضي" : ""}
+                      title={costMissing ? COST_MISSING_LABEL : costEstimate ? `${COST_ESTIMATE_LABEL} — من سعر الشراء الافتراضي` : ""}
                       className={
                         "w-full text-center bg-transparent text-xs focus:outline-none " +
                         (costMissing ? "placeholder:text-red-500 placeholder:text-[10px]" : costEstimate ? "text-amber-600" : "")
                       }
                       dir="ltr" />
-                    {costEstimate && <span className="block text-[9px] text-amber-600 text-center leading-none">تقديري</span>}
+                    {costEstimate && <span className="block text-[9px] text-amber-600 text-center leading-none">{COST_ESTIMATE_LABEL}</span>}
                   </td>
                   {/* الإجمالي */}
                   <td className="border border-border px-1 py-1 text-center font-semibold text-xs" dir="ltr">

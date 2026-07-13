@@ -1,4 +1,4 @@
-import { resolveVariantCost, COST_MISSING_LABEL } from "./variant-cost";
+import { resolveVariantCost, COST_MISSING_LABEL, COST_ESTIMATE_LABEL } from "./variant-cost";
 
 describe("resolveVariantCost (sales invoice cost display)", () => {
   it("1) large variant with stored avg_cost → actual", () => {
@@ -52,7 +52,8 @@ describe("resolveVariantCost (sales invoice cost display)", () => {
     expect(resolveVariantCost("abc", "def").source).toBe("missing");
   });
 
-  it("exposes a stable missing label", () => {
+  it("exposes stable missing + estimate labels", () => {
     expect(COST_MISSING_LABEL).toBe("سعر التكلفة غير مسجل");
+    expect(COST_ESTIMATE_LABEL).toBe("تكلفة تقديرية");
   });
 });
