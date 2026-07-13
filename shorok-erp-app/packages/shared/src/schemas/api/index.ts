@@ -20,3 +20,4 @@ export * from "./fixed-assets";
 export * from "./sales-invoices";
 export * from "./posting";
 export * from "./configuration";
+export * from "./vouchers";
