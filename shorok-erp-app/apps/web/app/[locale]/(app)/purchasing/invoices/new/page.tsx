@@ -16,6 +16,8 @@ import {
   type VariantOption,
 } from "../../../../../../lib/purchase-invoices-client";
 import { AP_COLORS, apColorMap } from "../../../../../../lib/ap-colors";
+import { ProductVariantSelect } from "../../../../../../components/features/product-variant-select";
+import { type VariantItem } from "../../../../../../lib/variant-select";
 import { boardArea, totalArea, BOARD_AREA_LARGE, BOARD_AREA_SMALL } from "../../../../../../lib/purchase-sizing";
 
 const SIZE_K = BOARD_AREA_LARGE; // كبير — 5.25 م²/لوح
@@ -103,6 +105,10 @@ export default function NewPurchaseInvoicePage() {
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [variants, setVariants] = useState<VariantOption[]>([]);
   const variantMap = new Map(variants.map((v) => [v.id, v]));
+  const variantItems: VariantItem[] = variants.map((v) => ({
+    id: v.id, skuCode: v.skuCode, colorNameAr: v.skuNameAr, colorNameEn: v.skuNameEn,
+    sizeMetersPerBoard: v.sizeMetersPerBoard, price: v.defaultPurchasePricePerMeter,
+  }));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -274,9 +280,7 @@ export default function NewPurchaseInvoicePage() {
           <thead>
             <tr className="bg-background text-textSecondary text-xs">
               <th className="border border-border px-2 py-1.5 text-center w-8">#</th>
-              <th className="border border-border px-2 py-1.5 text-center w-28">الكود</th>
-              <th className="border border-border px-2 py-1.5 text-center min-w-[120px]">اسم الكود</th>
-              <th className="border border-border px-2 py-1.5 text-center min-w-[180px]">الصنف</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[240px]">الكود / الصنف</th>
               <th className="border border-border px-2 py-1.5 text-center w-16" title="عدد الألواح">عدد الألواح</th>
               <th className="border border-border px-2 py-1.5 text-center w-16" title="لوح كبير = 5.25 م²">كبير (5.25)</th>
               <th className="border border-border px-2 py-1.5 text-center w-16" title="لوح صغير = 4 م²">صغير (4)</th>
@@ -301,37 +305,14 @@ export default function NewPurchaseInvoicePage() {
                   <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">
                     {idx + 1}
                   </td>
-                  {/* الكود — AP color select */}
+                  {/* الكود / الصنف — single searchable selector */}
                   <td className="border border-border px-1 py-1">
-                    <select
-                      value={line.colorCode}
-                      onChange={(e) => updateLine(idx, { colorCode: e.target.value })}
-                      className="w-full bg-transparent text-sm focus:outline-none font-mono"
-                    >
-                      <option value="">—</option>
-                      {AP_COLORS.map((c) => (
-                        <option key={c.code} value={c.code}>{c.code}</option>
-                      ))}
-                    </select>
-                  </td>
-                  {/* اسم الكود — auto-fill */}
-                  <td className="border border-border px-1 py-1 text-sm pe-2 text-end">
-                    {line.colorCode ? (apColorMap.get(line.colorCode)?.nameAr ?? "") : ""}
-                  </td>
-                  {/* الصنف — product variant select */}
-                  <td className="border border-border px-1 py-1">
-                    <select
+                    <ProductVariantSelect
+                      variants={variantItems}
                       value={line.productVariantId}
-                      onChange={(e) => onVariantChange(idx, e.target.value)}
-                      className="w-full bg-transparent text-sm focus:outline-none"
-                    >
-                      <option value="">اختر الصنف</option>
-                      {variants.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.skuCode} — {locale === "ar" ? v.skuNameAr : v.skuNameEn} ({v.sizeMetersPerBoard}م)
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(id) => onVariantChange(idx, id)}
+                      renderExtra={(v) => (v.price ? `شراء ${v.price}` : null)}
+                    />
                   </td>
                   <td className="border border-border px-1 py-1">
                     <input

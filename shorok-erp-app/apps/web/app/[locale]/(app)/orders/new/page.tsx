@@ -10,6 +10,8 @@ import { Card, CardBody, CardHeader, CardTitle } from "../../../../../components
 import { Input } from "../../../../../components/ui/input";
 import { Label } from "../../../../../components/ui/label";
 import { BranchPicker } from "../../../../../components/features/inventory/branch-picker";
+import { ProductVariantSelect } from "../../../../../components/features/product-variant-select";
+import { type VariantItem } from "../../../../../lib/variant-select";
 import { ApiClientError } from "../../../../../lib/api-client";
 import {
   listVariants,
@@ -41,6 +43,9 @@ export default function NewOrderPage() {
   const [branchId, setBranchId] = useState<string | null>(params.get("branchId"));
   const [variants, setVariants] = useState<VariantOption[]>([]);
   const [variantId, setVariantId] = useState<string>("");
+  const variantItems: VariantItem[] = variants.map((v) => ({
+    id: v.id, skuCode: v.sku.code, colorNameAr: v.sku.colorNameAr, colorNameEn: v.sku.colorNameEn, sizeMetersPerBoard: v.sizeMetersPerBoard,
+  }));
   const [customer, setCustomer] = useState("");
   const [boards, setBoards] = useState("");
   const [salePrice, setSalePrice] = useState("");
@@ -148,26 +153,12 @@ export default function NewOrderPage() {
 
             <div>
               <Label htmlFor="variant">{tForm("product")}</Label>
-              <select
-                id="variant"
+              <ProductVariantSelect
+                variants={variantItems}
                 value={variantId}
-                onChange={(e) => setVariantId(e.target.value)}
-                required
+                onChange={setVariantId}
                 disabled={submitting}
-                className="block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-textPrimary focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="" disabled>
-                  —
-                </option>
-                {variants.map((v) => {
-                  const color = locale === "ar" ? v.sku.colorNameAr : v.sku.colorNameEn;
-                  return (
-                    <option key={v.id} value={v.id}>
-                      {color} · {v.sku.code} · {v.sizeMetersPerBoard} m
-                    </option>
-                  );
-                })}
-              </select>
+              />
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

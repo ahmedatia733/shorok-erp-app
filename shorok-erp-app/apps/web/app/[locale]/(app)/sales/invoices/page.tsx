@@ -12,6 +12,8 @@ import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/ta
 import { useHasRole } from "../../../../../lib/auth";
 import { resolveVariantCost, COST_MISSING_LABEL, COST_ESTIMATE_LABEL, type CostSource } from "../../../../../lib/variant-cost";
 import { isPostingConfigError } from "../../../../../lib/posting-config";
+import { ProductVariantSelect } from "../../../../../components/features/product-variant-select";
+import { type VariantItem } from "../../../../../lib/variant-select";
 import {
   listSalesInvoices,
   getSalesInvoice,
@@ -302,6 +304,15 @@ function InvoiceForm({
   const [notes, setNotes] = useState(editInvoice?.notes ?? "");
   const [lines, setLines] = useState<LineFormState[]>([mkLine(), mkLine()]);
   const variantMap = new Map(variants.map((v) => [v.id, v]));
+  // Items for the single searchable selector (code/color/size + price/cost hints).
+  const variantItems: VariantItem[] = variants.map((v) => ({
+    id: v.id,
+    skuCode: v.skuCode,
+    colorNameAr: v.skuNameAr,
+    sizeMetersPerBoard: v.sizeMetersPerBoard,
+    price: v.defaultSalePrice,
+    cost: v.costSource === "missing" ? "غير مسجل" : `${v.costValue}${v.costSource === "estimate" ? ` (${COST_ESTIMATE_LABEL})` : ""}`,
+  }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -491,9 +502,7 @@ function InvoiceForm({
           <thead>
             <tr className="bg-surface text-textSecondary text-xs">
               <th className="border border-border px-2 py-1.5 text-center w-8">#</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">الكود</th>
-              <th className="border border-border px-2 py-1.5 text-center min-w-[110px]">اسم الكود</th>
-              <th className="border border-border px-2 py-1.5 text-center min-w-[170px]">الصنف</th>
+              <th className="border border-border px-2 py-1.5 text-center min-w-[240px]">الكود / الصنف</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">عدد</th>
               <th className="border border-border px-2 py-1.5 text-center w-12">كبير</th>
               <th className="border border-border px-2 py-1.5 text-center w-12">صغير</th>
@@ -527,37 +536,14 @@ function InvoiceForm({
                   <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">
                     {idx + 1}
                   </td>
-                  {/* الكود */}
+                  {/* الكود / الصنف — single searchable selector */}
                   <td className="border border-border px-1 py-1">
-                    <select
-                      value={line.colorCode}
-                      onChange={(e) => updateLine(idx, { colorCode: e.target.value })}
-                      className="w-full bg-transparent text-sm focus:outline-none font-mono"
-                    >
-                      <option value="">—</option>
-                      {AP_COLORS.map((c) => (
-                        <option key={c.code} value={c.code}>{c.code}</option>
-                      ))}
-                    </select>
-                  </td>
-                  {/* اسم الكود */}
-                  <td className="border border-border px-1 py-1 text-xs text-end pe-2">
-                    {line.colorCode ? (apColorMap.get(line.colorCode)?.nameAr ?? "") : ""}
-                  </td>
-                  {/* الصنف */}
-                  <td className="border border-border px-1 py-1">
-                    <select
+                    <ProductVariantSelect
+                      variants={variantItems}
                       value={line.productVariantId}
-                      onChange={(e) => onVariantChange(idx, e.target.value)}
-                      className="w-full bg-transparent text-sm focus:outline-none"
-                    >
-                      <option value="">اختر الصنف</option>
-                      {variants.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.skuCode} — {v.skuNameAr} ({v.sizeMetersPerBoard}م) · بيع {v.defaultSalePrice} · تكلفة {v.costSource === "missing" ? "غير مسجل" : `${v.costValue}${v.costSource === "estimate" ? ` (${COST_ESTIMATE_LABEL})` : ""}`}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(id) => onVariantChange(idx, id)}
+                      renderExtra={(v) => `بيع ${v.price ?? "—"} · تكلفة ${v.cost ?? "غير مسجل"}`}
+                    />
                   </td>
                   {/* عدد */}
                   <td className="border border-border px-1 py-1">
