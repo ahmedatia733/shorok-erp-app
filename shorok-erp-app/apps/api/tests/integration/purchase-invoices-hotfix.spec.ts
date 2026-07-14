@@ -65,6 +65,12 @@ describe("purchase invoices — Phase 1 hotfixes", () => {
     // behaviors (engine stock, balanced entry, cancel) are unchanged — they
     // just need the period precondition now.
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+
+    // Accounts now resolve from the PostingProfile (client account IDs are
+    // ignored). A complete profile lets the happy-path confirms post.
+    await handle.prisma.postingProfile.create({
+      data: { effectiveFrom: new Date("2026-01-01"), apAccountId, inventoryAccountId, vatInputAccountId: taxAccountId, createdBy: handle.ownerId },
+    });
   });
 
   afterAll(async () => {
@@ -139,31 +145,45 @@ describe("purchase invoices — Phase 1 hotfixes", () => {
     expect(totalDebit.gt(0)).toBe(true);
   });
 
-  it("T002: confirm without inventoryAccountId is rejected and posts nothing", async () => {
+  it("T002: an incomplete profile (no inventory account) is rejected and posts nothing", async () => {
     const id = await createDraft();
     const before = await balanceBoards();
+    // Profile missing the inventory account → confirm rejected (accounts come
+    // only from the profile; body account IDs are ignored).
+    await handle.prisma.postingProfile.deleteMany({});
+    await handle.prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), apAccountId, vatInputAccountId: taxAccountId, createdBy: handle.ownerId } });
 
     const res = await request(handle.app.getHttpServer())
       .post(`/api/v1/purchase-invoices/${id}/confirm`)
       .set("Authorization", `Bearer ${ownerToken}`)
-      .send({ apAccountId, taxAccountId }); // inventoryAccountId omitted
+      .send({ apAccountId, taxAccountId, inventoryAccountId }); // body ignored
     expect(res.status).toBe(409);
+    expect(res.body.details?.reason).toBe("inventory_account_required");
 
     const invoice = await handle.prisma.purchaseInvoice.findUnique({ where: { id } });
     expect(invoice?.status).toBe("DRAFT");
     expect(invoice?.journalEntryId).toBeNull();
     expect((await balanceBoards()).toFixed(4)).toBe(before.toFixed(4));
+    // restore the complete profile for subsequent tests
+    await handle.prisma.postingProfile.deleteMany({});
+    await handle.prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), apAccountId, inventoryAccountId, vatInputAccountId: taxAccountId, createdBy: handle.ownerId } });
   });
 
-  it("T002: confirm without taxAccountId while tax > 0 is rejected", async () => {
+  it("T002: an incomplete profile (no VAT-input account) with tax > 0 is rejected", async () => {
     const id = await createDraft();
+    await handle.prisma.postingProfile.deleteMany({});
+    await handle.prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), apAccountId, inventoryAccountId, createdBy: handle.ownerId } });
+
     const res = await request(handle.app.getHttpServer())
       .post(`/api/v1/purchase-invoices/${id}/confirm`)
       .set("Authorization", `Bearer ${ownerToken}`)
-      .send({ apAccountId, inventoryAccountId }); // taxAccountId omitted, taxRate 14
+      .send({ apAccountId, inventoryAccountId, taxAccountId }); // body ignored
     expect(res.status).toBe(409);
+    expect(res.body.details?.reason).toBe("tax_account_required_when_tax_exists");
     const invoice = await handle.prisma.purchaseInvoice.findUnique({ where: { id } });
     expect(invoice?.status).toBe("DRAFT");
+    await handle.prisma.postingProfile.deleteMany({});
+    await handle.prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), apAccountId, inventoryAccountId, vatInputAccountId: taxAccountId, createdBy: handle.ownerId } });
   });
 
   it("T001: cancel reverses the balance via compensating ADJUSTMENT, keeping history", async () => {

@@ -10,6 +10,7 @@ import { Card, CardBody } from "../../../../../components/ui/card";
 import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
+import { isPostingConfigError } from "../../../../../lib/posting-config";
 import { useHasRole } from "../../../../../lib/auth";
 import {
   listPurchaseInvoices,
@@ -30,14 +31,6 @@ function fmt(v: string | number) {
   return isNaN(n) ? "—" : n.toLocaleString("ar-EG", { minimumFractionDigits: 2 });
 }
 
-function autoSelect(accounts: AccountRow[], ...keywords: string[]): string {
-  const kws = keywords.map((k) => k.toLowerCase());
-  const match = accounts.find((a) =>
-    kws.some((k) => a.nameAr.toLowerCase().includes(k) || (a.nameEn ?? "").toLowerCase().includes(k)),
-  );
-  return match?.id ?? "";
-}
-
 // ─── StatusBadge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
@@ -56,56 +49,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-// ─── AccountSelector ─────────────────────────────────────────────────────────
-
-function AccountSelector({
-  label, hint, amountLabel, amount,
-  value, onChange, options, required,
-  linkPath, linkLabel,
-  locale,
-}: {
-  label: string; hint?: string; amountLabel: string; amount: string;
-  value: string; onChange: (v: string) => void;
-  options: AccountRow[]; required?: boolean;
-  linkPath?: string; linkLabel?: string;
-  locale: AppLocale;
-}) {
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium">
-          {label} {required && <span className="text-red-500">*</span>}
-        </label>
-        {value && linkPath && (
-          <a
-            href={`/${locale}/${linkPath}?accountId=${value}`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-blue-600 hover:underline"
-          >
-            {linkLabel ?? "عرض كشف الحساب"}
-          </a>
-        )}
-      </div>
-      {hint && <p className="text-xs text-textSecondary">{hint}</p>}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
-      >
-        <option value="">— اختر الحساب —</option>
-        {options.map((a) => (
-          <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-        ))}
-      </select>
-      <div className="text-xs text-textSecondary flex justify-between">
-        <span>{amountLabel}</span>
-        <span className="font-semibold" dir="ltr">{fmt(amount)} ج.م</span>
-      </div>
-    </div>
-  );
-}
-
 // ─── ConfirmModal ─────────────────────────────────────────────────────────────
 
 function ConfirmModal({
@@ -119,66 +62,33 @@ function ConfirmModal({
   onConfirmed: (updated: PurchaseInvoiceRow) => void;
   locale: AppLocale;
 }) {
-  const [leafAccounts, setLeafAccounts] = useState<AccountRow[]>([]);
-  const [apAccountId,        setApAccountId]        = useState("");
-  const [taxAccountId,       setTaxAccountId]       = useState("");
-  const [inventoryAccountId, setInventoryAccountId] = useState("");
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+  const [configError, setConfigError] = useState(false);
 
   const subtotal   = parseFloat(invoice.subtotal);
   const taxAmount  = parseFloat(invoice.taxAmount);
   const grandTotal = parseFloat(invoice.grandTotal);
-  const hasTax     = taxAmount > 0;
-
-  useEffect(() => {
-    void listAccounts().then((all) => {
-      // Flatten the tree so nested leaves (e.g. VAT 2300 under 2000) are found.
-      const leaf = getLeafAccounts(all);
-      setLeafAccounts(leaf);
-
-      const liabilityAccs = leaf.filter((a) => a.category === "LIABILITY");
-      const assetAccs     = leaf.filter((a) => a.category === "ASSET");
-
-      // AP account: موردون / دائنون / payable / creditor
-      const apMatch =
-        autoSelect(liabilityAccs, "موردون", "دائنون", "payable", "creditor") ||
-        autoSelect(leaf,          "موردون", "دائنون", "payable", "creditor") ||
-        (liabilityAccs[0]?.id ?? "");
-      setApAccountId(apMatch);
-
-      // Tax account: ضريبة / مدخلات / vat / tax
-      const taxKw = leaf.filter((a) => /ضريبة|ضرائب|vat|tax/i.test(a.nameAr + (a.nameEn ?? "")));
-      setTaxAccountId(taxKw[0]?.id ?? liabilityAccs[0]?.id ?? "");
-
-      // Inventory account: مخزون / بضاعة / inventory / stock
-      setInventoryAccountId(
-        autoSelect(assetAccs, "مخزون", "بضاعة", "inventory", "stock") ||
-        autoSelect(leaf,      "مخزون", "بضاعة", "inventory", "stock"),
-      );
-    });
-  }, []);
 
   async function handleConfirm() {
-    if (!apAccountId) { setError("يرجى اختيار حساب الموردين والدائنين"); return; }
     setSaving(true);
     setError(null);
+    setConfigError(false);
     try {
-      const updated = await confirmPurchaseInvoice(invoice.id, {
-        apAccountId,
-        taxAccountId:       taxAccountId       || undefined,
-        inventoryAccountId: inventoryAccountId || undefined,
-      });
+      // AP / inventory / VAT-input accounts resolve server-side from the
+      // PostingProfile — the client sends no account IDs.
+      const updated = await confirmPurchaseInvoice(invoice.id, {});
       onConfirmed(updated);
     } catch (err) {
-      setError(confirmErrorMessageAr(err));
+      if (isPostingConfigError(err)) setConfigError(true);
+      else setError(confirmErrorMessageAr(err));
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Modal open onClose={onClose} title="تأكيد فاتورة مشتريات">
+    <Modal open onClose={onClose} title="تأكيد فاتورة المشتريات">
       <div className="space-y-5 text-sm" dir="rtl">
         {error && <Alert variant="error">{error}</Alert>}
 
@@ -215,73 +125,20 @@ function ConfirmModal({
           </div>
         </div>
 
-        {/* القيد المحاسبي */}
-        <div className="rounded-md bg-surface border border-border p-3 text-xs space-y-1 font-mono">
-          <div className="font-semibold text-textSecondary mb-1">القيد المحاسبي:</div>
-          {inventoryAccountId && (
-            <div className="flex justify-between">
-              <span className="text-foreground">مدين — المخزون</span>
-              <span dir="ltr">{fmt(subtotal)}</span>
-            </div>
-          )}
-          {hasTax && taxAccountId && (
-            <div className="flex justify-between">
-              <span className="text-foreground">مدين — ضريبة المدخلات</span>
-              <span dir="ltr">{fmt(taxAmount)}</span>
-            </div>
-          )}
-          <div className="flex justify-between border-t border-dashed border-border pt-1">
-            <span className="text-foreground">دائن — الموردون والدائنون</span>
-            <span dir="ltr">{fmt(grandTotal)}</span>
-          </div>
-        </div>
+        <p className="text-xs text-blue-700 bg-blue-50 rounded p-2">
+          سيتم تحديث المخزون وتسجيل القيد المحاسبي تلقائيًا وفقًا لإعدادات الحسابات.
+        </p>
 
-        {/* Account selectors */}
-        <div className="space-y-4">
-          <AccountSelector
-            label="حساب الموردين والدائنين (AP)"
-            hint="الذمم الدائنة — ما يستحقه المورد"
-            amountLabel="يُضاف للدائن"
-            amount={invoice.grandTotal}
-            value={apAccountId}
-            onChange={setApAccountId}
-            options={leafAccounts}
-            required
-            locale={locale}
-            linkPath="accounting/statement"
-            linkLabel="عرض كشف الحساب"
-          />
-
-          <AccountSelector
-            label={`حساب ضريبة المدخلات${!hasTax ? " (لا توجد ضريبة)" : ""}`}
-            hint="ضريبة القيمة المضافة على المشتريات"
-            amountLabel="يُضاف للمدين"
-            amount={invoice.taxAmount}
-            value={taxAccountId}
-            onChange={setTaxAccountId}
-            options={leafAccounts}
-            locale={locale}
-            linkPath="accounting/tax"
-            linkLabel="عرض حساب الضريبة"
-          />
-
-          <AccountSelector
-            label="حساب المخزون"
-            hint="قيمة البضاعة الواردة"
-            amountLabel="يُضاف للمدين"
-            amount={invoice.subtotal}
-            value={inventoryAccountId}
-            onChange={setInventoryAccountId}
-            options={leafAccounts}
-            locale={locale}
-            linkPath="accounting/statement"
-            linkLabel="عرض كشف الحساب المحاسبي"
-          />
-        </div>
+        {configError && (
+          <Alert variant="error">
+            لا يمكن ترحيل الفاتورة لأن إعدادات حسابات المشتريات غير مكتملة.{" "}
+            <a href={`/${locale}/accounting/accounts`} className="underline font-medium">فتح إعدادات الحسابات ↗</a>
+          </Alert>
+        )}
 
         <div className="flex justify-end gap-2 pt-2 border-t border-border">
           <Button variant="ghost" onClick={onClose} disabled={saving}>إلغاء</Button>
-          <Button onClick={() => void handleConfirm()} disabled={saving || !apAccountId}>
+          <Button onClick={() => void handleConfirm()} disabled={saving}>
             {saving ? "جار التأكيد..." : "تأكيد الفاتورة"}
           </Button>
         </div>

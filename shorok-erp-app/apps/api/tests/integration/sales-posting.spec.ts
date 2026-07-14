@@ -178,17 +178,19 @@ describe("sales invoice posting (Phase 3B)", () => {
     expect((await handle.prisma.salesInvoice.findUnique({ where: { id: draft.id } }))!.status).toBe("DRAFT");
   });
 
-  it("body-account fallback: no profile but body accounts → still posts", async () => {
+  it("client-supplied accounts are ignored: no profile → typed config error, nothing posted", async () => {
     await handle.prisma.postingProfile.deleteMany({});
     const variantId = await freshVariant("560", "10");
     const draft = await createDraft(variantId, "2", "1000.00", "14");
+    // Even with valid account IDs in the body, the server ignores them and
+    // requires the PostingProfile — no silent fallback, no hard-coded account.
     const res = await request(server()).post(`/api/v1/sales-invoices/${draft.id}/confirm`).set(auth())
       .send({ arAccountId, revenueAccountId, taxAccountId: vatOutAccountId, cogsAccountId, inventoryAccountId });
-    expect(res.status).toBeLessThan(300);
+    expect(res.status).toBe(409);
+    expect(res.body.details?.reason).toBe("accounts_receivable_account_required");
     const inv = await handle.prisma.salesInvoice.findUnique({ where: { id: draft.id } });
-    expect(inv!.status).toBe("CONFIRMED");
-    const rev = await handle.prisma.journalEntry.findUnique({ where: { id: inv!.journalEntryId! }, include: { lines: true } });
-    expect(sum(rev!.lines, "debit").eq(sum(rev!.lines, "credit"))).toBe(true);
+    expect(inv!.status).toBe("DRAFT");
+    expect(inv!.journalEntryId).toBeNull();
   });
 
   it("cancel confirmed invoice: succeeds, CANCELLED, FKs cleared, CustomerTransaction deleted, stock restored (no P2003)", async () => {

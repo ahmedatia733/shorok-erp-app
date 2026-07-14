@@ -338,10 +338,12 @@ export class PurchaseInvoicesController {
     const invoiceNumber = existing.invoiceNumber;
     const invoiceDateStr = existing.invoiceDate.toISOString().slice(0, 10);
 
+    // Accounts resolve ONLY from the effective PostingProfile — never from the
+    // client (any account fields on the request are ignored).
     const profile = await this.effectiveConfig.postingProfileAsOf(invoiceDateStr);
-    const inventoryAccountId = profile?.inventoryAccountId ?? body.inventoryAccountId ?? null;
-    const apAccountId        = profile?.apAccountId        ?? body.apAccountId        ?? null;
-    const vatInputAccountId  = profile?.vatInputAccountId  ?? body.taxAccountId       ?? null;
+    const inventoryAccountId = profile?.inventoryAccountId ?? null;
+    const apAccountId        = profile?.apAccountId        ?? null;
+    const vatInputAccountId  = profile?.vatInputAccountId  ?? null;
 
     if (!inventoryAccountId) throw new ValidationError({ reason: "inventory_account_required" });
     if (!apAccountId)        throw new ValidationError({ reason: "accounts_payable_account_required" });

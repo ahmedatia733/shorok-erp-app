@@ -466,17 +466,16 @@ export class SalesInvoicesController {
     const taxAmount = new Decimal(existing.taxAmount.toString());
     const invoiceNumber = existing.invoiceNumber.toString();
 
-    // Phase 3B (T032): accounts resolve from the PostingProfile in force on
-    // the invoice date; body fields are only a transitional fallback for the
-    // current UI. `postJournalEntry`/`postCogs` are ignored — posting and the
-    // stock SALE are mandatory.
+    // Accounts resolve ONLY from the effective PostingProfile on the invoice
+    // date — never from the client (any account fields on the request are
+    // ignored). COGS + the stock SALE are mandatory and cannot be toggled off.
     const invoiceDateStr = existing.invoiceDate.toISOString().slice(0, 10);
     const profile = await this.effectiveConfig.postingProfileAsOf(invoiceDateStr);
-    const arAccountId        = profile?.arAccountId        ?? body.arAccountId        ?? null;
-    const revenueAccountId   = profile?.revenueAccountId   ?? body.revenueAccountId   ?? null;
-    const vatOutputAccountId = profile?.vatOutputAccountId ?? body.taxAccountId       ?? null;
-    const cogsAccountId      = profile?.cogsAccountId      ?? body.cogsAccountId      ?? null;
-    const inventoryAccountId = profile?.inventoryAccountId ?? body.inventoryAccountId ?? null;
+    const arAccountId        = profile?.arAccountId        ?? null;
+    const revenueAccountId   = profile?.revenueAccountId   ?? null;
+    const vatOutputAccountId = profile?.vatOutputAccountId ?? null;
+    const cogsAccountId      = profile?.cogsAccountId      ?? null;
+    const inventoryAccountId = profile?.inventoryAccountId ?? null;
 
     // COGS from avg_cost (never the user-entered cost_price). Per line:
     // boards = quantityMeters / sizeMetersPerBoard, cost = boards × avg_cost.

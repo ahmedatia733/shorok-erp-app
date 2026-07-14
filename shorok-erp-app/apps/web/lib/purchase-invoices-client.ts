@@ -111,7 +111,8 @@ export const createPurchaseInvoice = (body: {
 
 export const confirmPurchaseInvoice = (
   id: string,
-  body: { apAccountId: string; taxAccountId?: string; inventoryAccountId?: string },
+  // Accounts resolve server-side from the PostingProfile; the body is empty.
+  body: { apAccountId?: string; taxAccountId?: string; inventoryAccountId?: string } = {},
 ) => apiCall<PurchaseInvoiceRow>(`/purchase-invoices/${id}/confirm`, { method: "POST", body });
 
 export const cancelPurchaseInvoice = (id: string) =>

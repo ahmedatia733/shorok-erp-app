@@ -18,6 +18,7 @@ import {
 } from "../../../../../../lib/purchase-invoices-client";
 import { listAccounts, getLeafAccounts, type AccountRow } from "../../../../../../lib/accounts-client";
 import { confirmErrorMessageAr } from "../../../../../../lib/purchase-confirm-error";
+import { isPostingConfigError } from "../../../../../../lib/posting-config";
 import { formatDate, formatCurrency } from "../../../../../../lib/format";
 
 function autoSelectId(accounts: Awaited<ReturnType<typeof listAccounts>>, ...kws: string[]) {
@@ -60,13 +61,8 @@ export default function PurchaseInvoiceDetailPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Confirm-modal account selection (Phase 1 stabilization). Accounts come
-  // from posting configuration in Phase 3; for now the user picks them here.
-  const [leafAccounts, setLeafAccounts] = useState<AccountRow[]>([]);
-  const [apAccountId, setApAccountId] = useState("");
-  const [taxAccountId, setTaxAccountId] = useState("");
-  const [inventoryAccountId, setInventoryAccountId] = useState("");
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmConfigError, setConfirmConfigError] = useState(false);
 
   useEffect(() => {
     void getPurchaseInvoice(id)
@@ -76,45 +72,23 @@ export default function PurchaseInvoiceDetailPage() {
 
   function openConfirm() {
     setConfirmError(null);
+    setConfirmConfigError(false);
     setConfirmOpen(true);
-    void listAccounts().then((all) => {
-      // Flatten the tree so nested leaves (e.g. VAT 2300 under 2000) appear.
-      const leaf = getLeafAccounts(all);
-      setLeafAccounts(leaf);
-      const liab = leaf.filter((a) => a.category === "LIABILITY");
-      const asset = leaf.filter((a) => a.category === "ASSET");
-      setApAccountId(
-        autoSelectId(liab, "موردون", "دائنون", "payable", "creditor") ??
-          autoSelectId(leaf, "موردون", "دائنون", "payable", "creditor") ??
-          "",
-      );
-      setTaxAccountId(autoSelectId(leaf, "ضريبة", "ضرائب", "vat", "tax") ?? "");
-      setInventoryAccountId(
-        autoSelectId(asset, "مخزون", "بضاعة", "inventory", "stock") ??
-          autoSelectId(leaf, "مخزون", "بضاعة", "inventory", "stock") ??
-          "",
-      );
-    });
   }
-
-  const hasTax = invoice ? parseFloat(invoice.taxAmount) > 0 : false;
 
   async function handleConfirm() {
     setConfirmError(null);
-    if (!apAccountId) { setConfirmError("يجب اختيار حساب الموردين قبل ترحيل الفاتورة."); return; }
-    if (!inventoryAccountId) { setConfirmError("يجب اختيار حساب المخزون قبل ترحيل الفاتورة."); return; }
-    if (hasTax && !taxAccountId) { setConfirmError("يجب اختيار حساب ضريبة المشتريات لأن الفاتورة تحتوي على ضريبة."); return; }
+    setConfirmConfigError(false);
     setActionLoading(true);
     try {
-      const updated = await confirmPurchaseInvoice(id, {
-        apAccountId,
-        taxAccountId: taxAccountId || undefined,
-        inventoryAccountId: inventoryAccountId || undefined,
-      });
+      // AP / inventory / VAT-input accounts resolve server-side from the
+      // PostingProfile — the client sends no account IDs.
+      const updated = await confirmPurchaseInvoice(id, {});
       setInvoice(updated);
       setConfirmOpen(false);
     } catch (err) {
-      setConfirmError(confirmErrorMessageAr(err));
+      if (isPostingConfigError(err)) setConfirmConfigError(true);
+      else setConfirmError(confirmErrorMessageAr(err));
     } finally {
       setActionLoading(false);
     }
@@ -273,39 +247,29 @@ export default function PurchaseInvoiceDetailPage() {
         </div>
       )}
 
-      {/* Confirm modal — explicit account selection + clear errors (Phase 1) */}
-      {confirmOpen && (
-        <Modal open onClose={() => setConfirmOpen(false)} title="ترحيل فاتورة المشتريات">
+      {/* Confirm modal — no account selection; accounts resolve server-side. */}
+      {confirmOpen && invoice && (
+        <Modal open onClose={() => setConfirmOpen(false)} title="تأكيد فاتورة المشتريات">
           <div className="space-y-4 text-sm" dir="rtl">
-            {confirmError && <Alert variant="error">{confirmError}</Alert>}
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-1">
+              <div className="font-bold text-blue-800">{invoice.supplierNameAr}</div>
+              <div className="text-xs text-blue-600">فاتورة مشتريات #{invoice.invoiceNumber}</div>
+              <div className="flex justify-between font-bold text-blue-800 border-t border-blue-200 pt-1 mt-1">
+                <span>الإجمالي</span><span dir="ltr">{formatCurrency(invoice.grandTotal, locale)}</span>
+              </div>
+            </div>
 
-            <p className="text-textSecondary">
-              اختر الحسابات المطلوبة ثم اضغط ترحيل. سيتم تحديث المخزون وتسجيل القيد المحاسبي.
+            <p className="text-xs text-blue-700 bg-blue-50 rounded p-2">
+              سيتم تحديث المخزون وتسجيل القيد المحاسبي تلقائيًا وفقًا لإعدادات الحسابات.
             </p>
 
-            <ConfirmAccountSelect
-              label="حساب الموردين (دائن)"
-              required
-              value={apAccountId}
-              onChange={setApAccountId}
-              options={leafAccounts.filter((a) => a.category === "LIABILITY")}
-              fallback={leafAccounts}
-            />
-            <ConfirmAccountSelect
-              label="حساب المخزون (مدين)"
-              required
-              value={inventoryAccountId}
-              onChange={setInventoryAccountId}
-              options={leafAccounts.filter((a) => a.category === "ASSET")}
-              fallback={leafAccounts}
-            />
-            <ConfirmAccountSelect
-              label={`حساب ضريبة المشتريات${hasTax ? " (مطلوب)" : " (اختياري)"}`}
-              required={hasTax}
-              value={taxAccountId}
-              onChange={setTaxAccountId}
-              options={leafAccounts}
-            />
+            {confirmConfigError && (
+              <Alert variant="error">
+                لا يمكن ترحيل الفاتورة لأن إعدادات حسابات المشتريات غير مكتملة.{" "}
+                <a href={`/${locale}/accounting/accounts`} className="underline font-medium">فتح إعدادات الحسابات ↗</a>
+              </Alert>
+            )}
+            {confirmError && <Alert variant="error">{confirmError}</Alert>}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={actionLoading}>
@@ -322,35 +286,3 @@ export default function PurchaseInvoiceDetailPage() {
   );
 }
 
-// Simple account dropdown for the Phase 1 confirm modal. `options` is the
-// preferred category-filtered list; `fallback` (optional) widens to all
-// leaves so a mis-categorised account is still selectable.
-function ConfirmAccountSelect({
-  label, required, value, onChange, options, fallback,
-}: {
-  label: string;
-  required?: boolean;
-  value: string;
-  onChange: (v: string) => void;
-  options: AccountRow[];
-  fallback?: AccountRow[];
-}) {
-  const list = options.length > 0 ? options : (fallback ?? []);
-  return (
-    <div className="space-y-1">
-      <label className="text-sm font-medium">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
-      >
-        <option value="">— اختر الحساب —</option>
-        {list.map((a) => (
-          <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-        ))}
-      </select>
-    </div>
-  );
-}

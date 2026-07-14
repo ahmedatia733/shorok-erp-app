@@ -11,6 +11,7 @@ import { Modal } from "../../../../../components/ui/modal";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { useHasRole } from "../../../../../lib/auth";
 import { resolveVariantCost, COST_MISSING_LABEL, COST_ESTIMATE_LABEL, type CostSource } from "../../../../../lib/variant-cost";
+import { isPostingConfigError } from "../../../../../lib/posting-config";
 import {
   listSalesInvoices,
   getSalesInvoice,
@@ -154,409 +155,74 @@ function todayStr() {
 
 interface ConfirmModalProps {
   invoice: SalesInvoiceRow;
-  leafAccounts: AccountRow[];
   onClose: () => void;
   onConfirmed: (updated: SalesInvoiceDetail) => void;
   locale: AppLocale;
 }
 
-/** Smart keyword-based auto-selector helpers */
-function autoSelect(accounts: AccountRow[], ...keywords: string[]): string {
-  const kws = keywords.map((k) => k.toLowerCase());
-  const match = accounts.find((a) =>
-    kws.some((k) => a.nameAr.toLowerCase().includes(k) || (a.nameEn ?? "").toLowerCase().includes(k)),
-  );
-  return match?.id ?? "";
-}
-
-function AccountLink({
-  locale,
-  accountId,
-  label,
-  path,
-}: {
-  locale: AppLocale;
-  accountId: string;
-  label?: string;
-  path?: string;           // override destination page
-}) {
-  if (!accountId) return null;
-  const href = path
-    ? `/${locale}/${path}?accountId=${accountId}`
-    : `/${locale}/accounting/statement?accountId=${accountId}`;
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="text-xs text-blue-600 hover:underline flex items-center gap-1 whitespace-nowrap"
-    >
-      {label ?? "عرض كشف الحساب"} ↗
-    </a>
-  );
-}
-
-function AccountSelector({
-  label,
-  hint,
-  amountLabel,
-  value,
-  onChange,
-  primary,
-  fallback,
-  locale,
-  required,
-  linkPath,
-  linkLabel,
-}: {
-  label: string;
-  hint: string;
-  amountLabel: string;
-  value: string;
-  onChange: (id: string) => void;
-  primary: AccountRow[];
-  fallback: AccountRow[];
-  locale: AppLocale;
-  required?: boolean;
-  linkPath?: string;       // custom statement page path
-  linkLabel?: string;      // custom link label
-}) {
-  return (
-    <div className="rounded-lg border border-border p-3 space-y-2">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-medium">
-            {label}
-            {required && <span className="text-red-500 ms-1">*</span>}
-          </div>
-          <div className="text-xs text-textSecondary">{hint} — <strong>{amountLabel}</strong></div>
-        </div>
-        <AccountLink locale={locale} accountId={value} path={linkPath} label={linkLabel} />
-      </div>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background"
-      >
-        <option value="">— اختر الحساب —</option>
-        {primary.length > 0 && (
-          <optgroup label="الحسابات المقترحة">
-            {primary.map((a) => (
-              <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-            ))}
-          </optgroup>
-        )}
-        {fallback.length > 0 && (
-          <optgroup label="جميع الحسابات">
-            {fallback.map((a) => (
-              <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
-            ))}
-          </optgroup>
-        )}
-      </select>
-    </div>
-  );
-}
-
-function ConfirmModal({ invoice, leafAccounts, onClose, onConfirmed, locale }: ConfirmModalProps) {
-  const [arAccountId, setArAccountId] = useState("");
-  const [revenueAccountId, setRevenueAccountId] = useState("");
-  const [taxAccountId, setTaxAccountId] = useState("");
-  const [postJournalEntry, setPostJournalEntry] = useState(true);
-  const [postCogs, setPostCogs] = useState(false);
-  const [cogsAccountId, setCogsAccountId] = useState("");
-  const [inventoryAccountId, setInventoryAccountId] = useState("");
+function ConfirmModal({ invoice, onClose, onConfirmed, locale }: ConfirmModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // ── Auto-select accounts on mount ──────────────────────────────────────────
-  useEffect(() => {
-    const assetAccs     = leafAccounts.filter((a) => a.category === "ASSET");
-    const revenueAccs   = leafAccounts.filter((a) => a.category === "REVENUE");
-    const cogAccs       = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
-    const liabilityAccs = leafAccounts.filter((a) => a.category === "LIABILITY");
-
-    setArAccountId(autoSelect(assetAccs,   "ذمم", "مدينين", "receivable", "ar"));
-    setRevenueAccountId(autoSelect(revenueAccs, "مبيعات", "إيرادات", "revenue", "sales"));
-
-    // Tax: try keywords across ALL accounts, then fall back to first LIABILITY account
-    const taxById =
-      autoSelect(leafAccounts, "ضريبة", "ضرائب", "vat", "tax") ||
-      autoSelect(liabilityAccs, "ضريبة", "ضرائب", "vat", "tax") ||
-      (liabilityAccs[0]?.id ?? "");
-    setTaxAccountId(taxById);
-
-    setCogsAccountId(autoSelect(cogAccs,   "تكلفة", "cogs", "cost of sales"));
-    setInventoryAccountId(autoSelect(assetAccs, "مخزون", "بضاعة", "inventory", "stock"));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const [configError, setConfigError] = useState(false);
 
   const grandTotal = parseFloat(invoice.grandTotal);
   const subtotal   = parseFloat(invoice.subtotal);
   const taxAmount  = parseFloat(invoice.taxAmount);
   const totalCost  = parseFloat(invoice.totalCost);
-
-  const arAccount        = leafAccounts.find((a) => a.id === arAccountId);
-  const revenueAccount   = leafAccounts.find((a) => a.id === revenueAccountId);
-  const taxAccount       = leafAccounts.find((a) => a.id === taxAccountId);
-  const cogsAccount      = leafAccounts.find((a) => a.id === cogsAccountId);
-  const inventoryAccount = leafAccounts.find((a) => a.id === inventoryAccountId);
-
   const hasTax = taxAmount > 0;
-  const canSubmit =
-    arAccountId &&
-    revenueAccountId &&
-    (!hasTax || !postJournalEntry || taxAccountId) &&
-    (!postCogs || (cogsAccountId && inventoryAccountId));
 
   async function handleSubmit() {
     setSubmitting(true);
     setError(null);
+    setConfigError(false);
     try {
-      const result = await confirmSalesInvoice(invoice.id, {
-        arAccountId,
-        revenueAccountId,
-        taxAccountId: taxAccountId || undefined,
-        postJournalEntry,
-        postCogs,
-        cogsAccountId: cogsAccountId || undefined,
-        inventoryAccountId: inventoryAccountId || undefined,
-      });
+      // Accounts (AR / revenue / VAT / COGS / inventory) resolve server-side
+      // from the PostingProfile — the client sends no account IDs. COGS posts
+      // automatically for tracked inventory.
+      const result = await confirmSalesInvoice(invoice.id, {});
       onConfirmed(result);
-    } catch {
-      setError("فشل تأكيد الفاتورة. يرجى التحقق من البيانات والمحاولة مجدداً.");
+    } catch (e) {
+      if (isPostingConfigError(e)) setConfigError(true);
+      else setError("فشل تأكيد الفاتورة. يرجى التحقق من البيانات والمحاولة مجدداً.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  const assetAccounts     = leafAccounts.filter((a) => a.category === "ASSET");
-  const revenueAccounts   = leafAccounts.filter((a) => a.category === "REVENUE");
-  const liabilityAccounts = leafAccounts.filter((a) => a.category === "LIABILITY");
-  const cogsAccounts      = leafAccounts.filter((a) => a.category === "COST_OF_SALES");
-
-  // Smart-filtered primary lists
-  const arPrimary   = assetAccounts.filter((a) => /ذمم|مدينين|receivable/i.test(a.nameAr + (a.nameEn ?? "")));
-  const revPrimary  = revenueAccounts.filter((a) => /مبيعات|إيراد|revenue|sales/i.test(a.nameAr + (a.nameEn ?? "")));
-  const cogsPrimary = cogsAccounts.filter((a) => /تكلفة|cogs|cost/i.test(a.nameAr + (a.nameEn ?? "")));
-  const invPrimary  = assetAccounts.filter((a) => /مخزون|بضاعة|inventory|stock/i.test(a.nameAr + (a.nameEn ?? "")));
-
-  // Tax: keyword-matched accounts first, then ALL liability accounts, then rest
-  const taxKeyword  = leafAccounts.filter((a) => /ضريبة|ضرائب|vat|tax/i.test(a.nameAr + (a.nameEn ?? "")));
-  const taxPrimary  = taxKeyword.length > 0
-    ? taxKeyword
-    : liabilityAccounts;  // fallback: all liabilities if no keyword match
-  const taxFallback = leafAccounts.filter((a) => !taxPrimary.includes(a));
-
   return (
-    <Modal open={true} onClose={onClose} className="max-w-2xl w-full">
-      <div className="p-6 space-y-5 max-h-[90vh] overflow-y-auto" dir="rtl">
-        <h2 className="text-lg font-bold">
-          تأكيد الفاتورة — SI-{invoice.invoiceNumber}
-        </h2>
-
-        {/* ── Customer + Invoice summary ────────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          {/* Customer card — links to their statement */}
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-1 col-span-2 sm:col-span-1">
-            <div className="text-xs text-blue-500 font-medium">العميل</div>
-            <div className="font-bold text-blue-800">
-              {invoice.customer?.code} — {invoice.customer?.nameAr}
-            </div>
-            <a
-              href={`/${locale}/accounting/customers?customerId=${invoice.customer?.id ?? ""}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
-            >
-              عرض كشف حساب العميل ↗
-            </a>
-          </div>
-
-          {/* Amounts summary */}
-          <div className="rounded-lg border border-border bg-surface p-3 space-y-1 col-span-2 sm:col-span-1">
-            <div className="flex justify-between text-xs text-textSecondary">
-              <span>صافي المبيعات</span>
-              <span dir="ltr">{formatCurrency(subtotal, locale)}</span>
-            </div>
-            {hasTax && (
-              <div className="flex justify-between text-xs text-textSecondary">
-                <span>ضريبة القيمة المضافة</span>
-                <span dir="ltr">{formatCurrency(taxAmount, locale)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-sm font-bold text-green-700 border-t pt-1 mt-1">
-              <span>الإجمالي المستحق</span>
-              <span dir="ltr">{formatCurrency(grandTotal, locale)}</span>
-            </div>
-            {totalCost > 0 && (
-              <div className={
-                "flex justify-between text-xs font-semibold " +
-                (subtotal - totalCost >= 0 ? "text-green-600" : "text-red-600")
-              }>
-                <span>صافي الربح</span>
-                <span dir="ltr">{formatCurrency(subtotal - totalCost, locale)}</span>
-              </div>
-            )}
-          </div>
+    <Modal open={true} onClose={onClose} title={`تأكيد الفاتورة — SI-${invoice.invoiceNumber}`} className="max-w-md w-full">
+      <div className="space-y-4" dir="rtl">
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+          <div className="text-xs text-blue-500 font-medium">العميل</div>
+          <div className="font-bold text-blue-800">{invoice.customer?.code} — {invoice.customer?.nameAr}</div>
         </div>
 
-        {/* ── Journal Entry toggle ──────────────────────────────────────── */}
-        <div className="flex items-center gap-3 rounded-lg border border-border p-3">
-          <input
-            type="checkbox"
-            id="postJe"
-            checked={postJournalEntry}
-            onChange={(e) => setPostJournalEntry(e.target.checked)}
-            className="w-4 h-4 accent-primary"
-          />
-          <div>
-            <label htmlFor="postJe" className="text-sm font-medium cursor-pointer">
-              تسجيل قيد محاسبي في دفتر اليومية
-            </label>
-            <p className="text-xs text-textSecondary">
-              يُنشئ قيداً مزدوجاً Dr ذمم / Cr إيرادات {hasTax ? "/ Cr ضريبة" : ""}
-            </p>
-          </div>
-        </div>
-
-        {/* ── Section 1: AR account ─────────────────────────────────────── */}
-        <AccountSelector
-          label="حساب الذمم المدينة / العملاء"
-          hint="مدين — يُقيَّد بالإجمالي الكامل"
-          amountLabel={formatCurrency(grandTotal, locale)}
-          value={arAccountId}
-          onChange={setArAccountId}
-          primary={arPrimary.length > 0 ? arPrimary : assetAccounts}
-          fallback={arPrimary.length > 0 ? assetAccounts.filter((a) => !arPrimary.includes(a)) : []}
-          locale={locale}
-          required
-        />
-
-        {/* ── Section 2: Revenue account ────────────────────────────────── */}
-        <AccountSelector
-          label="حساب إيرادات المبيعات"
-          hint="دائن — يُقيَّد بصافي المبيعات"
-          amountLabel={formatCurrency(subtotal, locale)}
-          value={revenueAccountId}
-          onChange={setRevenueAccountId}
-          primary={revPrimary.length > 0 ? revPrimary : revenueAccounts}
-          fallback={revPrimary.length > 0 ? revenueAccounts.filter((a) => !revPrimary.includes(a)) : []}
-          locale={locale}
-          required
-        />
-
-        {/* ── Section 3: Tax account ────────────────────────────────────── */}
-        {hasTax && (
-          <AccountSelector
-            label="حساب ضريبة القيمة المضافة"
-            hint={`دائن — ${postJournalEntry ? "مطلوب" : "اختياري"} — ضريبة مخرجات على المبيعات`}
-            amountLabel={formatCurrency(taxAmount, locale)}
-            value={taxAccountId}
-            onChange={setTaxAccountId}
-            primary={taxPrimary}
-            fallback={taxFallback}
-            locale={locale}
-            required={postJournalEntry}
-            linkPath="accounting/tax"
-            linkLabel="عرض حساب الضريبة (VAT)"
-          />
-        )}
-
-        {/* ── Section 4: COGS ───────────────────────────────────────────── */}
-        {totalCost > 0 && (
-          <div className="space-y-3 border-t pt-3">
-            <div className="flex items-center gap-3 rounded-lg border border-border p-3">
-              <input
-                type="checkbox"
-                id="postCogs"
-                checked={postCogs}
-                onChange={(e) => setPostCogs(e.target.checked)}
-                className="w-4 h-4 accent-primary"
-              />
-              <div>
-                <label htmlFor="postCogs" className="text-sm font-medium cursor-pointer">
-                  تسجيل تكلفة البضاعة المباعة (COGS)
-                </label>
-                <p className="text-xs text-textSecondary">
-                  Dr تكلفة / Cr مخزون — {formatCurrency(totalCost, locale)}
-                </p>
-              </div>
+        <div className="rounded-lg border border-border bg-surface p-3 space-y-1 text-sm">
+          <div className="flex justify-between text-textSecondary"><span>صافي المبيعات</span><span dir="ltr">{formatCurrency(subtotal, locale)}</span></div>
+          {hasTax && <div className="flex justify-between text-textSecondary"><span>ضريبة القيمة المضافة</span><span dir="ltr">{formatCurrency(taxAmount, locale)}</span></div>}
+          <div className="flex justify-between font-bold text-green-700 border-t pt-1 mt-1"><span>الإجمالي</span><span dir="ltr">{formatCurrency(grandTotal, locale)}</span></div>
+          {totalCost > 0 && (
+            <div className={"flex justify-between font-semibold " + (subtotal - totalCost >= 0 ? "text-green-600" : "text-red-600")}>
+              <span>صافي الربح المقدّر</span><span dir="ltr">{formatCurrency(subtotal - totalCost, locale)}</span>
             </div>
-
-            {postCogs && (
-              <div className="space-y-3">
-                <AccountSelector
-                  label="حساب تكلفة البضاعة المباعة"
-                  hint="مدين"
-                  amountLabel={formatCurrency(totalCost, locale)}
-                  value={cogsAccountId}
-                  onChange={setCogsAccountId}
-                  primary={cogsPrimary.length > 0 ? cogsPrimary : cogsAccounts}
-                  fallback={cogsAccounts.filter((a) => !cogsPrimary.includes(a))}
-                  locale={locale}
-                />
-                <AccountSelector
-                  label="حساب المخزون / البضاعة"
-                  hint="دائن"
-                  amountLabel={formatCurrency(totalCost, locale)}
-                  value={inventoryAccountId}
-                  onChange={setInventoryAccountId}
-                  primary={invPrimary.length > 0 ? invPrimary : assetAccounts}
-                  fallback={assetAccounts.filter((a) => !invPrimary.includes(a))}
-                  locale={locale}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Journal Entry Preview ─────────────────────────────────────── */}
-        <div className="rounded-lg bg-gray-950 text-gray-100 p-4 text-xs space-y-2 font-mono">
-          <div className="text-gray-400 font-bold mb-2">◈ معاينة القيد المحاسبي</div>
-          <div className="flex justify-between">
-            <span className="text-green-400">Dr  {arAccount?.nameAr ?? "— اختر الحساب —"}</span>
-            <span>{formatCurrency(grandTotal, locale)}</span>
-          </div>
-          <div className="flex justify-between text-gray-400">
-            <span>Cr  {revenueAccount?.nameAr ?? "— اختر الحساب —"}</span>
-            <span>{formatCurrency(subtotal, locale)}</span>
-          </div>
-          {hasTax && (
-            <div className="flex justify-between text-gray-400">
-              <span>Cr  {taxAccount?.nameAr ?? "— اختر الحساب —"}</span>
-              <span>{formatCurrency(taxAmount, locale)}</span>
-            </div>
-          )}
-          {postCogs && totalCost > 0 && (
-            <>
-              <div className="border-t border-gray-700 mt-2 pt-2 text-gray-400">القيد 2 — تكلفة البضاعة</div>
-              <div className="flex justify-between text-green-400">
-                <span>Dr  {cogsAccount?.nameAr ?? "— اختر —"}</span>
-                <span>{formatCurrency(totalCost, locale)}</span>
-              </div>
-              <div className="flex justify-between text-gray-400">
-                <span>Cr  {inventoryAccount?.nameAr ?? "— اختر —"}</span>
-                <span>{formatCurrency(totalCost, locale)}</span>
-              </div>
-            </>
           )}
         </div>
 
-        <p className="text-xs text-blue-600 bg-blue-50 rounded p-2">
-          ✓ سيتم تلقائياً تسجيل حركة مدين في كشف حساب العميل بمبلغ {formatCurrency(grandTotal, locale)}
+        <p className="text-xs text-blue-700 bg-blue-50 rounded p-2">
+          سيتم تسجيل قيد المبيعات والضريبة وتكلفة البضاعة المباعة وتحديث المخزون تلقائيًا.
         </p>
 
+        {configError && (
+          <Alert variant="error">
+            لا يمكن ترحيل الفاتورة لأن إعدادات حسابات المبيعات غير مكتملة.{" "}
+            <a href={`/${locale}/accounting/accounts`} className="underline font-medium">فتح إعدادات الحسابات ↗</a>
+          </Alert>
+        )}
         {error && <Alert variant="error">{error}</Alert>}
 
-        <div className="flex justify-end gap-3 pt-2">
-          <Button variant="ghost" onClick={onClose} disabled={submitting}>
-            إلغاء
-          </Button>
-          <Button
-            onClick={() => void handleSubmit()}
-            disabled={!canSubmit || submitting}
-          >
+        <div className="flex justify-end gap-3 pt-1">
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>إلغاء</Button>
+          <Button onClick={() => void handleSubmit()} disabled={submitting}>
             {submitting ? "جاري التأكيد..." : "تأكيد الفاتورة"}
           </Button>
         </div>
@@ -1070,7 +736,6 @@ function InvoiceForm({
       {showConfirmModal && savedInvoice && (
         <ConfirmModal
           invoice={savedInvoice}
-          leafAccounts={leafAccounts}
           onClose={() => setShowConfirmModal(false)}
           onConfirmed={(inv) => {
             setShowConfirmModal(false);
@@ -1679,7 +1344,6 @@ export default function SalesInvoicesPage() {
       {confirmTarget && (
         <ConfirmModal
           invoice={confirmTarget}
-          leafAccounts={leafAccounts}
           onClose={() => setConfirmTarget(null)}
           onConfirmed={(inv) => {
             setConfirmTarget(null);

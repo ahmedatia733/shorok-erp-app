@@ -115,15 +115,16 @@ export const updateSalesInvoice = (
 
 export const confirmSalesInvoice = (
   id: string,
+  // Accounts resolve server-side from the PostingProfile; the body is empty.
   body: {
-    arAccountId: string;
-    revenueAccountId: string;
+    arAccountId?: string;
+    revenueAccountId?: string;
     taxAccountId?: string;
     postJournalEntry?: boolean;
     postCogs?: boolean;
     cogsAccountId?: string;
     inventoryAccountId?: string;
-  },
+  } = {},
 ) => apiCall<SalesInvoiceDetail>(`/sales-invoices/${id}/confirm`, { method: "POST", body });
 
 export const cancelSalesInvoice = (id: string) =>

@@ -146,17 +146,17 @@ describe("purchase invoice posting (Phase 3A)", () => {
     expect(inv!.status).toBe("DRAFT");
   });
 
-  it("transitional fallback: no profile but body accounts → current UI flow still works", async () => {
+  it("client-supplied accounts are ignored: no profile → typed config error, nothing posted", async () => {
     await handle.prisma.postingProfile.deleteMany({});
     const variantId = await freshVariant();
     const draft = await createDraft(variantId, "1", "100.00", "14");
+    // Account IDs in the body are ignored — accounts resolve only from the
+    // PostingProfile, so with no profile the confirm is rejected.
     const res = await request(server()).post(`/api/v1/purchase-invoices/${draft.id}/confirm`).set(auth())
       .send({ apAccountId, inventoryAccountId, taxAccountId: vatAccountId });
-    expect(res.status).toBeLessThan(300);
+    expect(res.status).toBe(409);
+    expect(res.body.details?.reason).toBe("inventory_account_required");
     const inv = await handle.prisma.purchaseInvoice.findUnique({ where: { id: draft.id } });
-    expect(inv!.status).toBe("CONFIRMED");
-    const entry = await handle.prisma.journalEntry.findFirst({ where: { sourceType: "PURCHASE_INVOICE", sourceId: draft.id }, include: { lines: true } });
-    expect(entry).not.toBeNull();
-    expect(sum(entry!.lines, "debit").eq(sum(entry!.lines, "credit"))).toBe(true);
+    expect(inv!.status).toBe("DRAFT");
   });
 });
