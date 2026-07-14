@@ -53,9 +53,10 @@ export const createJournalEntry = (body: {
   entryDate: string;
   description: string;
   referenceType?: string;
-  lines: Array<{ accountId: string; debit: string; credit: string; note?: string }>;
+  lines: Array<{ accountId: string; debit: string; credit: string; note?: string; partyType?: "CUSTOMER" | "SUPPLIER"; partyId?: string }>;
   acknowledgeNegativeBalance?: boolean;
   negativeBalanceReason?: string;
+  idempotencyKey?: string;
 }) => apiCall<JournalEntryRow>("/journal", { method: "POST", body });
 
 export const deleteJournalEntry = (id: string) =>

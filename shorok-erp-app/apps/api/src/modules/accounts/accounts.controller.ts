@@ -26,6 +26,9 @@ interface AccountNode {
   parentId: string | null;
   isLeaf: boolean;
   active: boolean;
+  systemRole: string | null;
+  isCashOrBank: boolean;
+  treasuryType: string | null;
   createdAt: Date;
   children: AccountNode[];
 }
@@ -59,6 +62,9 @@ export class AccountsController {
         parentId: r.parentId,
         isLeaf: r.isLeaf,
         active: r.active,
+        systemRole: r.systemRole ?? null,
+        isCashOrBank: r.isCashOrBank,
+        treasuryType: r.treasuryType ?? null,
         createdAt: r.createdAt,
         children: [],
       });

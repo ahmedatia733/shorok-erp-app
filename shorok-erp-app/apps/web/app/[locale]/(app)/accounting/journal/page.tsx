@@ -78,6 +78,9 @@ interface JournalLine {
   note: string;
   debit: string;
   credit: string;
+  // Party for control accounts (AR_CONTROL → CUSTOMER, AP_CONTROL → SUPPLIER).
+  partyType?: "CUSTOMER" | "SUPPLIER";
+  partyId?: string;
 }
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
@@ -89,7 +92,7 @@ const ENTRY_TYPE_LABELS: Record<string, string> = {
 };
 
 function emptyLine(): JournalLine {
-  return { category: "", accountId: "", accountNameAr: "", entityLabel: "", note: "", debit: "", credit: "" };
+  return { category: "", accountId: "", accountNameAr: "", entityLabel: "", note: "", debit: "", credit: "", partyType: undefined, partyId: undefined };
 }
 
 function lineNet(l: JournalLine): { type: "debit" | "credit"; net: number } {
@@ -238,6 +241,8 @@ export default function JournalPage() {
     lines.length >= 2 &&
     isBalanced &&
     lines.every((l) => l.accountId !== "" && (parseFloat(l.debit) || 0) + (parseFloat(l.credit) || 0) > 0) &&
+    // Control-account lines must have a party selected.
+    lines.every((l) => !l.partyType || !!l.partyId) &&
     totalDebit > 0;
 
   const displayedEntries = listSearch
@@ -258,37 +263,54 @@ export default function JournalPage() {
     updateLine(idx, { category: cat, accountId: "", accountNameAr: "", entityLabel: "" });
   }
 
+  const arControl = leafAccounts.find((a) => a.systemRole === "AR_CONTROL");
+  const apControl = leafAccounts.find((a) => a.systemRole === "AP_CONTROL");
+
   function handleAccountChange(idx: number, accountId: string) {
     const acc = leafAccounts.find((a) => a.id === accountId);
-    updateLine(idx, { accountId, accountNameAr: acc?.nameAr ?? "" });
+    // Control accounts require a party; clear any stale party otherwise.
+    const partyType = acc?.systemRole === "AR_CONTROL" ? "CUSTOMER" : acc?.systemRole === "AP_CONTROL" ? "SUPPLIER" : undefined;
+    updateLine(idx, { accountId, accountNameAr: acc?.nameAr ?? "", partyType, partyId: undefined, entityLabel: "" });
   }
 
   function handleCustomerSelect(idx: number, customerId: string) {
     const cust = customers.find((c) => c.id === customerId);
     if (!cust) return;
-    const arAcc = leafAccounts.find(
-      (a) => a.category === "ASSET" && /ذمم مدين|مدينون|حساب.*عميل/.test(a.nameAr),
-    );
+    // Resolve the AR control account by systemRole (never by name matching).
     updateLine(idx, {
       entityLabel: `${cust.code} — ${cust.nameAr}`,
       note: lines[idx]?.note || `${cust.code} — ${cust.nameAr}`,
-      accountId: arAcc?.id ?? "",
-      accountNameAr: arAcc?.nameAr ?? "",
+      accountId: arControl?.id ?? "",
+      accountNameAr: arControl?.nameAr ?? "",
+      partyType: "CUSTOMER",
+      partyId: customerId,
     });
   }
 
   function handleSupplierSelect(idx: number, supplierId: string) {
     const supp = suppliers.find((s) => s.id === supplierId);
     if (!supp) return;
-    const apAcc = leafAccounts.find(
-      (a) => a.category === "LIABILITY" && /ذمم دائن|دائنون|حساب.*مورد/.test(a.nameAr),
-    );
     updateLine(idx, {
       entityLabel: supp.nameAr,
       note: lines[idx]?.note || supp.nameAr,
-      accountId: apAcc?.id ?? "",
-      accountNameAr: apAcc?.nameAr ?? "",
+      accountId: apControl?.id ?? "",
+      accountNameAr: apControl?.nameAr ?? "",
+      partyType: "SUPPLIER",
+      partyId: supplierId,
     });
+  }
+
+  /** Party selected inline when a control account was chosen directly (not via the customers/suppliers category). */
+  function handleLinePartySelect(idx: number, partyId: string) {
+    const line = lines[idx];
+    if (!line) return;
+    if (line.partyType === "CUSTOMER") {
+      const c = customers.find((x) => x.id === partyId);
+      updateLine(idx, { partyId, entityLabel: c ? `${c.code} — ${c.nameAr}` : "" });
+    } else if (line.partyType === "SUPPLIER") {
+      const s = suppliers.find((x) => x.id === partyId);
+      updateLine(idx, { partyId, entityLabel: s?.nameAr ?? "" });
+    }
   }
 
   function handleDebitChange(idx: number, val: string) {
@@ -342,6 +364,8 @@ export default function JournalPage() {
             debit:  type === "debit"  ? net.toFixed(2) : "0.00",
             credit: type === "credit" ? net.toFixed(2) : "0.00",
             note: l.note || undefined,
+            partyType: l.partyType,
+            partyId: l.partyId,
           };
         }),
         ...(acknowledge ? { acknowledgeNegativeBalance: true } : {}),
@@ -842,6 +866,19 @@ export default function JournalPage() {
                               </div>
                             )}
                           </div>
+                        )}
+                        {/* Party required when a control account (AR/AP) is chosen directly */}
+                        {line.partyType && line.category !== "customers" && line.category !== "suppliers" && (
+                          <select
+                            value={line.partyId ?? ""}
+                            onChange={(e) => handleLinePartySelect(idx, e.target.value)}
+                            className="mt-1 w-full rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs focus:outline-none"
+                          >
+                            <option value="">{line.partyType === "CUSTOMER" ? "— العميل (مطلوب) —" : "— المورد (مطلوب) —"}</option>
+                            {line.partyType === "CUSTOMER"
+                              ? customers.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>)
+                              : suppliers.map((s) => <option key={s.id} value={s.id}>{s.nameAr}</option>)}
+                          </select>
                         )}
                       </td>
 

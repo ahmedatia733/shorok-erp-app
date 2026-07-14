@@ -11,6 +11,9 @@ export interface AccountRow {
   parentId: string | null;
   isLeaf: boolean;
   active: boolean;
+  systemRole?: string | null;
+  isCashOrBank?: boolean;
+  treasuryType?: string | null;
   children?: AccountRow[];
 }
 

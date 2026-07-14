@@ -5,6 +5,9 @@ export const JournalLineSchema = z.object({
   debit: z.string().regex(/^\d+(\.\d{1,2})?$/),
   credit: z.string().regex(/^\d+(\.\d{1,2})?$/),
   note: z.string().max(300).optional(),
+  // Party is required by the server on AR_CONTROL (CUSTOMER) / AP_CONTROL (SUPPLIER) lines.
+  partyType: z.enum(["CUSTOMER", "SUPPLIER"]).optional(),
+  partyId: z.string().uuid().optional(),
 });
 export type JournalLine = z.infer<typeof JournalLineSchema>;
 
@@ -22,6 +25,8 @@ export const CreateJournalEntryRequestSchema = z.object({
   // Warn-only negative-treasury policy: set on the confirmed retry.
   acknowledgeNegativeBalance: z.boolean().optional(),
   negativeBalanceReason: z.string().max(500).optional(),
+  // Optional client idempotency key so a retry/double-submit posts once.
+  idempotencyKey: z.string().min(8).max(120).optional(),
 });
 export type CreateJournalEntryRequest = z.infer<typeof CreateJournalEntryRequestSchema>;
 

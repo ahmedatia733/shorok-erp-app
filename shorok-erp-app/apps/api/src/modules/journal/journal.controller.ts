@@ -13,10 +13,11 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
+import { randomUUID } from "crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { ReversalService } from "../posting/reversal.service";
-import { TreasuryGuardService } from "../posting/treasury-guard.service";
+import { PostingEngine } from "../posting/posting.engine";
 
 @Controller("journal")
 export class JournalController {
@@ -24,7 +25,7 @@ export class JournalController {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly reversal: ReversalService,
-    private readonly treasuryGuard: TreasuryGuardService,
+    private readonly postingEngine: PostingEngine,
   ) {}
 
   /**
@@ -36,7 +37,7 @@ export class JournalController {
     @Body(new ZodValidationPipe(CreateJournalEntryRequestSchema)) body: CreateJournalEntryRequest,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    // Validate that sum(debit) === sum(credit)
+    // Balanced check (the engine re-checks, but this gives a specific message).
     let sumDebit = new Decimal(0);
     let sumCredit = new Decimal(0);
     for (const line of body.lines) {
@@ -47,78 +48,68 @@ export class JournalController {
       throw new ValidationError({ reason: "unbalanced_entry" });
     }
 
-    // Validate all accountIds are active leaf accounts
-    const accountIds = body.lines.map((l) => l.accountId);
+    // Accounts must be active leaves; AR_CONTROL/AP_CONTROL lines require a party.
+    const accountIds = [...new Set(body.lines.map((l) => l.accountId))];
     const accounts = await this.prisma.account.findMany({
       where: { id: { in: accountIds } },
-      select: { id: true, isLeaf: true, active: true, nameAr: true, nameEn: true },
+      select: { id: true, isLeaf: true, active: true, systemRole: true },
     });
-
+    const accById = new Map(accounts.map((a) => [a.id, a]));
     for (const line of body.lines) {
-      const acc = accounts.find((a) => a.id === line.accountId);
+      const acc = accById.get(line.accountId);
       if (!acc) throw new NotFoundError({ accountId: line.accountId });
       if (!acc.isLeaf || !acc.active) {
         throw new ValidationError({ reason: "account_not_leaf_or_inactive", accountId: line.accountId });
       }
+      if (acc.systemRole === "AR_CONTROL" && (line.partyType !== "CUSTOMER" || !line.partyId)) {
+        throw new ValidationError({ reason: "customer_party_required", accountId: line.accountId });
+      }
+      if (acc.systemRole === "AP_CONTROL" && (line.partyType !== "SUPPLIER" || !line.partyId)) {
+        throw new ValidationError({ reason: "supplier_party_required", accountId: line.accountId });
+      }
     }
 
-    return this.prisma.runInTransaction(async (tx) => {
-      // Negative treasury/bank balance protection (warn-only). Manual journals
-      // bypass the PostingEngine, so the guard is invoked here directly.
-      await this.treasuryGuard.check(tx, {
-        lines: body.lines,
-        acknowledge: body.acknowledgeNegativeBalance,
-        reason: body.negativeBalanceReason ?? null,
-        actor: user,
-        sourceType: "MANUAL",
-        sourceId: null,
-      });
+    // Party ids must reference an ACTIVE customer / supplier.
+    const customerIds = [...new Set(body.lines.filter((l) => l.partyType === "CUSTOMER" && l.partyId).map((l) => l.partyId!))];
+    const supplierIds = [...new Set(body.lines.filter((l) => l.partyType === "SUPPLIER" && l.partyId).map((l) => l.partyId!))];
+    if (customerIds.length) {
+      const found = new Set((await this.prisma.customer.findMany({ where: { id: { in: customerIds }, active: true }, select: { id: true } })).map((c) => c.id));
+      for (const id of customerIds) if (!found.has(id)) throw new NotFoundError({ reason: "customer_not_found", customerId: id });
+    }
+    if (supplierIds.length) {
+      const found = new Set((await this.prisma.supplier.findMany({ where: { id: { in: supplierIds }, active: true }, select: { id: true } })).map((s) => s.id));
+      for (const id of supplierIds) if (!found.has(id)) throw new NotFoundError({ reason: "supplier_not_found", supplierId: id });
+    }
 
-      const entry = await tx.journalEntry.create({
-        data: {
-          entryType: body.entryType ?? "JOURNAL",
-          reference: body.reference ?? null,
-          entryDate: new Date(body.entryDate),
-          description: body.description,
-          referenceType: body.referenceType ?? null,
-          referenceId: body.referenceId ?? null,
-          createdBy: user.id,
-          lines: {
-            create: body.lines.map((line) => ({
-              accountId: line.accountId,
-              debit: new Decimal(line.debit).toFixed(2),
-              credit: new Decimal(line.credit).toFixed(2),
-              note: line.note ?? null,
-            })),
-          },
-        },
-        include: {
-          lines: {
-            include: {
-              account: { select: { code: true, nameAr: true, nameEn: true } },
-            },
-          },
-        },
-      });
-
-      await this.audit.write({
-        tx,
-        actorId: user.id,
-        action: "CREATE",
-        entityType: "journal_entry",
-        entityId: entry.id,
-        afterSnapshot: {
-          entryDate: body.entryDate,
-          description: body.description,
-          totalDebit: sumDebit.toFixed(2),
-          lineCount: body.lines.length,
-        },
-        summaryAr: `${user.name} أنشأ قيد يومي: ${body.description} — ${sumDebit.toFixed(2)} ج.م`,
-        summaryEn: `${user.name} created journal entry: ${body.description} — ${sumDebit.toFixed(2)} EGP`,
-      });
-
-      return this._formatEntry(entry, sumDebit);
+    // Post through the single PostingEngine — balanced, OPEN period, DB-sequence
+    // numbering, POSTED status, party carried onto lines, treasury negative-balance
+    // guard, and audit, all in one transaction. No direct journalEntry writes.
+    const result = await this.postingEngine.post({
+      actor: user,
+      sourceType: "MANUAL",
+      entryType: body.entryType ?? "JOURNAL",
+      entryDate: body.entryDate,
+      reference: body.reference,
+      description: body.description,
+      idempotencyKey: body.idempotencyKey ?? `MANUAL:${randomUUID()}`,
+      lines: body.lines.map((l) => ({
+        accountId: l.accountId,
+        debit: l.debit,
+        credit: l.credit,
+        note: l.note,
+        partyType: l.partyType,
+        partyId: l.partyId,
+      })),
+      acknowledgeNegativeBalance: body.acknowledgeNegativeBalance,
+      negativeBalanceReason: body.negativeBalanceReason ?? null,
     });
+
+    const entry = await this.prisma.journalEntry.findUniqueOrThrow({
+      where: { id: result.journalEntryId },
+      include: { lines: { include: { account: { select: { code: true, nameAr: true, nameEn: true } } } } },
+    });
+    const totalDebit = entry.lines.reduce((a, l) => a.plus(l.debit.toString()), new Decimal(0));
+    return this._formatEntry(entry, totalDebit);
   }
 
   /**
