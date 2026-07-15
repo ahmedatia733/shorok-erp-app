@@ -133,23 +133,31 @@ export const getAging = (type: "AR" | "AP", asOf?: string) => {
 // ─── Supplier Statement ───────────────────────────────────────────────────────
 
 export interface SupplierStatementRow {
-  id: string;
-  date: string;
-  type: "purchase" | "payment" | "other";
-  description: string;
-  totalAmount: string;
-  paidAmount: string;
+  journalEntryId: string;
+  journalLineId: string;
+  entryNumber: string;
+  entryDate: string;
+  reference: string | null;
+  description: string | null;
+  debit: string;
+  credit: string;
   runningBalance: string;
-  journalEntryId: string | null;
-  notes: string | null;
+  sourceType: string | null;
+  sourceId: string | null;
+  isReversal: boolean;
 }
 
 export interface SupplierStatementData {
   supplier: { id: string; nameAr: string; nameEn: string | null };
+  openingBalance: string;
+  periodDebit: string;
+  periodCredit: string;
+  endingBalance: string;
+  rows: SupplierStatementRow[];
+  // aliases
   totalPurchases: string;
   totalPaid: string;
   closingBalance: string;
-  rows: SupplierStatementRow[];
 }
 
 export const getSupplierStatement = (supplierId: string, from?: string, to?: string) => {

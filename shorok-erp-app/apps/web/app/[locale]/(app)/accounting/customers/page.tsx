@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useLocale } from "next-intl";
 import { Alert } from "../../../../../components/ui/alert";
 import { sourceDocumentHref } from "../../../../../lib/source-document";
+import { statementRowLabel } from "../../../../../lib/statement-labels";
 import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
@@ -356,9 +357,8 @@ export default function CustomerStatementPage() {
                       </TD>
                       <TD>
                         {href
-                          ? <Link href={href} className="text-blue-600 hover:underline">{e.description ?? "—"}</Link>
-                          : (e.description ?? "—")}
-                        {e.isReversal && <span className="ms-1 rounded bg-amber-100 px-1 text-[10px] text-amber-700">عكس</span>}
+                          ? <Link href={href} className="text-blue-600 hover:underline">{statementRowLabel(e)}</Link>
+                          : statementRowLabel(e)}
                       </TD>
                       <TD className={parseFloat(e.debit) > 0 ? "text-red-600 font-medium text-center" : "text-textSecondary text-center"}>
                         {parseFloat(e.debit) > 0 ? fmt(e.debit) : "—"}
