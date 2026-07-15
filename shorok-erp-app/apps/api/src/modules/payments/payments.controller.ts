@@ -168,16 +168,14 @@ export class PaymentsController {
         sourceId: body.supplierId,
       });
 
-      const counter = await tx.journalEntry.count();
-      const entryNumber = BigInt(counter + 1);
-
       const description = body.notes
         ? `سداد للمورد ${supplier.nameAr} — ${body.notes}`
         : `سداد للمورد ${supplier.nameAr}`;
 
+      // entry_number comes from the DB sequence (autoincrement) — never count()+1,
+      // which collides with PostingEngine-numbered entries.
       const entry = await tx.journalEntry.create({
         data: {
-          entryNumber,
           entryType: "PAYMENT",
           entryDate: new Date(body.paymentDate),
           description,
@@ -187,7 +185,7 @@ export class PaymentsController {
           createdBy: user.id,
           lines: {
             create: [
-              { accountId: body.apAccountId,   debit: body.amount, credit: "0", note: `سداد للمورد ${supplier.nameAr}` },
+              { accountId: body.apAccountId,   debit: body.amount, credit: "0", note: `سداد للمورد ${supplier.nameAr}`, partyType: "SUPPLIER", partyId: body.supplierId },
               { accountId: body.bankAccountId, debit: "0", credit: body.amount, note: apAccount.nameAr },
             ],
           },

@@ -9,8 +9,10 @@ import { TaxLedgerController } from "./tax-ledger.controller";
 import { SupplierStatementController } from "./supplier-statement.controller";
 import { SupplierAgingController } from "./supplier-aging.controller";
 import { CashFlowController } from "./cash-flow.controller";
+import { AccountingStatementsModule } from "../accounting-statements/accounting-statements.module";
 
 @Module({
+  imports: [AccountingStatementsModule],
   controllers: [
     DashboardController,
     IncomeStatementController,
