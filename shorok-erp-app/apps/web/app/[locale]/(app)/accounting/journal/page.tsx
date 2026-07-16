@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { ACCOUNT_CATEGORIES, accountsInCategory } from "@shorok/shared";
 import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
 import { Button } from "../../../../../components/ui/button";
@@ -26,47 +27,18 @@ import {
 } from "../../../../../lib/journal-templates-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 
-// ─── Category definitions (shared with templates page) ────────────────────────
+// ─── Category definitions ─────────────────────────────────────────────────────
+// Sourced from @shorok/shared so the Journal, the Templates page, and the
+// Account Statement selector always offer the same categories.
 
-const CATEGORIES = [
-  { id: "banks",     label: "البنوك",               special: false },
-  { id: "vaults",    label: "الخزن",                special: false },
-  { id: "cash",      label: "الصندوق والنقدية",      special: false },
-  { id: "ar",        label: "الذمم المدينة",         special: false },
-  { id: "ap",        label: "الذمم الدائنة",         special: false },
-  { id: "revenue",   label: "الإيرادات",             special: false },
-  { id: "cogs",      label: "تكلفة المبيعات",        special: false },
-  { id: "expense",   label: "المصروفات",             special: false },
-  { id: "fixed",     label: "الأصول الثابتة",        special: false },
-  { id: "inventory", label: "المخزون والبضاعة",      special: false },
-  { id: "tax",       label: "الضرائب",               special: false },
-  { id: "equity",    label: "رأس المال",             special: false },
-  { id: "customers", label: "العملاء",               special: true  },
-  { id: "suppliers", label: "الموردون",              special: true  },
-  { id: "all",       label: "جميع الحسابات",         special: false },
-];
+const CATEGORIES = ACCOUNT_CATEGORIES.map((c) => ({
+  id: c.id,
+  label: c.label,
+  special: c.kind !== "ACCOUNTS", // customers/suppliers resolve to parties, not accounts
+}));
 
-function filterAccounts(cat: string, accounts: AccountRow[]): AccountRow[] {
-  if (cat === "customers" || cat === "suppliers") return [];
-  if (cat === "all") return accounts.filter((a) => a.isLeaf && a.active);
-  const both = (a: AccountRow) => (a.nameAr + " " + (a.nameEn ?? "")).toLowerCase();
-  const tests: Record<string, (a: AccountRow) => boolean> = {
-    banks:     (a) => a.category === "ASSET"       && /بنك|مصرف|bank|cib|nbe|qnb|hsbc|abc/i.test(both(a)),
-    vaults:    (a) => a.category === "ASSET"       && /خزن|خزينة|خزان|vault|safe/i.test(both(a)),
-    cash:      (a) => a.category === "ASSET"       && /صندوق|نقد|كاش|cash|petty/i.test(both(a)),
-    ar:        (a) => a.category === "ASSET"       && /مدين|ذمم|عميل|receivabl|سلف|عهد|prepaid|advance/i.test(both(a)),
-    ap:        (a) => a.category === "LIABILITY"   && /دائن|مورد|ذمم|payabl|مستحق|accrued/i.test(both(a)),
-    revenue:   (a) => a.category === "REVENUE",
-    cogs:      (a) => a.category === "COST_OF_SALES",
-    expense:   (a) => a.category === "EXPENSE",
-    fixed:     (a) => a.accountType === "FIXED_ASSET",
-    inventory: (a) => /مخزون|بضاع|سلع|stock|inventor/i.test(both(a)),
-    tax:       (a) => /ضريب|tax|vat/i.test(both(a)),
-    equity:    (a) => a.category === "EQUITY",
-  };
-  const test = tests[cat] ?? (() => true);
-  return accounts.filter((a) => a.isLeaf && a.active && test(a));
-}
+const filterAccounts = (cat: string, accounts: AccountRow[]): AccountRow[] =>
+  accountsInCategory(cat || "all", accounts);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

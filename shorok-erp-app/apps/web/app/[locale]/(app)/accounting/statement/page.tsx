@@ -1,497 +1,387 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale } from "next-intl";
+import { ACCOUNT_CATEGORIES, accountsInCategory } from "@shorok/shared";
 import type { AppLocale } from "../../../../../i18n";
-import { Button } from "../../../../../components/ui/button";
 import { Alert } from "../../../../../components/ui/alert";
-import { Skeleton } from "../../../../../components/ui/skeleton";
-import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
-import { Modal } from "../../../../../components/ui/modal";
+import { Button } from "../../../../../components/ui/button";
+import { Card, CardBody } from "../../../../../components/ui/card";
 import { Input } from "../../../../../components/ui/input";
-import { listSuppliers, type SupplierRow } from "../../../../../lib/suppliers-client";
-import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { Skeleton } from "../../../../../components/ui/skeleton";
+import { SearchableSelect, type SearchableOption } from "../../../../../components/ui/searchable-select";
+import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
+import { ApiClientError } from "../../../../../lib/api-client";
+import { statementRowLabel } from "../../../../../lib/statement-labels";
+import { sourceDocumentHref } from "../../../../../lib/source-document";
 import {
-  listPaymentAccounts,
-  getSupplierStatement,
-  getAccountStatement,
-  createPayment,
-  type PaymentAccount,
-  type SupplierStatement,
-  type AccountStatement,
-  type StatementEntry,
-} from "../../../../../lib/payments-client";
+  getConsolidatedStatement,
+  getStatementOptions,
+  type ConsolidatedStatement,
+  type StatementOptions,
+} from "../../../../../lib/statements-client";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+const ALL = "all";
 
-type EntityType = "supplier" | "account" | "gl_account";
-
-function fmt(v: string | number) {
-  return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: 2 });
+function fmt(v: string) {
+  return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function BalanceCell({ v }: { v: string }) {
-  const n = parseFloat(v);
-  const color = n > 0 ? "text-red-600" : n < 0 ? "text-green-600" : "text-textSecondary";
-  return <TD className={color}>{fmt(v)}</TD>;
+/** Balances are signed on the account's own normal side: negative reads as "against" that side. */
+function Money({ v, bold = false }: { v: string; bold?: boolean }) {
+  const n = Number(v);
+  const tone = n < 0 ? "text-red-600" : "text-textPrimary";
+  return <span className={`tabular-nums ${tone} ${bold ? "font-bold" : ""}`} dir="ltr">{fmt(v)}</span>;
 }
 
-function getAllLeafs(accounts: AccountRow[]): AccountRow[] {
-  const out: AccountRow[] = [];
-  for (const a of accounts) {
-    if (a.isLeaf && a.active) out.push(a);
-    if (a.children) out.push(...getAllLeafs(a.children));
-  }
-  return out;
-}
-
-// ── Source document badge ─────────────────────────────────────────────────────
-
-const SOURCE_MAP: Record<string, { label: string; href: (id: string, loc: string) => string }> = {
-  sales_invoice:          { label: "فاتورة مبيعات",  href: (id, l) => `/${l}/sales/invoices/${id}` },
-  order_collection:       { label: "تحصيل طلبية",   href: (id, l) => `/${l}/orders` },
-  purchase_invoice:       { label: "فاتورة مشتريات", href: (id, l) => `/${l}/purchasing/invoices` },
-  factory_ledger_payment: { label: "دفعة مصنع",     href: (id, l) => `/${l}/factory-orders` },
-  expense:                { label: "مصروف",           href: (id, l) => `/${l}/expenses` },
-  depreciation_entry:     { label: "استهلاك أصل",   href: (id, l) => `/${l}/accounting/fixed-assets` },
-  fixed_asset:            { label: "أصل ثابت",      href: (id, l) => `/${l}/accounting/fixed-assets` },
-};
-
-function SourceBadge({
-  refType,
-  refId,
-  locale,
-}: {
-  refType?: string;
-  refId?: string;
-  locale: AppLocale;
-}) {
-  if (!refType) return <span className="text-textSecondary text-xs">يدوي</span>;
-  const def = SOURCE_MAP[refType];
-  if (!def) return <span className="text-xs font-mono text-textSecondary">{refType}</span>;
-  if (!refId) {
-    return (
-      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
-        {def.label}
-      </span>
-    );
-  }
+function SummaryCard({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
   return (
-    <a
-      href={def.href(refId, locale)}
-      className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-    >
-      {def.label} ↗
-    </a>
+    <Card>
+      <CardBody className="py-3">
+        <div className="text-xs text-textSecondary mb-1">{label}</div>
+        <div className={`text-lg ${accent ? "font-bold text-primary" : "font-semibold"} tabular-nums`} dir="ltr">
+          {fmt(value)}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
 export default function StatementPage() {
   const locale = useLocale() as AppLocale;
-  const [entityType, setEntityType] = useState<EntityType>("supplier");
-  const [suppliers,  setSuppliers]  = useState<SupplierRow[]>([]);
-  const [accounts,   setAccounts]   = useState<PaymentAccount[]>([]);
-  const [glAccounts, setGlAccounts] = useState<AccountRow[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+
+  const [options, setOptions] = useState<StatementOptions | null>(null);
+  const [optionsLoading, setOptionsLoading] = useState(true);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+
+  const [category, setCategory] = useState("banks");
+  const [entityId, setEntityId] = useState(ALL);
   const [from, setFrom] = useState("");
-  const [to,   setTo]   = useState("");
+  const [to, setTo] = useState("");
+  const [includeZero, setIncludeZero] = useState(false);
 
+  const [data, setData] = useState<ConsolidatedStatement | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState<string | null>(null);
-  const [data,    setData]    = useState<SupplierStatement | AccountStatement | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Pay modal
-  const [payModal,    setPayModal]    = useState(false);
-  const [payAmount,   setPayAmount]   = useState("");
-  const [payAccountId,setPayAccountId]= useState("");
-  const [payRef,      setPayRef]      = useState("");
-  const [payNotes,    setPayNotes]    = useState("");
-  const [payDate,     setPayDate]     = useState(new Date().toISOString().slice(0, 10));
-  const [saving,      setSaving]      = useState(false);
-  const [saveError,   setSaveError]   = useState<string | null>(null);
+  const categoryDef = ACCOUNT_CATEGORIES.find((c) => c.id === category);
+
+  // ── options (categories + selectable entities) ───────────────────────────
 
   useEffect(() => {
     void (async () => {
-      const [s, a, accs] = await Promise.all([listSuppliers(), listPaymentAccounts(), listAccounts()]);
-      setSuppliers(s);
-      setAccounts(a);
-      setGlAccounts(getAllLeafs(accs));
-      if (a.length > 0 && a[0]) setPayAccountId(a[0].id);
-    })();
-  }, []);
+      try {
+        const o = await getStatementOptions();
+        setOptions(o);
 
-  // Deep-link from income statement / journal entry
-  useEffect(() => {
-    const accountId = new URLSearchParams(window.location.search).get("accountId") ?? "";
-    if (accountId) {
-      setEntityType("gl_account");
-      setSelectedId(accountId);
-      void load(accountId, "gl_account");
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function load(idOverride?: string, typeOverride?: EntityType) {
-    const id   = idOverride ?? selectedId;
-    const type = typeOverride ?? entityType;
-    if (!id) return;
-    setLoading(true);
-    setError(null);
-    try {
-      if (type === "supplier") {
-        setData(await getSupplierStatement(id, from || undefined, to || undefined));
-      } else {
-        // Both "account" (PaymentAccount) and "gl_account" use getAccountStatement
-        setData(await getAccountStatement(id, from || undefined, to || undefined));
+        // Deep link from an invoice / income statement: ?accountId=… selects the
+        // account inside whichever category owns it.
+        const accountId = new URLSearchParams(window.location.search).get("accountId");
+        if (accountId && o.accounts.some((a) => a.id === accountId)) {
+          const owning = ACCOUNT_CATEGORIES.find(
+            (c) => c.id !== ALL && c.kind === "ACCOUNTS" && accountsInCategory(c.id, o.accounts).some((a) => a.id === accountId),
+          );
+          setCategory(owning?.id ?? ALL);
+          setEntityId(accountId);
+        }
+      } catch (e) {
+        setOptionsError(e instanceof ApiClientError ? e.localizedMessage(locale) : "فشل تحميل قوائم الحسابات");
+      } finally {
+        setOptionsLoading(false);
       }
-    } catch {
-      setError("حدث خطأ أثناء تحميل كشف الحساب");
-    } finally {
-      setLoading(false);
-    }
-  }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function handlePay() {
-    if (!payAmount || !payAccountId || !selectedId) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await createPayment({
-        entityType:     "SUPPLIER",
-        entityId:       selectedId,
-        paymentAccountId: payAccountId,
-        amount:         payAmount,
-        paymentDate:    payDate,
-        referenceNumber: payRef || undefined,
-        notes:          payNotes || undefined,
-      });
-      setPayModal(false);
-      setPayAmount("");
-      setPayRef("");
-      setPayNotes("");
-      await load();
-    } catch {
-      setSaveError("فشل تسجيل الدفعة، تأكد من البيانات");
-    } finally {
-      setSaving(false);
-    }
-  }
+  // ── second selector options ──────────────────────────────────────────────
 
-  function switchType(t: EntityType) {
-    setEntityType(t);
-    setSelectedId("");
+  const entityOptions = useMemo<SearchableOption[]>(() => {
+    if (!options || !categoryDef) return [];
+    const all: SearchableOption = { value: ALL, label: categoryDef.allLabel, pinned: true };
+
+    if (categoryDef.kind === "CUSTOMERS") {
+      return [all, ...options.customers.map((c) => ({
+        value: c.id,
+        label: `${c.code} — ${c.nameAr}`,
+        keywords: `${c.code} ${c.nameAr}`,
+      }))];
+    }
+    if (categoryDef.kind === "SUPPLIERS") {
+      return [all, ...options.suppliers.map((s) => ({
+        value: s.id,
+        label: s.nameAr,
+        keywords: `${s.nameAr} ${s.nameEn ?? ""}`,
+      }))];
+    }
+    // Only active leaf accounts are selectable; parents are never postable.
+    return [all, ...accountsInCategory(categoryDef.id, options.accounts).map((a) => ({
+      value: a.id,
+      label: `${a.code} — ${a.nameAr}`,
+      keywords: `${a.code} ${a.nameAr} ${a.nameEn ?? ""}`,
+    }))];
+  }, [options, categoryDef]);
+
+  // Switching category must drop a selection that no longer exists in it.
+  // Re-picking the current category is a no-op: clearing `data` here without a
+  // dependency change would blank the page with no reload to refill it.
+  function handleCategoryChange(next: string) {
+    if (next === category) return;
+    setCategory(next);
+    setEntityId(ALL);
     setData(null);
   }
 
-  const isSupplierData = (d: SupplierStatement | AccountStatement): d is SupplierStatement =>
-    "totalDebit" in d;
-  const isAccountData = (d: SupplierStatement | AccountStatement): d is AccountStatement =>
-    "totalIn" in d;
+  // ── load statement ───────────────────────────────────────────────────────
 
-  // Guard against `data` being null on the initial render: `isAccountData`
-  // uses the `in` operator, and `"totalIn" in null` throws a TypeError that
-  // crashed the whole page. Short-circuit on `!!data` first.
-  const isGLAccount = !!data && isAccountData(data) && data.entity?.type === "gl_account";
+  const load = useCallback(async () => {
+    if (!categoryDef) return;
+    setLoading(true);
+    setError(null);
+    try {
+      // Always re-fetched from the GL — nothing is cached client-side, so a
+      // posting or reversal shows up as soon as the page is opened or refreshed.
+      setData(await getConsolidatedStatement({
+        category,
+        entityId,
+        from: from || undefined,
+        to: to || undefined,
+        includeZero,
+      }));
+    } catch (e) {
+      setData(null);
+      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "فشل تحميل كشف الحساب");
+    } finally {
+      setLoading(false);
+    }
+  }, [category, entityId, from, to, includeZero, categoryDef, locale]);
 
-  const entries: StatementEntry[] = data?.entries ?? [];
+  useEffect(() => {
+    if (!options) return;
+    void load();
+  }, [options, load]);
 
-  const entityOptions =
-    entityType === "supplier"
-      ? suppliers.map((s) => ({ id: s.id, label: s.nameAr }))
-      : entityType === "account"
-      ? accounts.map((a) => ({ id: a.id, label: a.name }))
-      : glAccounts.map((a) => ({ id: a.id, label: `${a.code} — ${a.nameAr}` }));
+  const isConsolidated = data?.selectionType === "consolidated";
 
-  const tabCls = (t: EntityType) =>
-    `px-4 py-2 rounded-md text-sm font-medium border transition-colors ${
-      entityType === t
-        ? "bg-primary text-white border-primary"
-        : "border-border hover:bg-background text-textSecondary"
-    }`;
+  // ── render ───────────────────────────────────────────────────────────────
 
-  // For GL account, show running balance column direction hint
-  const glDebitNet = data && isAccountData(data) ? parseFloat(data.totalIn) - parseFloat(data.totalOut) : 0;
+  if (optionsLoading) {
+    return (
+      <div className="space-y-4 max-w-6xl" dir="rtl">
+        <Skeleton className="h-9 w-40" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-64" />
+      </div>
+    );
+  }
+
+  if (optionsError) {
+    return (
+      <div className="space-y-3 max-w-6xl" dir="rtl">
+        <h1 className="text-xl font-bold">كشف الحساب</h1>
+        <Alert variant="error">{optionsError}</Alert>
+        <Button onClick={() => window.location.reload()}>إعادة المحاولة</Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6" dir="rtl">
-      <h1 className="text-2xl font-bold">كشف الحساب</h1>
+    <div className="space-y-4 max-w-6xl" dir="rtl">
+      <h1 className="text-xl font-bold">كشف الحساب</h1>
 
-      {/* Entity type tabs */}
-      <div className="bg-surface border border-border rounded-lg p-4 space-y-4">
-        <div className="flex gap-2 flex-wrap">
-          <button type="button" className={tabCls("supplier")}  onClick={() => switchType("supplier")}>مورد</button>
-          <button type="button" className={tabCls("account")}   onClick={() => switchType("account")}>بنك / خزنة</button>
-          <button type="button" className={tabCls("gl_account")} onClick={() => switchType("gl_account")}>حساب محاسبي</button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className={entityType === "gl_account" ? "md:col-span-2" : ""}>
-            <label className="block text-xs text-textSecondary mb-1">
-              {entityType === "supplier" ? "المورد" : entityType === "account" ? "الحساب (بنك/خزنة)" : "الحساب المحاسبي"}
-            </label>
+      {/* ── Two-stage selector ─────────────────────────────────────────────── */}
+      <Card>
+        <CardBody className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div>
+            <label htmlFor="stmt-category" className="block text-sm font-medium mb-1">القائمة</label>
             <select
-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
+              id="stmt-category"
+              className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background"
+              value={category}
+              onChange={(e) => handleCategoryChange(e.target.value)}
             >
-              <option value="">— اختر —</option>
-              {entityOptions.map((o) => (
-                <option key={o.id} value={o.id}>{o.label}</option>
+              {ACCOUNT_CATEGORIES.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="block text-xs text-textSecondary mb-1">من تاريخ</label>
-            <input
-              type="date"
-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
+            <label htmlFor="stmt-entity" className="block text-sm font-medium mb-1">
+              {categoryDef?.kind === "CUSTOMERS" ? "العميل"
+                : categoryDef?.kind === "SUPPLIERS" ? "المورد"
+                : "الحساب"}
+            </label>
+            <SearchableSelect
+              id="stmt-entity"
+              value={entityId}
+              onChange={setEntityId}
+              options={entityOptions}
+              placeholder="بحث بالكود أو الاسم..."
+              emptyText="لا توجد حسابات في هذه القائمة"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-textSecondary mb-1">إلى تاريخ</label>
-            <input
-              type="date"
-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            />
+            <label htmlFor="stmt-from" className="block text-sm font-medium mb-1">من تاريخ</label>
+            <Input id="stmt-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </div>
 
-          <div className="flex items-end">
-            <Button
-              onClick={() => void load(undefined, undefined)}
-              disabled={!selectedId || loading}
-              className="w-full"
-            >
-              {loading ? "جار التحميل..." : "عرض"}
-            </Button>
+          <div>
+            <label htmlFor="stmt-to" className="block text-sm font-medium mb-1">إلى تاريخ</label>
+            <Input id="stmt-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
-        </div>
-      </div>
+
+          <div className="md:col-span-4 flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary"
+                checked={includeZero}
+                onChange={(e) => setIncludeZero(e.target.checked)}
+              />
+              إظهار الحسابات بدون حركة
+            </label>
+            <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
+              {loading ? "جارِ التحديث..." : "تحديث"}
+            </Button>
+            {data && (
+              <span className="text-sm text-textSecondary">
+                {isConsolidated ? "عرض مجمّع — " : "عرض تفصيلي — "}{data.entityLabel}
+              </span>
+            )}
+          </div>
+        </CardBody>
+      </Card>
 
       {error && <Alert variant="error">{error}</Alert>}
 
-      {loading && (
-        <div className="space-y-2">
-          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+      {loading && !data && (
+        <div className="space-y-3">
+          <Skeleton className="h-20" />
+          <Skeleton className="h-48" />
         </div>
       )}
 
-      {data && !loading && (
-        <div className="space-y-4">
-          {/* Entity name + summary */}
-          <div className="bg-surface border border-border rounded-lg p-4">
-            <div className="flex justify-between items-start flex-wrap gap-3">
-              <div>
-                <div className="font-semibold text-lg">
-                  {isSupplierData(data) ? data.entity.nameAr : data.entity.name}
+      {data && (
+        <>
+          {/* ── Summary ─────────────────────────────────────────────────────── */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <SummaryCard label="الرصيد الافتتاحي" value={data.openingBalance} />
+            <SummaryCard label="إجمالي المدين" value={data.periodDebit} />
+            <SummaryCard label="إجمالي الدائن" value={data.periodCredit} />
+            <SummaryCard label="الرصيد النهائي" value={data.endingBalance} accent />
+          </div>
+
+          {/* ── Breakdown (consolidated only) ───────────────────────────────── */}
+          {isConsolidated && (
+            <Card>
+              <CardBody className="p-0 overflow-x-auto">
+                <div className="px-4 py-2 text-sm font-semibold border-b border-border">
+                  تفاصيل الحسابات ({data.breakdown.length})
                 </div>
-                {isSupplierData(data) && data.entity.nameEn && (
-                  <div className="text-sm text-textSecondary">{data.entity.nameEn}</div>
-                )}
-                {isAccountData(data) && data.entity.code && (
-                  <div className="text-xs font-mono text-textSecondary">{data.entity.code}</div>
-                )}
-              </div>
-
-              {/* Phase-1 hotfix T004: this button wrote to the legacy Payment
-                  model which creates NO journal entry (invisible in GL).
-                  Frozen pending migration — supplier payments go through
-                  دفعات الموردين which posts a real GL entry. */}
-              {entityType === "supplier" && (
-                <a href={`/${locale}/purchasing/supplier-payments`}>
-                  <Button variant="primary" size="sm">+ سداد دفعة (من صفحة دفعات الموردين)</Button>
-                </a>
-              )}
-            </div>
-
-            <div className="mt-3 grid grid-cols-3 gap-4 text-center">
-              {isSupplierData(data) && (
-                <>
-                  <div>
-                    <div className="text-xs text-textSecondary">إجمالي المشتريات (دائن)</div>
-                    <div className="font-semibold text-red-600">{fmt(data.totalCredit)} ج.م</div>
+                {data.breakdown.length === 0 ? (
+                  <div className="px-4 py-6 text-sm text-textSecondary">
+                    لا توجد حسابات بحركة في هذه القائمة.
+                    {!includeZero && " فعّل «إظهار الحسابات بدون حركة» لعرض الحسابات الفارغة."}
                   </div>
-                  <div>
-                    <div className="text-xs text-textSecondary">إجمالي المدفوع (مدين)</div>
-                    <div className="font-semibold text-green-600">{fmt(data.totalDebit)} ج.م</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-textSecondary">الرصيد المستحق</div>
-                    <div className={`font-bold text-lg ${parseFloat(data.closingBalance) > 0 ? "text-red-600" : "text-green-600"}`}>
-                      {fmt(data.closingBalance)} ج.م
-                    </div>
-                  </div>
-                </>
-              )}
-              {isAccountData(data) && (
-                <>
-                  <div>
-                    <div className="text-xs text-textSecondary">
-                      {isGLAccount ? "إجمالي المدين" : "إجمالي الوارد"}
-                    </div>
-                    <div className="font-semibold text-red-700">{fmt(data.totalIn)} ج.م</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-textSecondary">
-                      {isGLAccount ? "إجمالي الدائن" : "إجمالي الصادر"}
-                    </div>
-                    <div className="font-semibold text-green-700">{fmt(data.totalOut)} ج.م</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-textSecondary">الرصيد (مدين − دائن)</div>
-                    <div className={`font-bold text-lg ${glDebitNet >= 0 ? "text-red-700" : "text-green-700"}`}>
-                      {fmt(data.closingBalance)} ج.م
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Statement table */}
-          <div className="overflow-x-auto rounded-lg border border-border">
-            <Table>
-              <THead>
-                <TR>
-                  <TH>التاريخ</TH>
-                  <TH>المرجع</TH>
-                  <TH>البيان</TH>
-                  {isGLAccount && <TH>مصدر القيد</TH>}
-                  <TH className="text-end font-bold text-red-700">مدين</TH>
-                  <TH className="text-end font-bold text-green-700">دائن</TH>
-                  <TH className="text-end">الرصيد</TH>
-                  {entityType === "supplier" && <TH />}
-                </TR>
-              </THead>
-              <TBody>
-                {entries.length === 0 ? (
-                  <TR>
-                    <TD colSpan={isGLAccount ? 7 : entityType === "supplier" ? 7 : 6} className="text-center text-textSecondary py-6">
-                      لا توجد حركات في هذه الفترة
-                    </TD>
-                  </TR>
                 ) : (
-                  entries.map((e, i) => (
-                    <TR key={i}>
-                      <TD className="text-sm whitespace-nowrap">
-                        {new Date(e.date).toLocaleDateString("ar-EG")}
-                      </TD>
-                      <TD className="font-mono text-xs">
-                        {e.journalEntryId ? (
-                          <a
-                            href={`/${locale}/accounting/journal`}
-                            className="text-blue-700 hover:underline"
-                            title="الانتقال إلى القيود اليومية"
-                          >
-                            {e.reference}
-                          </a>
-                        ) : (
-                          e.reference
-                        )}
-                      </TD>
-                      <TD className="text-sm">{e.description}</TD>
-                      {isGLAccount && (
-                        <TD>
-                          <SourceBadge refType={e.referenceType} refId={e.referenceId} locale={locale} />
-                        </TD>
-                      )}
-                      <TD className={`text-end tabular-nums ${parseFloat(e.debit) > 0 ? "bg-red-50 text-red-700 font-medium" : "text-textSecondary"}`}>
-                        {parseFloat(e.debit) > 0 ? fmt(e.debit) : "—"}
-                      </TD>
-                      <TD className={`text-end tabular-nums ${parseFloat(e.credit) > 0 ? "bg-green-50 text-green-700 font-medium" : "text-textSecondary"}`}>
-                        {parseFloat(e.credit) > 0 ? fmt(e.credit) : "—"}
-                      </TD>
-                      <BalanceCell v={e.balance} />
-                      {/* Phase-1 hotfix T004: legacy payment delete frozen —
-                          history is read-only pending migration. */}
-                      {entityType === "supplier" && <TD />}
-                    </TR>
-                  ))
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>الكود</TH>
+                        <TH>الاسم</TH>
+                        <TH>الرصيد الافتتاحي</TH>
+                        <TH>مدين</TH>
+                        <TH>دائن</TH>
+                        <TH>الرصيد النهائي</TH>
+                        <TH></TH>
+                      </TR>
+                    </THead>
+                    <TBody>
+                      {data.breakdown.map((b) => (
+                        <TR key={b.entityId}>
+                          <TD className="font-mono text-xs" dir="ltr">{b.code || "—"}</TD>
+                          <TD>{b.name}</TD>
+                          <TD className="text-end"><Money v={b.openingBalance} /></TD>
+                          <TD className="text-end"><Money v={b.debit} /></TD>
+                          <TD className="text-end"><Money v={b.credit} /></TD>
+                          <TD className="text-end"><Money v={b.endingBalance} bold /></TD>
+                          <TD>
+                            <button
+                              type="button"
+                              className="text-xs text-blue-600 hover:underline"
+                              onClick={() => setEntityId(b.entityId)}
+                            >
+                              عرض التفاصيل ←
+                            </button>
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
                 )}
-              </TBody>
-            </Table>
-          </div>
-        </div>
-      )}
+              </CardBody>
+            </Card>
+          )}
 
-      {/* Pay modal */}
-      {payModal && (
-        <Modal open={payModal} onClose={() => setPayModal(false)} title="تسجيل دفعة">
-          <div className="space-y-4" dir="rtl">
-            {saveError && <Alert variant="error">{saveError}</Alert>}
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium mb-1">المبلغ (ج.م)</label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  placeholder="0.00"
-                />
+          {/* ── Movements ───────────────────────────────────────────────────── */}
+          <Card>
+            <CardBody className="p-0 overflow-x-auto">
+              <div className="px-4 py-2 text-sm font-semibold border-b border-border">
+                الحركات ({data.rows.length})
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">تاريخ الدفع</label>
-                <input
-                  type="date"
-                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
-                  value={payDate}
-                  onChange={(e) => setPayDate(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">الحساب</label>
-              <select
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
-                value={payAccountId}
-                onChange={(e) => setPayAccountId(e.target.value)}
-              >
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">رقم المرجع (اختياري)</label>
-              <Input
-                value={payRef}
-                onChange={(e) => setPayRef(e.target.value)}
-                placeholder="مثال: CHQ-001"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">ملاحظات (اختياري)</label>
-              <Input
-                value={payNotes}
-                onChange={(e) => setPayNotes(e.target.value)}
-                placeholder="ملاحظات إضافية"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" onClick={() => setPayModal(false)}>إلغاء</Button>
-              <Button
-                onClick={() => void handlePay()}
-                disabled={saving || !payAmount || !payAccountId}
-              >
-                {saving ? "جار الحفظ..." : "تأكيد الدفعة"}
-              </Button>
-            </div>
-          </div>
-        </Modal>
+              {data.rows.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-textSecondary">لا توجد حركات في هذه الفترة.</div>
+              ) : (
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>التاريخ</TH>
+                      <TH>القيد</TH>
+                      {isConsolidated && <TH>الحساب</TH>}
+                      <TH>البيان / المستند</TH>
+                      <TH>مدين</TH>
+                      <TH>دائن</TH>
+                      <TH>الرصيد</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {data.rows.map((r) => {
+                      const href = sourceDocumentHref(r, locale);
+                      return (
+                        <TR key={r.journalLineId}>
+                          <TD className="whitespace-nowrap" dir="ltr">{r.entryDate}</TD>
+                          <TD className="font-mono text-xs" dir="ltr">{r.reference ?? `#${r.entryNumber}`}</TD>
+                          {isConsolidated && (
+                            <TD className="text-xs">
+                              <span className="font-mono" dir="ltr">{r.accountCode}</span> — {r.accountName}
+                            </TD>
+                          )}
+                          <TD>
+                            {href ? (
+                              <a href={href} className="text-blue-600 hover:underline">
+                                {statementRowLabel(r)} ↗
+                              </a>
+                            ) : (
+                              statementRowLabel(r)
+                            )}
+                          </TD>
+                          <TD className="text-end">
+                            {Number(r.debit) > 0 ? <Money v={r.debit} /> : <span className="text-textSecondary">—</span>}
+                          </TD>
+                          <TD className="text-end">
+                            {Number(r.credit) > 0 ? <Money v={r.credit} /> : <span className="text-textSecondary">—</span>}
+                          </TD>
+                          <TD className="text-end"><Money v={r.runningBalance} /></TD>
+                        </TR>
+                      );
+                    })}
+                  </TBody>
+                </Table>
+              )}
+            </CardBody>
+          </Card>
+        </>
       )}
     </div>
   );

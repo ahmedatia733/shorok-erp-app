@@ -33,6 +33,29 @@ export interface StatementResult {
   rows: StatementRow[];
 }
 
+/** A journal line joined to its entry — the shape {@link StatementService.reduce} folds. */
+export interface StatementLineInput {
+  id: string;
+  accountId: string;
+  debit: Prisma.Decimal | string;
+  credit: Prisma.Decimal | string;
+  note: string | null;
+  partyType: string | null;
+  partyId: string | null;
+  branchId: string | null;
+  journalEntry: {
+    id: string;
+    entryNumber: bigint | number;
+    entryDate: Date;
+    reference: string | null;
+    description: string | null;
+    sourceType: string | null;
+    sourceId: string | null;
+    reversalOfId: string | null;
+    status: string;
+  };
+}
+
 /**
  * Builds an account/party statement directly from the General Ledger
  * (journal_entries + journal_lines) — the single source of truth. Rows for
@@ -53,6 +76,23 @@ export class StatementService {
     return category === "LIABILITY" || category === "EQUITY" || category === "REVENUE" ? "CREDIT" : "DEBIT";
   }
 
+  /** Include + deterministic ordering every statement query relies on. */
+  static readonly lineInclude = {
+    journalEntry: {
+      select: {
+        id: true, entryNumber: true, entryDate: true, reference: true,
+        description: true, sourceType: true, sourceId: true, reversalOfId: true, status: true,
+      },
+    },
+  } as const;
+
+  /** Deterministic: entry date, then entry number, then line id. */
+  static readonly lineOrderBy: Prisma.JournalLineOrderByWithRelationInput[] = [
+    { journalEntry: { entryDate: "asc" } },
+    { journalEntry: { entryNumber: "asc" } },
+    { id: "asc" },
+  ];
+
   async compute(
     lineWhere: Prisma.JournalLineWhereInput,
     normalSide: NormalSide,
@@ -61,26 +101,30 @@ export class StatementService {
   ): Promise<StatementResult> {
     const lines = await this.prisma.journalLine.findMany({
       where: lineWhere,
-      include: {
-        journalEntry: {
-          select: {
-            id: true, entryNumber: true, entryDate: true, reference: true,
-            description: true, sourceType: true, sourceId: true, reversalOfId: true, status: true,
-          },
-        },
-      },
-      // Deterministic: entry date, then entry number, then line id.
-      orderBy: [
-        { journalEntry: { entryDate: "asc" } },
-        { journalEntry: { entryNumber: "asc" } },
-        { id: "asc" },
-      ],
+      include: StatementService.lineInclude,
+      orderBy: StatementService.lineOrderBy,
     });
+    return StatementService.reduce(lines, () => normalSide, from, to);
+  }
 
+  /**
+   * Folds ordered journal lines into a statement. Pure, so the single-account
+   * and consolidated endpoints share one implementation and cannot drift apart.
+   *
+   * `sideFor` resolves the normal side per line, which is what lets a mixed
+   * category (e.g. "all accounts") total each account on its own side rather
+   * than forcing one formula across asset and liability rows.
+   */
+  static reduce(
+    lines: StatementLineInput[],
+    sideFor: (line: StatementLineInput) => NormalSide,
+    from?: string,
+    to?: string,
+  ): StatementResult {
     const fromDate = from ? new Date(from) : null;
     const toDate = to ? new Date(to) : null;
-    const signed = (debit: Decimal, credit: Decimal) =>
-      normalSide === "DEBIT" ? debit.sub(credit) : credit.sub(debit);
+    const signed = (debit: Decimal, credit: Decimal, side: NormalSide) =>
+      side === "DEBIT" ? debit.sub(credit) : credit.sub(debit);
 
     let opening = new Decimal(0);
     let running = new Decimal(0);
@@ -92,15 +136,16 @@ export class StatementService {
       const debit = new Decimal(l.debit.toString());
       const credit = new Decimal(l.credit.toString());
       const entryDate = l.journalEntry.entryDate;
+      const side = sideFor(l);
 
       if (fromDate && entryDate < fromDate) {
-        opening = opening.add(signed(debit, credit)); // before the window → opening balance only
+        opening = opening.add(signed(debit, credit, side)); // before the window → opening balance only
         continue;
       }
       if (toDate && entryDate > toDate) continue; // after the window → excluded
 
       if (rows.length === 0) running = opening; // first in-window row starts from opening
-      running = running.add(signed(debit, credit));
+      running = running.add(signed(debit, credit, side));
       periodDebit = periodDebit.add(debit);
       periodCredit = periodCredit.add(credit);
 

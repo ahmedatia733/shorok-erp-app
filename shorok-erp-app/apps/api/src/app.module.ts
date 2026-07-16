@@ -37,6 +37,7 @@ import { ReceiptVouchersModule } from "./modules/receipt-vouchers/receipt-vouche
 import { PostingModule } from "./modules/posting/posting.module";
 import { PeriodsModule } from "./modules/periods/periods.module";
 import { ConfigurationModule } from "./modules/configuration/configuration.module";
+import { AccountingStatementsModule } from "./modules/accounting-statements/accounting-statements.module";
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { ConfigurationModule } from "./modules/configuration/configuration.modul
     ExpensesModule,
     FactoryLedgerModule,
     ReportsModule,
+    AccountingStatementsModule,
     ImportModule,
     AccountsModule,
     JournalModule,
