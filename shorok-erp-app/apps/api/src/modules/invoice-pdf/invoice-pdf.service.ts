@@ -8,10 +8,10 @@ import { buildInvoiceHtml, type InvoicePdfData } from "./invoice-template";
 
 /**
  * Renders an invoice to PDF with headless Chromium. The actual render runs in a
- * separate Node process (render.cjs) so that ESM-only puppeteer-core /
- * @sparticuz/chromium stay out of this module's loader — that keeps rendering
- * identical under Nest at runtime and under Jest's VM sandbox. Chromium is
- * production-safe on Railway via @sparticuz/chromium; locally it uses CHROME_PATH.
+ * separate Node process (render.cjs) so that ESM-only puppeteer-core stays out of
+ * this module's loader — that keeps rendering identical under Nest at runtime and
+ * under Jest's VM sandbox. The production image installs Alpine's chromium and
+ * points CHROME_PATH at it; locally CHROME_PATH selects a system Chrome.
  */
 @Injectable()
 export class InvoicePdfService {

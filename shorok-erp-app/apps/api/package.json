@@ -27,7 +27,6 @@
     "@nestjs/platform-express": "^10.4.6",
     "@prisma/client": "^5.22.0",
     "@shorok/shared": "workspace:*",
-    "@sparticuz/chromium": "^149.0.0",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.7",
     "decimal.js": "^10.4.3",

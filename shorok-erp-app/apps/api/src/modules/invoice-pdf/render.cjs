@@ -6,10 +6,30 @@
  * blocked without --experimental-vm-modules).
  *
  * Usage: node render.cjs <htmlInputPath> <pdfOutputPath>
- * Chrome/Chromium selection: CHROME_PATH / PUPPETEER_EXECUTABLE_PATH for a local
- * binary, otherwise the bundled @sparticuz/chromium (Railway-safe).
+ * Chromium selection: CHROME_PATH / PUPPETEER_EXECUTABLE_PATH, else the first
+ * standard install path that exists (the production image is Alpine, which
+ * installs its own musl-linked chromium at /usr/bin/chromium).
  */
 const fs = require("fs");
+
+/** Standard Chromium/Chrome locations, in preference order. */
+const CANDIDATES = [
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+];
+
+function resolveChromium() {
+  const explicit = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (explicit) {
+    if (!fs.existsSync(explicit)) throw new Error(`Chromium not found at CHROME_PATH=${explicit}`);
+    return explicit;
+  }
+  const found = CANDIDATES.find((p) => fs.existsSync(p));
+  if (!found) throw new Error(`No Chromium found. Set CHROME_PATH. Looked in: ${CANDIDATES.join(", ")}`);
+  return found;
+}
 
 async function main() {
   const [htmlPath, outPath] = process.argv.slice(2);
@@ -17,19 +37,11 @@ async function main() {
   const html = fs.readFileSync(htmlPath, "utf8");
 
   const puppeteer = (await import("puppeteer-core")).default;
-  const localPath = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
-
-  let browser;
-  if (localPath) {
-    browser = await puppeteer.launch({ headless: true, executablePath: localPath, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
-  } else {
-    const chromium = (await import("@sparticuz/chromium")).default;
-    browser = await puppeteer.launch({
-      args: [...chromium.args, "--no-sandbox", "--disable-setuid-sandbox"],
-      executablePath: await chromium.executablePath(),
-      headless: true,
-    });
-  }
+  const browser = await puppeteer.launch({
+    headless: true,
+    executablePath: resolveChromium(),
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+  });
 
   try {
     const page = await browser.newPage();
