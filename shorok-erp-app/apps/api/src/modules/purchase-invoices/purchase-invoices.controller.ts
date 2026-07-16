@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Patch, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Patch, Query, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { Decimal } from "decimal.js";
 import {
   CreatePurchaseInvoiceRequestSchema,
@@ -20,6 +21,8 @@ import { InventoryEngine } from "../inventory/inventory.engine";
 import { PostingEngine } from "../posting/posting.engine";
 import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
+import { InvoicePdfService } from "../invoice-pdf/invoice-pdf.service";
+import { purchaseInvoiceToPdfData } from "../invoice-pdf/invoice-pdf.mapper";
 import { weightedAverageCost, unitCostPerBoard } from "./costing";
 
 @Controller("purchase-invoices")
@@ -31,6 +34,7 @@ export class PurchaseInvoicesController {
     private readonly postingEngine: PostingEngine,
     private readonly reversal: ReversalService,
     private readonly effectiveConfig: EffectiveConfigService,
+    private readonly invoicePdf: InvoicePdfService,
   ) {}
 
   private formatInvoice(inv: any) {
@@ -158,6 +162,36 @@ export class PurchaseInvoicesController {
     });
     if (!inv) throw new NotFoundError({ id });
     return this.formatInvoice(inv);
+  }
+
+  // ─── GET /purchase-invoices/:id/pdf ──────────────────────────────────
+  // Downloadable Arabic/RTL PDF — presentation only, no cost / account / journal
+  // internals. Same auth as the detail view.
+
+  @Get(":id/pdf")
+  @Roles("OWNER", "ACCOUNTANT")
+  async getPdf(@Param("id") id: string, @Res() res: Response) {
+    const inv = await this.prisma.purchaseInvoice.findUnique({
+      where: { id },
+      include: {
+        supplier: { select: { id: true, nameAr: true, nameEn: true } },
+        branch: { select: { id: true, nameAr: true, nameEn: true } },
+        lines: {
+          include: { productVariant: { include: { sku: true } } },
+        },
+      },
+    });
+    if (!inv) throw new NotFoundError({ id });
+
+    const company = await this.prisma.companyProfile.findFirst({ select: { nameAr: true } });
+    const pdf = await this.invoicePdf.renderInvoice(
+      purchaseInvoiceToPdfData(inv, company?.nameAr ?? "الشركة"),
+    );
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${inv.invoiceNumber}.pdf"`);
+    res.setHeader("Content-Length", pdf.length);
+    res.end(pdf);
   }
 
   @Post()

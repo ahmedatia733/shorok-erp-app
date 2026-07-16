@@ -6,7 +6,8 @@
     "deleteOutDir": true,
     "tsConfigPath": "tsconfig.build.json",
     "assets": [
-      { "include": "i18n/**/*.json", "outDir": "dist" }
+      { "include": "i18n/**/*.json", "outDir": "dist" },
+      { "include": "modules/invoice-pdf/render.cjs", "outDir": "dist" }
     ]
   }
 }

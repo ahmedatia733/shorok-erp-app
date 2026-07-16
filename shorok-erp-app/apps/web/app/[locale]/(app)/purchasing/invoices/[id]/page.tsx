@@ -17,6 +17,8 @@ import {
   type PurchaseInvoiceRow,
 } from "../../../../../../lib/purchase-invoices-client";
 import { listAccounts, getLeafAccounts, type AccountRow } from "../../../../../../lib/accounts-client";
+import { downloadInvoicePdf } from "../../../../../../lib/invoice-pdf-client";
+import { ApiClientError } from "../../../../../../lib/api-client";
 import { confirmErrorMessageAr } from "../../../../../../lib/purchase-confirm-error";
 import { isPostingConfigError } from "../../../../../../lib/posting-config";
 import { formatDate, formatCurrency } from "../../../../../../lib/format";
@@ -63,6 +65,20 @@ export default function PurchaseInvoiceDetailPage() {
 
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmConfigError, setConfirmConfigError] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  async function handleExportPdf() {
+    if (!invoice || pdfLoading) return;
+    setPdfLoading(true);
+    setError(null);
+    try {
+      await downloadInvoicePdf("purchase", invoice.id, invoice.invoiceNumber);
+    } catch (e) {
+      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : t("loadFailed"));
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   useEffect(() => {
     void getPurchaseInvoice(id)
@@ -122,6 +138,9 @@ export default function PurchaseInvoiceDetailPage() {
         </Button>
         <h1 className="text-xl font-bold">{invoice.invoiceNumber}</h1>
         <StatusBadge status={invoice.status} t={t} />
+        <Button variant="ghost" size="sm" className="ms-auto" onClick={() => void handleExportPdf()} disabled={pdfLoading}>
+          {pdfLoading ? "جارِ التصدير..." : "تصدير PDF"}
+        </Button>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}

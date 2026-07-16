@@ -89,6 +89,43 @@ export async function apiCall<T = unknown>(path: string, options: CallOptions = 
   return (await res.json()) as T;
 }
 
+/**
+ * Downloads a binary response (e.g. a PDF) with the same auth + one-shot 401
+ * refresh behaviour as {@link apiCall}. Returns the response body as a Blob plus
+ * the server-provided filename (from Content-Disposition). Throws ApiClientError
+ * on non-2xx, decoding the JSON error envelope the API returns for failures.
+ */
+export async function apiDownload(
+  path: string,
+  options: { locale?: AppLocale; retryOnUnauthorized?: boolean; signal?: AbortSignal } = {},
+): Promise<{ blob: Blob; filename: string | null }> {
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const headers: Record<string, string> = { "accept-language": options.locale ?? "ar" };
+  if (accessToken) headers["authorization"] = `Bearer ${accessToken}`;
+
+  const res = await fetch(url, { method: "GET", credentials: "include", headers, signal: options.signal });
+
+  if (res.status === 401 && options.retryOnUnauthorized !== false) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) return apiDownload(path, { ...options, retryOnUnauthorized: false });
+  }
+
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as ApiErrorPayload | null;
+    throw new ApiClientError(res.status, payload ?? {
+      code: "unknown",
+      message_ar: "حدث خطأ غير متوقع.",
+      message_en: "An unexpected error occurred.",
+    });
+  }
+
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8''|")?([^";]+)/i.exec(disposition);
+  const raw = match?.[1];
+  const filename = raw ? decodeURIComponent(raw.replace(/"$/, "")) : null;
+  return { blob: await res.blob(), filename };
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {

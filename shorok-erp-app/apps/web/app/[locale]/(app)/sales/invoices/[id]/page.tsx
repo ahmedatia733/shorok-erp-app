@@ -18,6 +18,8 @@ import {
   type SalesInvoiceDetail,
 } from "../../../../../../lib/sales-invoices-client";
 import { listAccounts, type AccountRow } from "../../../../../../lib/accounts-client";
+import { downloadInvoicePdf } from "../../../../../../lib/invoice-pdf-client";
+import { ApiClientError } from "../../../../../../lib/api-client";
 import { formatDate, formatCurrency } from "../../../../../../lib/format";
 
 // ─── Status badge ──────────────────────────────────────────────────────────────
@@ -272,6 +274,20 @@ export default function SalesInvoiceDetailPage() {
   const [showConfirm,  setShowConfirm]  = useState(false);
   const [cancelModal,  setCancelModal]  = useState(false);
   const [cancelling,   setCancelling]   = useState(false);
+  const [pdfLoading,   setPdfLoading]   = useState(false);
+
+  async function handleExportPdf() {
+    if (!invoice || pdfLoading) return;
+    setPdfLoading(true);
+    setError(null);
+    try {
+      await downloadInvoicePdf("sales", invoice.id, `SI-${invoice.invoiceNumber}`);
+    } catch (e) {
+      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "فشل تصدير ملف PDF.");
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   useEffect(() => {
     void (async () => {
@@ -347,6 +363,9 @@ export default function SalesInvoiceDetailPage() {
           {(invoice.status === "DRAFT" || invoice.status === "CONFIRMED") && isOwner && (
             <Button variant="ghost" onClick={() => setCancelModal(true)}>إلغاء</Button>
           )}
+          <Button variant="ghost" onClick={() => void handleExportPdf()} disabled={pdfLoading}>
+            {pdfLoading ? "جارِ التصدير..." : "تصدير PDF"}
+          </Button>
           <Button variant="ghost" onClick={() => window.print()}>طباعة</Button>
         </div>
       </div>

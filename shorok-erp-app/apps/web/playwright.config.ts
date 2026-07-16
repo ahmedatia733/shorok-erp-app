@@ -53,6 +53,10 @@ export default defineConfig({
         DEFAULT_LOCALE: "ar",
         API_PORT: String(API_PORT),
         NODE_ENV: "production",
+        // Invoice PDF rendering uses Chromium; point at a local binary for E2E.
+        CHROME_PATH:
+          process.env.CHROME_PATH ??
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       },
       // /auth/me without a token returns 401 — that's the readiness signal.
       url: `http://localhost:${API_PORT}/api/v1/auth/me`,
