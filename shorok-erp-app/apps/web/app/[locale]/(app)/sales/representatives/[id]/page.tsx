@@ -23,12 +23,13 @@ function fmt(v: string | number) {
   return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "red" | "green" | "muted" }) {
+  const cls = tone === "red" ? "text-red-600" : tone === "green" ? "text-green-600" : tone === "muted" ? "text-textSecondary" : "";
   return (
     <Card>
       <CardBody className="text-center">
         <div className="text-xs text-textSecondary mb-1">{label}</div>
-        <div className="font-bold text-lg">{value}</div>
+        <div className={`font-bold text-lg ${cls}`}>{value}</div>
       </CardBody>
     </Card>
   );
@@ -110,11 +111,26 @@ export default function RepresentativeDetailsPage() {
         </CardBody>
       </Card>
 
-      {/* Summary cards */}
+      {/* Sales-activity summary cards (informational) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard label={t("draftInvoices")} value={String(rep.summary.draftInvoiceCount)} />
         <StatCard label={t("confirmedInvoices")} value={String(rep.summary.confirmedInvoiceCount)} />
         <StatCard label={t("confirmedSalesTotal")} value={fmt(rep.summary.confirmedSalesTotal)} />
+      </div>
+
+      {/* Financial cards — from posted journal lines only, never invoices */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard label={t("periodDebit")} value={fmt(rep.summary.periodDebit)} tone="red" />
+        <StatCard label={t("periodCredit")} value={fmt(rep.summary.periodCredit)} tone="green" />
+        <StatCard
+          label={t("netBalance")}
+          value={(() => {
+            const n = parseFloat(rep.summary.netBalance);
+            if (n === 0) return <span>{fmt(0)} — {t("balanceZero")}</span>;
+            return <span>{fmt(Math.abs(n))} — {n > 0 ? t("balanceDebit") : t("balanceCredit")}</span>;
+          })()}
+          tone={parseFloat(rep.summary.netBalance) === 0 ? "muted" : parseFloat(rep.summary.netBalance) > 0 ? "red" : "green"}
+        />
       </div>
 
       {editOpen && <RepresentativeFormModal rep={rep} onClose={() => setEditOpen(false)} onSaved={onSaved} />}

@@ -390,8 +390,16 @@ export class SalesInvoicesController {
     if (existing.status !== "DRAFT") {
       throw new ValidationError({ reason: "only_draft_can_be_updated", status: existing.status });
     }
-    // Re-assigning a rep validates it; null clears the assignment.
-    if (body.salesRepresentativeId) await this.salesReps.assertAssignable(body.salesRepresentativeId);
+    // Only a NEW/changed rep assignment is validated for active status. Keeping
+    // the invoice's existing (possibly now-inactive) rep while editing other
+    // fields must succeed — the historical relationship is preserved, not
+    // re-created. Clearing to null is always allowed.
+    if (
+      body.salesRepresentativeId &&
+      body.salesRepresentativeId !== existing.salesRepresentativeId
+    ) {
+      await this.salesReps.assertAssignable(body.salesRepresentativeId);
+    }
 
     return this.prisma.runInTransaction(async (tx) => {
       // Delete old lines then recompute if new lines are provided

@@ -40,5 +40,8 @@ export const SalesRepresentativeStatementQuerySchema = z.object({
   type: z.enum(["all", "invoice", "journal"]).optional(),
   // Filter sales-invoice rows by status.
   invoiceStatus: z.enum(["DRAFT", "CONFIRMED", "CANCELLED", "PAID"]).optional(),
+  // Server-side pagination over the combined timeline (1-based page).
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce.number().int().min(1).max(200).optional().default(50),
 });
 export type SalesRepresentativeStatementQuery = z.infer<typeof SalesRepresentativeStatementQuerySchema>;

@@ -18,6 +18,9 @@ export interface SalesRepresentativeDetail extends SalesRepresentative {
     draftInvoiceCount: number;
     confirmedInvoiceCount: number;
     confirmedSalesTotal: string;
+    periodDebit: string;
+    periodCredit: string;
+    netBalance: string;
   };
 }
 
@@ -50,6 +53,13 @@ export interface RepStatement {
   closingBalance: string;
   salesInvoiceCount: number;
   confirmedSalesTotal: string;
+  page: number;
+  limit: number;
+  totalRows: number;
+  totalPages: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  pageOpeningBalance: string;
   rows: RepStatementRow[];
 }
 
@@ -71,6 +81,8 @@ export interface RepStatementFilters {
   branchId?: string;
   type?: "all" | "invoice" | "journal";
   invoiceStatus?: "DRAFT" | "CONFIRMED" | "CANCELLED" | "PAID";
+  page?: number;
+  limit?: number;
 }
 
 export function listRepresentatives(params: { search?: string; status?: "active" | "inactive" | "all" } = {}): Promise<SalesRepresentative[]> {
@@ -100,6 +112,8 @@ export function getRepresentativeStatement(id: string, filters: RepStatementFilt
   if (filters.branchId) q.set("branchId", filters.branchId);
   if (filters.type && filters.type !== "all") q.set("type", filters.type);
   if (filters.invoiceStatus) q.set("invoiceStatus", filters.invoiceStatus);
+  if (filters.page) q.set("page", String(filters.page));
+  if (filters.limit) q.set("limit", String(filters.limit));
   const qs = q.toString();
   return apiCall(`/sales-representatives/${id}/statement${qs ? `?${qs}` : ""}`);
 }

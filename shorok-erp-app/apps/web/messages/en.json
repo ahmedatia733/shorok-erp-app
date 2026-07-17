@@ -656,6 +656,17 @@
     "balanceDebit": "Debit",
     "balanceCredit": "Credit",
     "balanceZero": "Balanced",
-    "invoiceStatus": "Invoice Status"
+    "invoiceStatus": "Invoice Status",
+    "netBalance": "Current Net Balance",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page",
+    "of": "of",
+    "statusAll": "All Statuses",
+    "statusDraft": "Draft",
+    "statusConfirmed": "Confirmed",
+    "statusPaid": "Paid",
+    "statusCancelled": "Cancelled",
+    "rowsTotal": "Total Rows"
   }
 }

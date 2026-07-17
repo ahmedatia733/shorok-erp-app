@@ -52,27 +52,34 @@ export default function RepresentativeStatementPage() {
   const [to, setTo] = useState("");
   const [branchId, setBranchId] = useState("");
   const [type, setType] = useState<"all" | "invoice" | "journal">("all");
+  const [invoiceStatus, setInvoiceStatus] = useState<"" | "DRAFT" | "CONFIRMED" | "PAID" | "CANCELLED">("");
+  const [page, setPage] = useState(1);
 
   const [data, setData] = useState<RepStatement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (toPage?: number) => {
+    const wanted = toPage ?? 1;
     setLoading(true);
     setError(null);
     try {
-      setData(await getRepresentativeStatement(id, {
+      const res = await getRepresentativeStatement(id, {
         from: from || undefined,
         to: to || undefined,
         branchId: branchId || undefined,
         type,
-      }));
+        invoiceStatus: invoiceStatus || undefined,
+        page: wanted,
+      });
+      setData(res);
+      setPage(res.page);
     } catch (e) {
       setError(e instanceof ApiClientError ? e.localizedMessage(locale) : t("loadError"));
     } finally {
       setLoading(false);
     }
-  }, [id, from, to, branchId, type, locale, t]);
+  }, [id, from, to, branchId, type, invoiceStatus, locale, t]);
 
   useEffect(() => {
     void (async () => {
@@ -102,7 +109,7 @@ export default function RepresentativeStatementPage() {
 
       {/* Filters */}
       <div className="bg-surface border border-border rounded-lg p-4">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
           <div>
             <label className="block text-xs text-textSecondary mb-1">{t("from")}</label>
             <input type="date" className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -126,8 +133,18 @@ export default function RepresentativeStatementPage() {
               <option value="journal">{t("typeJournal")}</option>
             </select>
           </div>
+          <div>
+            <label className="block text-xs text-textSecondary mb-1">{t("invoiceStatus")}</label>
+            <select className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background" value={invoiceStatus} onChange={(e) => setInvoiceStatus(e.target.value as typeof invoiceStatus)}>
+              <option value="">{t("statusAll")}</option>
+              <option value="DRAFT">{t("statusDraft")}</option>
+              <option value="CONFIRMED">{t("statusConfirmed")}</option>
+              <option value="PAID">{t("statusPaid")}</option>
+              <option value="CANCELLED">{t("statusCancelled")}</option>
+            </select>
+          </div>
           <div className="flex items-end">
-            <Button onClick={() => void load()} disabled={loading} className="w-full">{loading ? t("loading") : t("apply")}</Button>
+            <Button onClick={() => void load(1)} disabled={loading} className="w-full">{loading ? t("loading") : t("apply")}</Button>
           </div>
         </div>
       </div>
@@ -191,6 +208,22 @@ export default function RepresentativeStatementPage() {
               )}
             </TBody>
           </Table>
+
+          {/* Pagination over the combined timeline */}
+          <div className="flex items-center justify-between gap-3 flex-wrap text-sm">
+            <div className="text-textSecondary">
+              {t("rowsTotal")}: {data.totalRows}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" disabled={!data.hasPrev || loading} onClick={() => void load(data.page - 1)}>
+                {t("previous")}
+              </Button>
+              <span className="text-textSecondary">{t("page")} {data.page} {t("of")} {data.totalPages}</span>
+              <Button variant="ghost" disabled={!data.hasNext || loading} onClick={() => void load(data.page + 1)}>
+                {t("next")}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

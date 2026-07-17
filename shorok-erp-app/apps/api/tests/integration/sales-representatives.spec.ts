@@ -16,6 +16,8 @@ import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
 describe("sales representatives", () => {
   let handle: TestApp;
   let ownerToken: string;
+  // An ACCOUNTANT whose branch access is limited to branchB only.
+  let accBToken: string;
   let branchA: string, branchB: string;
   let customerId: string;
   let arCtl: string, revenue: string, vatOut: string, cogs: string, inventory: string, cash: string;
@@ -72,6 +74,16 @@ describe("sales representatives", () => {
     });
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 6, status: "OPEN" } });
+
+    // ACCOUNTANT limited to branchB — used to prove API-level branch scoping.
+    await handle.prisma.user.create({
+      data: {
+        name: "Acc B", phone: "+201400000021", passwordHash: await bcrypt.hash(pw, 10),
+        role: "ACCOUNTANT" as never, status: "ACTIVE",
+        branchAccesses: { create: { branchId: branchB } },
+      },
+    });
+    accBToken = (await request(server()).post("/api/v1/auth/login").send({ phone: "+201400000021", password: pw })).body.accessToken;
   });
 
   afterAll(async () => teardownTestApp(handle));
@@ -316,5 +328,159 @@ describe("sales representatives", () => {
     await postJournal([{ accountId: cash, debit: "10", credit: "0", salesRepresentativeId: repId }, { accountId: revenue, debit: "0", credit: "10" }]);
     expect(await handle.prisma.customerTransaction.count()).toBe(before.ct);
     expect(await handle.prisma.paymentAccount.count()).toBe(before.pa);
+  });
+
+  // ── Details financial cards ─────────────────────────────────────────────────
+
+  it("details cards report periodDebit, periodCredit and netBalance from posted lines only", async () => {
+    const repId = (await createRep({ nameAr: "مندوب البطاقات" })).body.id;
+    await postJournal([{ accountId: cash, debit: "800", credit: "0", salesRepresentativeId: repId }, { accountId: revenue, debit: "0", credit: "800" }]);
+    await postJournal([{ accountId: cash, debit: "300", credit: "0" }, { accountId: revenue, debit: "0", credit: "300", salesRepresentativeId: repId }]);
+    // A confirmed invoice must NOT touch the financial cards.
+    const v = await stockedVariant();
+    const d = await draft(repId, v);
+    await request(server()).post(`/api/v1/sales-invoices/${d.body.id}/confirm`).set(H()).send({});
+
+    const res = await request(server()).get(`/api/v1/sales-representatives/${repId}`).set(H());
+    expect(res.status).toBe(200);
+    expect(res.body.summary.periodDebit).toBe("800.00");
+    expect(res.body.summary.periodCredit).toBe("300.00");
+    expect(res.body.summary.netBalance).toBe("500.00"); // 800 − 300, invoice excluded
+    expect(res.body.summary.confirmedInvoiceCount).toBe(1);
+  });
+
+  // ── Server-side pagination ──────────────────────────────────────────────────
+
+  it("paginates the combined timeline with a correct page-opening and running balance on later pages", async () => {
+    const repId = (await createRep({ nameAr: "مندوب الصفحات" })).body.id;
+    // 5 posted debit lines of 100 each on distinct dates → running 100..500.
+    for (let i = 1; i <= 5; i++) {
+      const day = String(10 + i).padStart(2, "0");
+      await postJournal(
+        [{ accountId: cash, debit: "100", credit: "0", salesRepresentativeId: repId }, { accountId: revenue, debit: "0", credit: "100" }],
+        `2026-07-${day}`,
+      );
+    }
+    const p1 = (await statement(repId, "?page=1&limit=2")).body;
+    expect(p1.totalRows).toBe(5);
+    expect(p1.totalPages).toBe(3);
+    expect(p1.rows).toHaveLength(2);
+    expect(p1.hasPrev).toBe(false);
+    expect(p1.hasNext).toBe(true);
+    expect(p1.pageOpeningBalance).toBe("0.00");
+    expect(p1.rows[0].runningBalance).toBe("100.00");
+    expect(p1.rows[1].runningBalance).toBe("200.00");
+    // Header totals reflect the FULL set, not the page.
+    expect(p1.closingBalance).toBe("500.00");
+    expect(p1.periodDebit).toBe("500.00");
+
+    const p2 = (await statement(repId, "?page=2&limit=2")).body;
+    expect(p2.rows).toHaveLength(2);
+    expect(p2.pageOpeningBalance).toBe("200.00"); // enters page 2 at 200, not the global opening
+    expect(p2.rows[0].runningBalance).toBe("300.00");
+    expect(p2.rows[1].runningBalance).toBe("400.00");
+    expect(p2.hasPrev).toBe(true);
+    expect(p2.hasNext).toBe(true);
+
+    const p3 = (await statement(repId, "?page=3&limit=2")).body;
+    expect(p3.rows).toHaveLength(1);
+    expect(p3.rows[0].runningBalance).toBe("500.00");
+    expect(p3.hasNext).toBe(false);
+
+    // No duplicates / no missing across pages.
+    const ids = [...p1.rows, ...p2.rows, ...p3.rows].map((r: any) => r.journalLineId);
+    expect(new Set(ids).size).toBe(5);
+  });
+
+  // ── API-level branch authorization ──────────────────────────────────────────
+
+  it("scopes the statement to a branch-limited user's branches and totals", async () => {
+    const repId = (await createRep({ nameAr: "مندوب الصلاحيات" })).body.id;
+    // 70 tagged to branchA, 30 to branchB.
+    await postJournal([{ accountId: cash, debit: "70", credit: "0", salesRepresentativeId: repId, branchId: branchA }, { accountId: revenue, debit: "0", credit: "70" }]);
+    await postJournal([{ accountId: cash, debit: "30", credit: "0", salesRepresentativeId: repId, branchId: branchB }, { accountId: revenue, debit: "0", credit: "30" }]);
+
+    // OWNER sees everything: 70 + 30 = 100.
+    expect((await statement(repId)).body.closingBalance).toBe("100.00");
+
+    // ACCOUNTANT limited to branchB sees only the branchB movement, and the
+    // total is computed AFTER scoping (not a filtered view of a global total).
+    const scoped = await request(server()).get(`/api/v1/sales-representatives/${repId}/statement`).set(H(accBToken));
+    expect(scoped.status).toBe(200);
+    expect(scoped.body.closingBalance).toBe("30.00");
+    expect(scoped.body.periodDebit).toBe("30.00");
+    expect(scoped.body.rows.every((r: any) => r.kind !== "JOURNAL" || r.branchId === branchB)).toBe(true);
+  });
+
+  it("rejects an explicit unauthorized branchId with the typed branch-forbidden error", async () => {
+    const repId = (await createRep({ nameAr: "مندوب المنع" })).body.id;
+    const res = await request(server()).get(`/api/v1/sales-representatives/${repId}/statement?branchId=${branchA}`).set(H(accBToken));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("branch_forbidden");
+  });
+
+  it("scopes the details financial cards to the branch-limited user", async () => {
+    const repId = (await createRep({ nameAr: "مندوب بطاقات مقيدة" })).body.id;
+    await postJournal([{ accountId: cash, debit: "70", credit: "0", salesRepresentativeId: repId, branchId: branchA }, { accountId: revenue, debit: "0", credit: "70" }]);
+    await postJournal([{ accountId: cash, debit: "30", credit: "0", salesRepresentativeId: repId, branchId: branchB }, { accountId: revenue, debit: "0", credit: "30" }]);
+    const res = await request(server()).get(`/api/v1/sales-representatives/${repId}`).set(H(accBToken));
+    expect(res.body.summary.periodDebit).toBe("30.00");
+    expect(res.body.summary.netBalance).toBe("30.00");
+  });
+
+  // ── Inactive historical representative editing ──────────────────────────────
+
+  it("keeps an existing (now inactive) rep on an invoice while editing an unrelated field (Scenario A)", async () => {
+    const repId = (await createRep({ nameAr: "مندوب تاريخي للفاتورة" })).body.id;
+    const v = await stockedVariant();
+    const inv = await draft(repId, v);
+    expect(inv.status).toBeLessThan(300);
+    // Deactivate the rep AFTER assignment.
+    await request(server()).patch(`/api/v1/sales-representatives/${repId}`).set(H()).send({ active: false });
+
+    // Editing notes while re-sending the SAME (now inactive) rep must succeed.
+    const upd = await request(server()).put(`/api/v1/sales-invoices/${inv.body.id}`).set(H()).send({
+      notes: "تعديل غير متعلق بالمندوب",
+      salesRepresentativeId: repId,
+      lines: [{ productVariantId: v, quantity: "4", unitPrice: "1000" }],
+    });
+    expect(upd.status).toBeLessThan(300);
+    expect(upd.body.salesRepresentativeId).toBe(repId);
+  });
+
+  it("rejects changing an invoice to a DIFFERENT inactive rep (Scenario C)", async () => {
+    const activeRep = (await createRep({ nameAr: "مندوب نشط للتبديل" })).body.id;
+    const inactiveRep = (await createRep({ nameAr: "مندوب موقوف للتبديل" })).body.id;
+    await request(server()).patch(`/api/v1/sales-representatives/${inactiveRep}`).set(H()).send({ active: false });
+    const v = await stockedVariant();
+    const inv = await draft(activeRep, v);
+
+    const upd = await request(server()).put(`/api/v1/sales-invoices/${inv.body.id}`).set(H()).send({
+      salesRepresentativeId: inactiveRep,
+      lines: [{ productVariantId: v, quantity: "4", unitPrice: "1000" }],
+    });
+    expect(upd.status).toBe(409);
+    expect(upd.body.code).toBe("representative_inactive");
+  });
+
+  // ── Invoice-status filter ───────────────────────────────────────────────────
+
+  it("filters invoice rows by status without dropping journal rows", async () => {
+    const repId = (await createRep({ nameAr: "مندوب فلترة الحالة" })).body.id;
+    await postJournal([{ accountId: cash, debit: "50", credit: "0", salesRepresentativeId: repId }, { accountId: revenue, debit: "0", credit: "50" }]);
+    // One draft invoice (stays DRAFT) and one confirmed.
+    const v1 = await stockedVariant();
+    await draft(repId, v1); // DRAFT
+    const v2 = await stockedVariant();
+    const d2 = await draft(repId, v2);
+    await request(server()).post(`/api/v1/sales-invoices/${d2.body.id}/confirm`).set(H()).send({});
+
+    const draftOnly = (await statement(repId, "?invoiceStatus=DRAFT")).body;
+    const invRows = draftOnly.rows.filter((r: any) => r.kind === "SALES_INVOICE");
+    expect(invRows.every((r: any) => r.status === "DRAFT")).toBe(true);
+    // Journal rows remain present under an invoice-status filter.
+    expect(draftOnly.rows.some((r: any) => r.kind === "JOURNAL")).toBe(true);
+    // Confirmed sales total is unaffected by the display filter's confirmed row.
+    expect(new Decimal(draftOnly.confirmedSalesTotal).gt(0)).toBe(true);
   });
 });

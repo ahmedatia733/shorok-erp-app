@@ -1,13 +1,30 @@
 import { Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
-import { RepresentativeInactiveError, RepresentativeNotFoundError } from "../../common/errors/api-errors";
+import {
+  BranchForbiddenError,
+  RepresentativeInactiveError,
+  RepresentativeNotFoundError,
+} from "../../common/errors/api-errors";
+import type { AuthenticatedUser } from "../../common/types/request-user";
 import {
   StatementService,
   type StatementLineInput,
 } from "../accounting-statements/statement.service";
 
 type Tx = Prisma.TransactionClient;
+
+/**
+ * The set of branches a statement may read, resolved from the caller.
+ * `branchIn === null` means no restriction (OWNER, or a financial role with no
+ * branch grants configured). `includeBranchless` keeps branch-agnostic manual
+ * GL lines visible so a rep's authoritative balance stays complete — a NULL
+ * branch can't be attributed to an unauthorized branch, so it never leaks one.
+ */
+export interface BranchScope {
+  branchIn: string[] | null;
+  includeBranchless: boolean;
+}
 
 /** One row in the combined representative statement timeline. */
 export interface RepStatementRow {
@@ -40,7 +57,22 @@ export interface RepStatementResult {
   closingBalance: string;
   salesInvoiceCount: number;
   confirmedSalesTotal: string;
+  // Pagination over the combined timeline (header totals above are the FULL
+  // filtered set, never limited to the current page).
+  page: number;
+  limit: number;
+  totalRows: number;
+  totalPages: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  pageOpeningBalance: string; // running balance entering the first row of this page
   rows: RepStatementRow[];
+}
+
+export interface RepFinancialSummary {
+  periodDebit: string;
+  periodCredit: string;
+  netBalance: string; // debit − credit (all posted movements up to now)
 }
 
 /**
@@ -81,13 +113,71 @@ export class SalesRepresentativesService {
     if (!rep.active) throw new RepresentativeInactiveError({ salesRepresentativeId: id, code: rep.code });
   }
 
+  /**
+   * Resolves the branch set the caller may read, enforcing branch access BEFORE
+   * any total is computed (so a restricted user never sees an unrestricted
+   * number). OWNER is unrestricted. A requested branchId is validated against
+   * the user's grants and yields a single-branch, branch-only view. Otherwise a
+   * non-OWNER is scoped to their granted branches (plus branch-agnostic rows).
+   */
+  resolveBranchScope(user: AuthenticatedUser, requestedBranchId?: string): BranchScope {
+    if (requestedBranchId) {
+      if (user.role !== "OWNER" && !user.allowedBranches.includes(requestedBranchId)) {
+        throw new BranchForbiddenError({ branchId: requestedBranchId });
+      }
+      // A specific branch view shows only that branch's activity.
+      return { branchIn: [requestedBranchId], includeBranchless: false };
+    }
+    if (user.role === "OWNER" || user.allowedBranches.length === 0) {
+      return { branchIn: null, includeBranchless: true };
+    }
+    return { branchIn: user.allowedBranches, includeBranchless: true };
+  }
+
+  /** journal_lines.branchId filter for a scope (branch-agnostic lines optional). */
+  private journalBranchWhere(scope: BranchScope): Prisma.JournalLineWhereInput {
+    if (scope.branchIn === null) return {};
+    return {
+      OR: [
+        { branchId: { in: scope.branchIn } },
+        ...(scope.includeBranchless ? [{ branchId: null }] : []),
+      ],
+    };
+  }
+
+  /**
+   * Details-page financial cards: total posted debit/credit and the net balance
+   * for the rep, up to now, computed Decimal-safe from journal_lines (never from
+   * invoices). Respects the caller's branch scope.
+   */
+  async financialSummary(id: string, scope: BranchScope): Promise<RepFinancialSummary> {
+    const agg = await this.prisma.journalLine.aggregate({
+      where: {
+        salesRepresentativeId: id,
+        journalEntry: { status: { in: ["POSTED", "REVERSED"] } },
+        ...this.journalBranchWhere(scope),
+      },
+      _sum: { debit: true, credit: true },
+    });
+    const debit = new Decimal(agg._sum.debit?.toString() ?? "0");
+    const credit = new Decimal(agg._sum.credit?.toString() ?? "0");
+    return {
+      periodDebit: debit.toFixed(2),
+      periodCredit: credit.toFixed(2),
+      netBalance: debit.sub(credit).toFixed(2),
+    };
+  }
+
   /** Builds the combined sales-activity + financial-movement statement. */
   async buildStatement(
     id: string,
-    query: { from?: string; to?: string; branchId?: string; type?: "all" | "invoice" | "journal"; invoiceStatus?: string },
+    query: { from?: string; to?: string; type?: "all" | "invoice" | "journal"; invoiceStatus?: string; page?: number; limit?: number },
+    scope: BranchScope,
   ): Promise<RepStatementResult> {
     const rep = await this.require(id);
     const type = query.type ?? "all";
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.min(200, Math.max(1, query.limit ?? 50));
 
     // ── Financial movements: posted journal_lines carrying this rep ──────────
     // POSTED and REVERSED entries are both included so a reversal nets correctly
@@ -100,8 +190,8 @@ export class SalesRepresentativesService {
       const lines = (await this.prisma.journalLine.findMany({
         where: {
           salesRepresentativeId: id,
-          ...(query.branchId ? { branchId: query.branchId } : {}),
           journalEntry: { status: { in: ["POSTED", "REVERSED"] } },
+          ...this.journalBranchWhere(scope),
         },
         include: StatementService.lineInclude,
         orderBy: StatementService.lineOrderBy,
@@ -158,11 +248,14 @@ export class SalesRepresentativesService {
     if (type !== "journal") {
       const fromDate = query.from ? new Date(query.from) : undefined;
       const toDate = query.to ? new Date(query.to) : undefined;
+      // The invoice-status filter is a DISPLAY filter over rows only. The header
+      // stats (count, confirmed total) are computed across all statuses in the
+      // branch/date scope, so filtering the displayed rows never distorts them.
       const invoices = await this.prisma.salesInvoice.findMany({
         where: {
           salesRepresentativeId: id,
-          ...(query.branchId ? { branchId: query.branchId } : {}),
-          ...(query.invoiceStatus ? { status: query.invoiceStatus } : {}),
+          // Invoices always carry a branch, so scope filters directly.
+          ...(scope.branchIn ? { branchId: { in: scope.branchIn } } : {}),
           ...(fromDate || toDate
             ? { invoiceDate: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } }
             : {}),
@@ -181,6 +274,8 @@ export class SalesRepresentativesService {
         if (inv.status === "CONFIRMED" || inv.status === "PAID") {
           confirmedSalesTotal = confirmedSalesTotal.add(new Decimal(inv.grandTotal.toString()));
         }
+        // Row display honours the status filter; header stats above do not.
+        if (query.invoiceStatus && inv.status !== query.invoiceStatus) continue;
         invoiceRows.push({
           kind: "SALES_INVOICE",
           date: inv.invoiceDate.toISOString().slice(0, 10),
@@ -221,6 +316,17 @@ export class SalesRepresentativesService {
       else r.runningBalance = running;
     }
 
+    // Paginate the ONE merged timeline (never invoices/journals separately).
+    // Header totals stay full-set; only `rows` is the page. `pageOpeningBalance`
+    // is the balance entering the page, so a later page shows correct running
+    // balances without restarting from the global opening.
+    const totalRows = merged.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / limit));
+    const safePage = Math.min(page, totalPages);
+    const start = (safePage - 1) * limit;
+    const pageRows = merged.slice(start, start + limit);
+    const pageOpeningBalance = start === 0 ? opening : merged[start - 1]!.runningBalance;
+
     return {
       representative: { id: rep.id, code: rep.code, nameAr: rep.nameAr, nameEn: rep.nameEn, phone: rep.phone, active: rep.active },
       openingBalance: opening,
@@ -229,7 +335,14 @@ export class SalesRepresentativesService {
       closingBalance: closing,
       salesInvoiceCount,
       confirmedSalesTotal: confirmedSalesTotal.toFixed(2),
-      rows: merged,
+      page: safePage,
+      limit,
+      totalRows,
+      totalPages,
+      hasPrev: safePage > 1,
+      hasNext: safePage < totalPages,
+      pageOpeningBalance,
+      rows: pageRows,
     };
   }
 }

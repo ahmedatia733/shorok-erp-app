@@ -656,6 +656,17 @@
     "balanceDebit": "مدين",
     "balanceCredit": "دائن",
     "balanceZero": "متوازن",
-    "invoiceStatus": "حالة الفاتورة"
+    "invoiceStatus": "حالة الفاتورة",
+    "netBalance": "الرصيد الصافي الحالي",
+    "previous": "السابق",
+    "next": "التالي",
+    "page": "صفحة",
+    "of": "من",
+    "statusAll": "كل الحالات",
+    "statusDraft": "مسودة",
+    "statusConfirmed": "مؤكدة",
+    "statusPaid": "مدفوعة",
+    "statusCancelled": "ملغاة",
+    "rowsTotal": "إجمالي الصفوف"
   }
 }

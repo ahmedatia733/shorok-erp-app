@@ -63,11 +63,16 @@ export class SalesRepresentativesController {
   }
 
   @Get(":id")
-  async getOne(@Param("id") id: string) {
+  @Roles("OWNER", "ACCOUNTANT")
+  async getOne(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     const rep = await this.reps.require(id);
+    const scope = this.reps.resolveBranchScope(user);
+    const invoiceBranchWhere = scope.branchIn ? { branchId: { in: scope.branchIn } } : {};
     // Summary cards for the details page — draft vs confirmed counts and totals.
     const grouped = await this.prisma.salesInvoice.groupBy({
-      by: ["status"], where: { salesRepresentativeId: id }, _count: { _all: true }, _sum: { grandTotal: true },
+      by: ["status"],
+      where: { salesRepresentativeId: id, ...invoiceBranchWhere },
+      _count: { _all: true }, _sum: { grandTotal: true },
     });
     const draftCount = grouped.filter((g) => g.status === "DRAFT").reduce((a, g) => a + g._count._all, 0);
     const confirmedCount = grouped
@@ -77,12 +82,18 @@ export class SalesRepresentativesController {
       .filter((g) => g.status === "CONFIRMED" || g.status === "PAID")
       .reduce((a, g) => a.add(g._sum.grandTotal ?? 0), new Prisma.Decimal(0));
 
+    // Financial cards come from posted journal lines only (never invoices).
+    const financial = await this.reps.financialSummary(id, scope);
+
     return {
       ...this.format(rep),
       summary: {
         draftInvoiceCount: draftCount,
         confirmedInvoiceCount: confirmedCount,
         confirmedSalesTotal: confirmedSalesTotal.toFixed(2),
+        periodDebit: financial.periodDebit,
+        periodCredit: financial.periodCredit,
+        netBalance: financial.netBalance,
       },
     };
   }
@@ -173,7 +184,11 @@ export class SalesRepresentativesController {
   async statement(
     @Param("id") id: string,
     @Query(new ZodValidationPipe(SalesRepresentativeStatementQuerySchema)) query: SalesRepresentativeStatementQuery,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.reps.buildStatement(id, query);
+    // Enforce branch access BEFORE any total is computed; a requested branchId
+    // the user can't see throws the typed branch-forbidden response.
+    const scope = this.reps.resolveBranchScope(user, query.branchId);
+    return this.reps.buildStatement(id, query, scope);
   }
 }
