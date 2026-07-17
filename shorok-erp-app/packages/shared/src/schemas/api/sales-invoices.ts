@@ -23,6 +23,8 @@ export const CreateSalesInvoiceSchema = z.object({
   taxRate:     PctStr.optional().default("0"),
   notes:       z.string().max(1000).optional(),
   orderId:     z.string().uuid().optional(),
+  // Optional reporting dimension; null clears it. Never affects posting.
+  salesRepresentativeId: z.string().uuid().optional().nullable(),
   lines:       z.array(SalesInvoiceLineInputSchema).min(1),
 });
 export type CreateSalesInvoice = z.infer<typeof CreateSalesInvoiceSchema>;
@@ -32,6 +34,7 @@ export const UpdateSalesInvoiceSchema = z.object({
   dueDate:     DateStr.optional(),
   notes:       z.string().max(1000).optional(),
   taxRate:     PctStr.optional(),
+  salesRepresentativeId: z.string().uuid().optional().nullable(),
   lines:       z.array(SalesInvoiceLineInputSchema).min(1).optional(),
 });
 export type UpdateSalesInvoice = z.infer<typeof UpdateSalesInvoiceSchema>;

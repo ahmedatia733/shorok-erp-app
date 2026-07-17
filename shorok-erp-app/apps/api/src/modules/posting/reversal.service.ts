@@ -85,6 +85,7 @@ export class ReversalService {
         partyType: (l.partyType ?? undefined) as "CUSTOMER" | "SUPPLIER" | undefined,
         partyId: l.partyId ?? undefined,
         branchId: l.branchId ?? undefined,
+        salesRepresentativeId: l.salesRepresentativeId ?? undefined,
       }));
 
       const result = await this.engine.post({

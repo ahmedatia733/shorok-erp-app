@@ -18,6 +18,10 @@ export const ERROR_CODES = {
   COLLECTION_EXCEEDS_REQUIRED: "collection_exceeds_required",
   // Accounting
   TREASURY_NEGATIVE_BALANCE_WARNING: "treasury_negative_balance_warning",
+  // Sales representatives
+  REPRESENTATIVE_NOT_FOUND: "representative_not_found",
+  REPRESENTATIVE_INACTIVE: "representative_inactive",
+  DUPLICATE_REPRESENTATIVE_CODE: "duplicate_representative_code",
   // Generic conflict
   CONFLICT: "conflict",
   NOT_FOUND: "not_found",

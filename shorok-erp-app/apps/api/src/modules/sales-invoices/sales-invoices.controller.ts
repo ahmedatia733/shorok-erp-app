@@ -36,6 +36,7 @@ import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 import { InvoicePdfService } from "../invoice-pdf/invoice-pdf.service";
 import { salesInvoiceToPdfData } from "../invoice-pdf/invoice-pdf.mapper";
+import { SalesRepresentativesService } from "../sales-representatives/sales-representatives.service";
 import { lineCogs } from "./sales-cogs";
 
 @Controller("sales-invoices")
@@ -48,6 +49,7 @@ export class SalesInvoicesController {
     private readonly reversal: ReversalService,
     private readonly effectiveConfig: EffectiveConfigService,
     private readonly invoicePdf: InvoicePdfService,
+    private readonly salesReps: SalesRepresentativesService,
   ) {}
 
   // ─── helpers ─────────────────────────────────────────────────────────
@@ -89,6 +91,10 @@ export class SalesInvoicesController {
         : null,
       branch: inv.branch
         ? { id: inv.branch.id, nameAr: inv.branch.nameAr }
+        : null,
+      salesRepresentativeId: inv.salesRepresentativeId ?? null,
+      salesRepresentative: inv.salesRepresentative
+        ? { id: inv.salesRepresentative.id, code: inv.salesRepresentative.code, nameAr: inv.salesRepresentative.nameAr }
         : null,
       status: inv.status,
       notes: inv.notes ?? null,
@@ -172,6 +178,7 @@ export class SalesInvoicesController {
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
       include: {
         customer: { select: { id: true, code: true, nameAr: true } },
+        salesRepresentative: { select: { id: true, code: true, nameAr: true } },
         branch: { select: { id: true, nameAr: true } },
         _count: { select: { lines: true } },
       },
@@ -196,6 +203,7 @@ export class SalesInvoicesController {
       where: { id },
       include: {
         customer: { select: { id: true, code: true, nameAr: true } },
+        salesRepresentative: { select: { id: true, code: true, nameAr: true } },
         branch: { select: { id: true, nameAr: true } },
         lines: {
           include: {
@@ -258,6 +266,10 @@ export class SalesInvoicesController {
     const branch = await this.prisma.branch.findUnique({ where: { id: body.branchId } });
     if (!branch || !branch.active) throw new NotFoundError({ branchId: body.branchId });
 
+    // Optional rep dimension — must exist and be active when assigned to a new
+    // invoice. It never affects posting, stock, or totals.
+    if (body.salesRepresentativeId) await this.salesReps.assertAssignable(body.salesRepresentativeId);
+
     // Validate all variants exist
     for (const line of body.lines) {
       const variant = await this.prisma.productVariant.findUnique({
@@ -296,6 +308,7 @@ export class SalesInvoicesController {
           dueDate: body.dueDate ? new Date(body.dueDate) : null,
           customerId: body.customerId,
           branchId: body.branchId,
+          salesRepresentativeId: body.salesRepresentativeId ?? null,
           taxRate: taxRate.toFixed(2),
           notes: body.notes ?? null,
           status: "DRAFT",
@@ -321,6 +334,7 @@ export class SalesInvoicesController {
         },
         include: {
           customer: { select: { id: true, code: true, nameAr: true } },
+        salesRepresentative: { select: { id: true, code: true, nameAr: true } },
           branch: { select: { id: true, nameAr: true } },
           lines: {
             include: {
@@ -376,6 +390,8 @@ export class SalesInvoicesController {
     if (existing.status !== "DRAFT") {
       throw new ValidationError({ reason: "only_draft_can_be_updated", status: existing.status });
     }
+    // Re-assigning a rep validates it; null clears the assignment.
+    if (body.salesRepresentativeId) await this.salesReps.assertAssignable(body.salesRepresentativeId);
 
     return this.prisma.runInTransaction(async (tx) => {
       // Delete old lines then recompute if new lines are provided
@@ -440,6 +456,7 @@ export class SalesInvoicesController {
             ? { dueDate: body.dueDate ? new Date(body.dueDate) : null }
             : {}),
           ...(body.notes !== undefined ? { notes: body.notes } : {}),
+          ...(body.salesRepresentativeId !== undefined ? { salesRepresentativeId: body.salesRepresentativeId } : {}),
           taxRate: taxRate.toFixed(2),
           subtotal: subtotal.toFixed(2),
           discountAmount: discountAmount.toFixed(2),
@@ -449,6 +466,7 @@ export class SalesInvoicesController {
         },
         include: {
           customer: { select: { id: true, code: true, nameAr: true } },
+        salesRepresentative: { select: { id: true, code: true, nameAr: true } },
           branch: { select: { id: true, nameAr: true } },
           lines: {
             include: {
@@ -574,6 +592,16 @@ export class SalesInvoicesController {
         lines: revenueLines,
       });
 
+      // Document-level rep attribution on the journal HEADER only. The lines
+      // carry no rep, so a confirmed invoice never moves the rep's financial
+      // balance — invoice activity is informational on the statement.
+      if (existing.salesRepresentativeId) {
+        await tx.journalEntry.update({
+          where: { id: revenuePosted.journalEntryId },
+          data: { salesRepresentativeId: existing.salesRepresentativeId },
+        });
+      }
+
       // 3. COGS entry via PostingEngine — ONLY when COGS > 0 (avg_cost basis
       //    exists). Skipped for items without a cost basis yet (Phase 4).
       let cogsJournalEntryId: string | null = null;
@@ -641,6 +669,7 @@ export class SalesInvoicesController {
         },
         include: {
           customer: { select: { id: true, code: true, nameAr: true } },
+        salesRepresentative: { select: { id: true, code: true, nameAr: true } },
           branch: { select: { id: true, nameAr: true } },
           lines: {
             include: {

@@ -8,6 +8,12 @@ export const JournalLineSchema = z.object({
   // Party is required by the server on AR_CONTROL (CUSTOMER) / AP_CONTROL (SUPPLIER) lines.
   partyType: z.enum(["CUSTOMER", "SUPPLIER"]).optional(),
   partyId: z.string().uuid().optional(),
+  // Optional branch dimension carried onto the line (used by branch-filtered
+  // statements). The GL column already exists; this exposes it on manual entry.
+  branchId: z.string().uuid().optional().nullable(),
+  // Optional sales-representative dimension — authoritative, per line. Separate
+  // from partyType/partyId; null/omitted means no representative on this line.
+  salesRepresentativeId: z.string().uuid().optional().nullable(),
 });
 export type JournalLine = z.infer<typeof JournalLineSchema>;
 

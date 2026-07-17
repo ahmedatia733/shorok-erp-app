@@ -11,7 +11,12 @@ import {
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
-import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
+import {
+  NotFoundError,
+  RepresentativeInactiveError,
+  RepresentativeNotFoundError,
+  ValidationError,
+} from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -81,6 +86,18 @@ export class JournalController {
       for (const id of supplierIds) if (!found.has(id)) throw new NotFoundError({ reason: "supplier_not_found", supplierId: id });
     }
 
+    // Rep lines carry an optional, active-only sales-representative dimension.
+    const repIds = [...new Set(body.lines.filter((l) => l.salesRepresentativeId).map((l) => l.salesRepresentativeId!))];
+    if (repIds.length) {
+      const reps = await this.prisma.salesRepresentative.findMany({ where: { id: { in: repIds } }, select: { id: true, active: true, code: true } });
+      const byId = new Map(reps.map((r) => [r.id, r]));
+      for (const id of repIds) {
+        const rep = byId.get(id);
+        if (!rep) throw new RepresentativeNotFoundError({ salesRepresentativeId: id });
+        if (!rep.active) throw new RepresentativeInactiveError({ salesRepresentativeId: id, code: rep.code });
+      }
+    }
+
     // Post through the single PostingEngine — balanced, OPEN period, DB-sequence
     // numbering, POSTED status, party carried onto lines, treasury negative-balance
     // guard, and audit, all in one transaction. No direct journalEntry writes.
@@ -99,6 +116,8 @@ export class JournalController {
         note: l.note,
         partyType: l.partyType,
         partyId: l.partyId,
+        branchId: l.branchId ?? undefined,
+        salesRepresentativeId: l.salesRepresentativeId ?? null,
       })),
       acknowledgeNegativeBalance: body.acknowledgeNegativeBalance,
       negativeBalanceReason: body.negativeBalanceReason ?? null,
@@ -106,7 +125,7 @@ export class JournalController {
 
     const entry = await this.prisma.journalEntry.findUniqueOrThrow({
       where: { id: result.journalEntryId },
-      include: { lines: { include: { account: { select: { code: true, nameAr: true, nameEn: true } } } } },
+      include: { lines: { include: { account: { select: { code: true, nameAr: true, nameEn: true } }, salesRepresentative: { select: { id: true, code: true, nameAr: true } } } } },
     });
     const totalDebit = entry.lines.reduce((a, l) => a.plus(l.debit.toString()), new Decimal(0));
     return this._formatEntry(entry, totalDebit);
@@ -139,6 +158,7 @@ export class JournalController {
         lines: {
           include: {
             account: { select: { code: true, nameAr: true, nameEn: true } },
+            salesRepresentative: { select: { id: true, code: true, nameAr: true } },
           },
         },
       },
@@ -171,6 +191,7 @@ export class JournalController {
         lines: {
           include: {
             account: { select: { code: true, nameAr: true, nameEn: true } },
+            salesRepresentative: { select: { id: true, code: true, nameAr: true } },
           },
         },
       },
@@ -239,7 +260,11 @@ export class JournalController {
         debit: { toString(): string };
         credit: { toString(): string };
         note: string | null;
+        partyType?: string | null;
+        partyId?: string | null;
+        salesRepresentativeId?: string | null;
         account: { code: string; nameAr: string; nameEn: string };
+        salesRepresentative?: { id: string; code: string; nameAr: string } | null;
       }>;
     },
     totalDebit: Decimal,
@@ -264,6 +289,12 @@ export class JournalController {
         debit: l.debit.toString(),
         credit: l.credit.toString(),
         note: l.note,
+        partyType: l.partyType ?? null,
+        partyId: l.partyId ?? null,
+        salesRepresentativeId: l.salesRepresentativeId ?? null,
+        salesRepresentative: l.salesRepresentative
+          ? { id: l.salesRepresentative.id, code: l.salesRepresentative.code, nameAr: l.salesRepresentative.nameAr }
+          : null,
       })),
     };
   }

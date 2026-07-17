@@ -161,6 +161,7 @@ export class PostingEngine {
             partyType: l.partyType ?? null,
             partyId: l.partyId ?? null,
             branchId: l.branchId ?? null,
+            salesRepresentativeId: l.salesRepresentativeId ?? null,
           })),
         },
       },

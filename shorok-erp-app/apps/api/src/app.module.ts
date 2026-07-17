@@ -33,6 +33,7 @@ import { JournalTemplatesModule } from "./modules/journal-templates/journal-temp
 import { CustomersModule } from "./modules/customers/customers.module";
 import { FixedAssetsModule } from "./modules/fixed-assets/fixed-assets.module";
 import { SalesInvoicesModule } from "./modules/sales-invoices/sales-invoices.module";
+import { SalesRepresentativesModule } from "./modules/sales-representatives/sales-representatives.module";
 import { ReceiptVouchersModule } from "./modules/receipt-vouchers/receipt-vouchers.module";
 import { PostingModule } from "./modules/posting/posting.module";
 import { PeriodsModule } from "./modules/periods/periods.module";
@@ -91,6 +92,7 @@ import { AccountingStatementsModule } from "./modules/accounting-statements/acco
     CustomersModule,
     FixedAssetsModule,
     SalesInvoicesModule,
+    SalesRepresentativesModule,
     ReceiptVouchersModule,
     PostingModule,
     PeriodsModule,

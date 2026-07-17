@@ -131,3 +131,22 @@ export class TreasuryNegativeBalanceWarning extends ApiError {
     super(ERROR_CODES.TREASURY_NEGATIVE_BALANCE_WARNING, 409, "errors.treasury_negative_balance_warning", details);
   }
 }
+
+export class RepresentativeNotFoundError extends ApiError {
+  constructor(details?: Record<string, unknown>) {
+    super(ERROR_CODES.REPRESENTATIVE_NOT_FOUND, 404, "errors.representative_not_found", details);
+  }
+}
+
+/** Assigning an inactive representative to a NEW invoice/journal line (409). */
+export class RepresentativeInactiveError extends ApiError {
+  constructor(details?: Record<string, unknown>) {
+    super(ERROR_CODES.REPRESENTATIVE_INACTIVE, 409, "errors.representative_inactive", details);
+  }
+}
+
+export class DuplicateRepresentativeCodeError extends ApiError {
+  constructor(details?: Record<string, unknown>) {
+    super(ERROR_CODES.DUPLICATE_REPRESENTATIVE_CODE, 409, "errors.duplicate_representative_code", details);
+  }
+}

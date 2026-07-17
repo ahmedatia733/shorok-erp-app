@@ -26,6 +26,8 @@ export interface SalesInvoiceRow {
   dueDate: string | null;
   customer: { id: string; code: string; nameAr: string } | null;
   branch: { id: string; nameAr: string } | null;
+  salesRepresentativeId: string | null;
+  salesRepresentative: { id: string; code: string; nameAr: string } | null;
   status: "DRAFT" | "CONFIRMED" | "CANCELLED" | "PAID";
   notes: string | null;
   subtotal: string;

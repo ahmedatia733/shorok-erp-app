@@ -35,6 +35,8 @@ export const PostingLineSchema = z.object({
   partyType: JournalPartyTypeEnum.optional(),
   partyId: UuidSchema.optional(),
   branchId: UuidSchema.optional(),
+  // Optional sales-representative dimension (authoritative, per line).
+  salesRepresentativeId: UuidSchema.optional().nullable(),
   note: z.string().max(300).optional(),
 });
 export type PostingLine = z.infer<typeof PostingLineSchema>;

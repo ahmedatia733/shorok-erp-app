@@ -18,6 +18,7 @@ export * from "./products";
 export * from "./purchase-invoices";
 export * from "./reports";
 export * from "./sales-invoices";
+export * from "./sales-representatives";
 export * from "./statements";
 export * from "./suppliers";
 export * from "./users";

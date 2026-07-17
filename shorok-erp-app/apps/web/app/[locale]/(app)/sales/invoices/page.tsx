@@ -27,6 +27,8 @@ import {
 } from "../../../../../lib/sales-invoices-client";
 import { listCustomers, createCustomer, type CustomerRow } from "../../../../../lib/customers-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { listRepresentatives, type SalesRepresentative } from "../../../../../lib/sales-representatives-client";
+import { RepresentativeFormModal } from "../../../../../components/sales-representatives/representative-form-modal";
 import { apiCall, ApiClientError } from "../../../../../lib/api-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 import { AP_COLORS, apColorMap } from "../../../../../lib/ap-colors";
@@ -263,6 +265,28 @@ function InvoiceForm({
   const [customerId, setCustomerId] = useState(editInvoice?.customer?.id ?? "");
   const [branchId, setBranchId] = useState(editInvoice?.branch?.id ?? "");
 
+  // ── Optional sales representative + inline quick-create ────────────────────
+  const [reps, setReps] = useState<SalesRepresentative[]>([]);
+  const [salesRepresentativeId, setSalesRepresentativeId] = useState(editInvoice?.salesRepresentativeId ?? "");
+  const [showNewRep, setShowNewRep] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const list = await listRepresentatives({ status: "active" });
+        // Keep an inactive rep already on the invoice selectable/visible.
+        if (editInvoice?.salesRepresentative && !list.some((r) => r.id === editInvoice.salesRepresentative!.id)) {
+          list.push({ ...(editInvoice.salesRepresentative as SalesRepresentative), active: false } as SalesRepresentative);
+        }
+        setReps(list);
+      } catch { /* representatives are optional */ }
+    })();
+  }, [editInvoice]);
+  function onRepCreated(created: SalesRepresentative) {
+    setReps((prev) => [...prev.filter((r) => r.id !== created.id), created]);
+    setSalesRepresentativeId(created.id); // auto-select; invoice fields untouched
+    setShowNewRep(false);
+  }
+
   // ── Inline "new customer" (reuses the canonical POST /customers) ──────────
   const canCreateCustomer = useHasRole("ACCOUNTANT"); // OWNER (bypass) or ACCOUNTANT
   const [showNewCust, setShowNewCust] = useState(false);
@@ -370,6 +394,7 @@ function InvoiceForm({
         dueDate: dueDate || undefined,
         customerId,
         branchId,
+        salesRepresentativeId: salesRepresentativeId || null,
         taxRate: effectiveTaxRate.toFixed(2),
         notes: notes || undefined,
         lines: validLines.map((l) => ({
@@ -396,8 +421,10 @@ function InvoiceForm({
       } else {
         onSaved(inv);
       }
-    } catch {
-      setError("فشل حفظ الفاتورة. يرجى التحقق من البيانات.");
+    } catch (e) {
+      // Surface the typed, localized backend reason (branch/rep/stock/period …)
+      // instead of a generic message; fall back only for unexpected errors.
+      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "فشل حفظ الفاتورة. يرجى التحقق من البيانات.");
     } finally {
       setSaving(false);
     }
@@ -466,6 +493,31 @@ function InvoiceForm({
                   <option key={b.id} value={b.id}>{b.nameAr}</option>
                 ))}
               </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">المندوب</label>
+              <div className="flex gap-1">
+                <select
+                  value={salesRepresentativeId}
+                  onChange={(e) => setSalesRepresentativeId(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                >
+                  <option value="">— بدون مندوب —</option>
+                  {reps.map((r) => (
+                    <option key={r.id} value={r.id}>{r.code} — {r.nameAr}{r.active ? "" : " (غير نشط)"}</option>
+                  ))}
+                </select>
+                {canCreateCustomer && (
+                  <button
+                    type="button"
+                    onClick={() => setShowNewRep(true)}
+                    title="إضافة مندوب جديد"
+                    className="shrink-0 rounded border border-primary px-2 py-1.5 text-xs text-primary hover:bg-primary hover:text-white transition-colors"
+                  >
+                    + مندوب جديد
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <label className="block text-xs text-gray-600 mb-1">تاريخ الفاتورة *</label>
@@ -752,6 +804,12 @@ function InvoiceForm({
           </div>
         </div>
       </Modal>
+
+      {/* Quick-create a representative without leaving the invoice; the shared
+          modal reuses the canonical create API. Invoice form data is preserved. */}
+      {showNewRep && (
+        <RepresentativeFormModal rep={null} onClose={() => setShowNewRep(false)} onSaved={onRepCreated} />
+      )}
     </div>
   );
 }

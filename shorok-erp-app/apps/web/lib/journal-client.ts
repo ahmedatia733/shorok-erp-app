@@ -53,7 +53,7 @@ export const createJournalEntry = (body: {
   entryDate: string;
   description: string;
   referenceType?: string;
-  lines: Array<{ accountId: string; debit: string; credit: string; note?: string; partyType?: "CUSTOMER" | "SUPPLIER"; partyId?: string }>;
+  lines: Array<{ accountId: string; debit: string; credit: string; note?: string; partyType?: "CUSTOMER" | "SUPPLIER"; partyId?: string; branchId?: string | null; salesRepresentativeId?: string | null }>;
   acknowledgeNegativeBalance?: boolean;
   negativeBalanceReason?: string;
   idempotencyKey?: string;

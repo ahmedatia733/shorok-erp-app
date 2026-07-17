@@ -398,6 +398,32 @@ model Supplier {
   @@map("suppliers")
 }
 
+// ========================= SalesRepresentative =======================
+// A sales representative is an optional accounting/reporting DIMENSION, not a
+// GL account. Its financial balance comes only from posted journal_lines that
+// carry sales_representative_id; sales invoices are informational activity and
+// never move the balance. Deactivate rather than delete once it has history.
+
+model SalesRepresentative {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique @db.VarChar(20)
+  nameAr    String   @map("name_ar") @db.VarChar(200)
+  nameEn    String?  @map("name_en") @db.VarChar(200)
+  phone     String?  @db.VarChar(30)
+  address   String?  @db.VarChar(300)
+  notes     String?  @db.VarChar(1000)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  salesInvoices  SalesInvoice[]
+  journalEntries JournalEntry[]
+  journalLines   JournalLine[]
+
+  @@index([active])
+  @@map("sales_representatives")
+}
+
 // ====================== BranchInventoryBalance =======================
 
 model BranchInventoryBalance {
@@ -679,8 +705,12 @@ model JournalEntry {
   sourceType     JournalSourceType? @map("source_type")
   sourceId       String?            @map("source_id") @db.Uuid
   idempotencyKey String?            @unique @map("idempotency_key") @db.VarChar(120)
+  // Optional document-level rep attribution (e.g. from the source invoice).
+  // NOT used for the rep balance — that comes from journal_lines only.
+  salesRepresentativeId String?      @map("sales_representative_id") @db.Uuid
 
   creator                User                 @relation("JournalEntryCreatedBy", fields: [createdBy], references: [id])
+  salesRepresentative    SalesRepresentative? @relation(fields: [salesRepresentativeId], references: [id], onDelete: Restrict)
   lines                  JournalLine[]
   expenses               Expense[]
   collections            OrderCollection[]    @relation("CollectionJournalEntry")
@@ -696,6 +726,7 @@ model JournalEntry {
   @@index([entryDate(sort: Desc)])
   @@index([periodId])
   @@index([sourceType, sourceId])
+  @@index([salesRepresentativeId])
   @@map("journal_entries")
 }
 
@@ -712,13 +743,18 @@ model JournalLine {
   partyType      JournalPartyType? @map("party_type")
   partyId        String?           @map("party_id") @db.Uuid
   branchId       String?           @map("branch_id") @db.Uuid
+  // Authoritative rep dimension: debit/credit live at the line, so the rep
+  // balance is computed from these. Separate from partyType/partyId/accountId.
+  salesRepresentativeId String?    @map("sales_representative_id") @db.Uuid
 
-  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-  account      Account      @relation(fields: [accountId], references: [id])
+  journalEntry        JournalEntry         @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account             Account              @relation(fields: [accountId], references: [id])
+  salesRepresentative SalesRepresentative? @relation(fields: [salesRepresentativeId], references: [id], onDelete: Restrict)
 
   @@index([journalEntryId])
   @@index([accountId])
   @@index([accountId, partyType, partyId])
+  @@index([salesRepresentativeId])
   @@map("journal_lines")
 }
 
@@ -941,19 +977,22 @@ model SalesInvoice {
   journalEntryId     String?   @map("journal_entry_id") @db.Uuid
   cogsJournalEntryId String?   @map("cogs_journal_entry_id") @db.Uuid
   customerTxId       String?   @map("customer_tx_id") @db.Uuid
+  salesRepresentativeId String? @map("sales_representative_id") @db.Uuid
   createdBy          String    @map("created_by") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  customer           Customer                   @relation(fields: [customerId], references: [id])
-  branch             Branch                     @relation("SalesInvoiceBranch", fields: [branchId], references: [id])
-  creator            User                       @relation("SalesInvoiceCreatedBy", fields: [createdBy], references: [id])
-  lines              SalesInvoiceLine[]
-  orders             CustomerOrder[]            @relation("OrderSalesInvoice")
-  receiptAllocations ReceiptVoucherAllocation[]
+  customer            Customer                   @relation(fields: [customerId], references: [id])
+  branch              Branch                     @relation("SalesInvoiceBranch", fields: [branchId], references: [id])
+  creator             User                       @relation("SalesInvoiceCreatedBy", fields: [createdBy], references: [id])
+  salesRepresentative SalesRepresentative?       @relation(fields: [salesRepresentativeId], references: [id], onDelete: Restrict)
+  lines               SalesInvoiceLine[]
+  orders              CustomerOrder[]            @relation("OrderSalesInvoice")
+  receiptAllocations  ReceiptVoucherAllocation[]
 
   @@index([customerId])
   @@index([invoiceDate(sort: Desc)])
+  @@index([salesRepresentativeId])
   @@map("sales_invoices")
 }
 

@@ -31,6 +31,8 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
         className={cn(
           "rounded-lg border border-border bg-surface shadow-xl flex flex-col max-h-[90vh]",
           className || "w-full max-w-md",

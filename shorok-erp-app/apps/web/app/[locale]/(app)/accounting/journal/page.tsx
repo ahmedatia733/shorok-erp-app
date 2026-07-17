@@ -20,6 +20,7 @@ import {
 } from "../../../../../lib/journal-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 import { listCustomers, type CustomerRow } from "../../../../../lib/customers-client";
+import { listRepresentatives, type SalesRepresentative } from "../../../../../lib/sales-representatives-client";
 import { listSuppliers, type SupplierRow } from "../../../../../lib/suppliers-client";
 import {
   listTemplates,
@@ -53,6 +54,8 @@ interface JournalLine {
   // Party for control accounts (AR_CONTROL → CUSTOMER, AP_CONTROL → SUPPLIER).
   partyType?: "CUSTOMER" | "SUPPLIER";
   partyId?: string;
+  // Optional sales-representative dimension (separate from the party).
+  salesRepresentativeId?: string;
 }
 
 const ENTRY_TYPE_LABELS: Record<string, string> = {
@@ -64,7 +67,7 @@ const ENTRY_TYPE_LABELS: Record<string, string> = {
 };
 
 function emptyLine(): JournalLine {
-  return { category: "", accountId: "", accountNameAr: "", entityLabel: "", note: "", debit: "", credit: "", partyType: undefined, partyId: undefined };
+  return { category: "", accountId: "", accountNameAr: "", entityLabel: "", note: "", debit: "", credit: "", partyType: undefined, partyId: undefined, salesRepresentativeId: undefined };
 }
 
 function lineNet(l: JournalLine): { type: "debit" | "credit"; net: number } {
@@ -151,6 +154,7 @@ export default function JournalPage() {
   const [leafAccounts,  setLeafAccounts]  = useState<AccountRow[]>([]);
   const [customers,     setCustomers]     = useState<CustomerRow[]>([]);
   const [suppliers,     setSuppliers]     = useState<SupplierRow[]>([]);
+  const [reps,          setReps]          = useState<SalesRepresentative[]>([]);
   const [entryType,     setEntryType]     = useState("JOURNAL");
   const [entryDate,     setEntryDate]     = useState(() => new Date().toISOString().slice(0, 10));
   const [description,   setDescription]   = useState("");
@@ -196,6 +200,7 @@ export default function JournalPage() {
         setSuppliers(supps.filter((s) => s.active));
       },
     );
+    void listRepresentatives({ status: "active" }).then(setReps).catch(() => undefined);
   }, [createOpen, leafAccounts.length]);
 
   useEffect(() => {
@@ -338,6 +343,7 @@ export default function JournalPage() {
             note: l.note || undefined,
             partyType: l.partyType,
             partyId: l.partyId,
+            salesRepresentativeId: l.salesRepresentativeId || null,
           };
         }),
         ...(acknowledge ? { acknowledgeNegativeBalance: true } : {}),
@@ -688,6 +694,7 @@ export default function JournalPage() {
                   <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold w-36">القائمة</th>
                   <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold">الحساب</th>
                   <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold">البيان</th>
+                  <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold w-40">المندوب</th>
                   <th className="px-2 py-2 text-center text-xs font-bold text-red-700 w-28">مدين</th>
                   <th className="px-2 py-2 text-center text-xs font-bold text-green-700 w-28">دائن</th>
                   <th className="w-7" />
@@ -866,6 +873,20 @@ export default function JournalPage() {
                         />
                       </td>
 
+                      {/* المندوب (اختياري، على مستوى السطر) */}
+                      <td className="px-1.5 py-1.5">
+                        <select
+                          className={selectCls}
+                          value={line.salesRepresentativeId ?? ""}
+                          onChange={(e) => updateLine(idx, { salesRepresentativeId: e.target.value || undefined })}
+                        >
+                          <option value="">— بدون —</option>
+                          {reps.map((r) => (
+                            <option key={r.id} value={r.id}>{r.code} — {r.nameAr}</option>
+                          ))}
+                        </select>
+                      </td>
+
                       {/* مدين */}
                       <td className="px-1.5 py-1.5">
                         <input
@@ -920,7 +941,7 @@ export default function JournalPage() {
                 {/* Totals row */}
                 <tr className="bg-surface border-t-2 border-border">
                   <td />
-                  <td colSpan={3} className="px-3 py-2 text-end text-xs text-textSecondary font-semibold">
+                  <td colSpan={4} className="px-3 py-2 text-end text-xs text-textSecondary font-semibold">
                     الإجمالي
                   </td>
                   <td className="px-1.5 py-2 text-end tabular-nums font-bold text-red-700 text-sm">
@@ -935,7 +956,7 @@ export default function JournalPage() {
                 {/* Balance indicator */}
                 {(totalDebit > 0 || totalCredit > 0) && (
                   <tr>
-                    <td colSpan={7} className="px-3 py-1.5">
+                    <td colSpan={8} className="px-3 py-1.5">
                       {isBalanced ? (
                         <span className="text-xs text-green-700 font-medium">✓ القيد متوازن</span>
                       ) : (
