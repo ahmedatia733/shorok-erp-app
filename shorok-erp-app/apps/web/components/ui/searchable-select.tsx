@@ -123,6 +123,10 @@ export function SearchableSelect({
           if (!open) setOpen(true);
         }}
         onFocus={() => !disabled && !loading && setOpen(true)}
+        // Committing an option keeps focus on the input (the option's mousedown
+        // prevents blur), so a later click fires no focus event — without this
+        // the list would refuse to reopen until the user clicked away first.
+        onClick={() => !disabled && !loading && setOpen(true)}
         onKeyDown={onKeyDown}
       />
 
