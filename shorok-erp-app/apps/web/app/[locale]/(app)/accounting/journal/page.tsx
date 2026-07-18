@@ -805,7 +805,9 @@ export default function JournalPage() {
                   const isCustomers = line.category === "customers";
                   const isSuppliers = line.category === "suppliers";
                   const isReps      = line.category === REPRESENTATIVES_CATEGORY;
-                  const isSpecial   = isCustomers || isSuppliers; // party auto-resolves the account
+                  // Customers/suppliers resolve the account from the party; المناديب
+                  // shows only the representative picker (no account search).
+                  const isSpecial   = isCustomers || isSuppliers || isReps;
                   const pool = isSpecial ? [] : filterAccounts(line.category || "all", leafAccounts);
                   const q = (comboSearch[idx] ?? "").toLowerCase();
                   const visible = q
@@ -885,6 +887,32 @@ export default function JournalPage() {
                               </div>
                             )}
                           </div>
+                        ) : isReps ? (
+                          <div className="space-y-1">
+                            <div className="flex gap-1">
+                              <select
+                                className={selectCls}
+                                value={line.salesRepresentativeId ?? ""}
+                                onChange={(e) => handleRepSelect(idx, e.target.value)}
+                              >
+                                <option value="">— اختر المندوب —</option>
+                                {reps.map((r) => (
+                                  <option key={r.id} value={r.id}>{r.code} — {r.nameAr}</option>
+                                ))}
+                              </select>
+                              <button type="button" onClick={() => setQuickRepIdx(idx)} title="مندوب جديد"
+                                className="shrink-0 rounded border border-primary px-2 text-xs text-primary hover:bg-primary hover:text-white transition-colors">+</button>
+                            </div>
+                            {line.entityLabel && (
+                              <div className="text-xs text-primary font-medium px-1 truncate">✓ {line.entityLabel}</div>
+                            )}
+                            {repsError && (
+                              <div className="text-xs text-red-600 px-1 flex items-center gap-2">
+                                <span>{repsError}</span>
+                                <button type="button" className="underline" onClick={() => void refreshReps()}>إعادة المحاولة</button>
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <div className="relative">
                             {line.accountId && openComboIdx !== idx ? (
@@ -951,36 +979,6 @@ export default function JournalPage() {
                             )}
                           </div>
                         )}
-                        {/* المناديب — pick the representative here; the account is
-                            still chosen with the normal picker above. */}
-                        {isReps && (
-                          <div className="mt-1 space-y-1">
-                            <div className="flex gap-1">
-                              <select
-                                className="w-full rounded border border-primary/40 bg-primary/5 px-2 py-1 text-xs focus:outline-none"
-                                value={line.salesRepresentativeId ?? ""}
-                                onChange={(e) => handleRepSelect(idx, e.target.value)}
-                              >
-                                <option value="">— اختر المندوب —</option>
-                                {reps.map((r) => (
-                                  <option key={r.id} value={r.id}>{r.code} — {r.nameAr}</option>
-                                ))}
-                              </select>
-                              <button type="button" onClick={() => setQuickRepIdx(idx)} title="مندوب جديد"
-                                className="shrink-0 rounded border border-primary px-2 text-xs text-primary hover:bg-primary hover:text-white transition-colors">+</button>
-                            </div>
-                            {line.salesRepresentativeId && line.entityLabel && (
-                              <div className="text-xs text-primary font-medium px-1 truncate">✓ {line.entityLabel}</div>
-                            )}
-                            {repsError && (
-                              <div className="text-xs text-red-600 px-1 flex items-center gap-2">
-                                <span>{repsError}</span>
-                                <button type="button" className="underline" onClick={() => void refreshReps()}>إعادة المحاولة</button>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
                         {/* Party required when a control account (AR/AP) is chosen directly */}
                         {line.partyType && line.category !== "customers" && line.category !== "suppliers" && (
                           <select
