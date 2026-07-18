@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { ACCOUNT_CATEGORIES, accountsInCategory } from "@shorok/shared";
 import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
 import { Button } from "../../../../../components/ui/button";
@@ -19,42 +18,40 @@ import {
   type JournalEntryRow,
 } from "../../../../../lib/journal-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
-import { listCustomers, type CustomerRow } from "../../../../../lib/customers-client";
+import { listCustomers, createCustomer, type CustomerRow } from "../../../../../lib/customers-client";
 import { listRepresentatives, type SalesRepresentative } from "../../../../../lib/sales-representatives-client";
+import { RepresentativeFormModal } from "../../../../../components/sales-representatives/representative-form-modal";
 import { listSuppliers, type SupplierRow } from "../../../../../lib/suppliers-client";
+import { ApiClientError } from "../../../../../lib/api-client";
 import {
   listTemplates,
   type JournalTemplate,
 } from "../../../../../lib/journal-templates-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 
-// ─── Category definitions ─────────────────────────────────────────────────────
-// Sourced from @shorok/shared so the Journal, the Templates page, and the
-// Account Statement selector always offer the same categories.
-
-const CATEGORIES = ACCOUNT_CATEGORIES.map((c) => ({
-  id: c.id,
-  label: c.label,
-  special: c.kind !== "ACCOUNTS", // customers/suppliers resolve to parties, not accounts
-}));
-
-const filterAccounts = (cat: string, accounts: AccountRow[]): AccountRow[] =>
-  accountsInCategory(cat || "all", accounts);
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/**
+ * The line's "القائمة" (list) selector is a single mutually-exclusive dimension:
+ * a line may carry a Customer party, a Supplier party, a Sales Representative,
+ * or nothing. It is a FRONTEND-ONLY discriminator mapped to the existing backend
+ * fields (partyType/partyId for customer/supplier; salesRepresentativeId for the
+ * rep) — the DB PartyType enum is unchanged.
+ */
+type JournalListType = "NONE" | "CUSTOMER" | "SUPPLIER" | "SALES_REPRESENTATIVE";
+
 interface JournalLine {
-  category: string;
+  listType: JournalListType;
   accountId: string;
   accountNameAr: string;
-  entityLabel: string;
+  entityLabel: string; // display label of the selected customer/supplier/rep
   note: string;
   debit: string;
   credit: string;
-  // Party for control accounts (AR_CONTROL → CUSTOMER, AP_CONTROL → SUPPLIER).
+  // Customer/Supplier party (AR_CONTROL → CUSTOMER, AP_CONTROL → SUPPLIER).
   partyType?: "CUSTOMER" | "SUPPLIER";
   partyId?: string;
-  // Optional sales-representative dimension (separate from the party).
+  // Sales-representative dimension — mutually exclusive with the party above.
   salesRepresentativeId?: string;
 }
 
@@ -67,7 +64,7 @@ const ENTRY_TYPE_LABELS: Record<string, string> = {
 };
 
 function emptyLine(): JournalLine {
-  return { category: "", accountId: "", accountNameAr: "", entityLabel: "", note: "", debit: "", credit: "", partyType: undefined, partyId: undefined, salesRepresentativeId: undefined };
+  return { listType: "NONE", accountId: "", accountNameAr: "", entityLabel: "", note: "", debit: "", credit: "", partyType: undefined, partyId: undefined, salesRepresentativeId: undefined };
 }
 
 function lineNet(l: JournalLine): { type: "debit" | "credit"; net: number } {
@@ -165,6 +162,14 @@ export default function JournalPage() {
   const [openComboIdx,  setOpenComboIdx]  = useState<number | null>(null);
   const [comboSearch,   setComboSearch]   = useState<Record<number, string>>({});
   const [listSearch,    setListSearch]    = useState("");
+  const [masterDataError, setMasterDataError] = useState<string | null>(null);
+  // Which line opened a quick-create modal (so the new entity auto-selects there).
+  const [quickCustomerIdx, setQuickCustomerIdx] = useState<number | null>(null);
+  const [quickRepIdx,      setQuickRepIdx]      = useState<number | null>(null);
+  const [quickCustName,    setQuickCustName]    = useState("");
+  const [quickCustPhone,   setQuickCustPhone]   = useState("");
+  const [quickCustSaving,  setQuickCustSaving]  = useState(false);
+  const [quickCustError,   setQuickCustError]   = useState<string | null>(null);
 
   // ── Template picker ───────────────────────────────────────────────────────
   const [templates,          setTemplates]          = useState<JournalTemplate[]>([]);
@@ -191,17 +196,49 @@ export default function JournalPage() {
 
   useEffect(() => { void loadJournal(); }, [loadJournal]);
 
+  // Live master-data refresh — reused on open, after quick-create, and on window
+  // focus so options stay current without a full page reload. Failures surface a
+  // localized error with a retry action rather than being swallowed.
+  const refreshMasterData = useCallback(async () => {
+    setMasterDataError(null);
+    try {
+      const [accs, custs, supps, repList] = await Promise.all([
+        listAccounts(),
+        listCustomers(),
+        listSuppliers(),
+        listRepresentatives({ status: "active" }),
+      ]);
+      setLeafAccounts(getAllLeafs(accs));
+      setCustomers(custs.filter((c) => c.active));
+      setSuppliers(supps.filter((s) => s.active));
+      setReps(repList);
+    } catch {
+      setMasterDataError(t("masterDataError"));
+    }
+  }, [t]);
+
+  const refreshCustomers = useCallback(async () => {
+    try { setCustomers((await listCustomers()).filter((c) => c.active)); }
+    catch { setMasterDataError(t("customersLoadError")); }
+  }, [t]);
+  const refreshRepresentatives = useCallback(async () => {
+    try { setReps(await listRepresentatives({ status: "active" })); }
+    catch { setMasterDataError(t("repsLoadError")); }
+  }, [t]);
+
   useEffect(() => {
-    if (!createOpen || leafAccounts.length > 0) return;
-    void Promise.all([listAccounts(), listCustomers(), listSuppliers()]).then(
-      ([accs, custs, supps]) => {
-        setLeafAccounts(getAllLeafs(accs));
-        setCustomers(custs.filter((c) => c.active));
-        setSuppliers(supps.filter((s) => s.active));
-      },
-    );
-    void listRepresentatives({ status: "active" }).then(setReps).catch(() => undefined);
-  }, [createOpen, leafAccounts.length]);
+    if (!createOpen) return;
+    void refreshMasterData();
+  }, [createOpen, refreshMasterData]);
+
+  // Refresh options when the window regains focus (e.g. after creating a
+  // customer/representative in another tab), only while the editor is open.
+  useEffect(() => {
+    if (!createOpen) return;
+    const onFocus = () => void refreshMasterData();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [createOpen, refreshMasterData]);
 
   useEffect(() => {
     if (!createOpen || templates.length > 0) return;
@@ -236,58 +273,82 @@ export default function JournalPage() {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   }
 
-  function handleCategoryChange(idx: number, cat: string) {
-    updateLine(idx, { category: cat, accountId: "", accountNameAr: "", entityLabel: "" });
+  /**
+   * Switching the list type clears every incompatible selection so no stale
+   * hidden id survives in the payload (Customer↔Rep↔Supplier↔None).
+   */
+  function handleListTypeChange(idx: number, listType: JournalListType) {
+    updateLine(idx, {
+      listType,
+      partyType: undefined,
+      partyId: undefined,
+      salesRepresentativeId: undefined,
+      entityLabel: "",
+    });
   }
 
-  const arControl = leafAccounts.find((a) => a.systemRole === "AR_CONTROL");
-  const apControl = leafAccounts.find((a) => a.systemRole === "AP_CONTROL");
+  /** Selects the customer/supplier/rep for the line, per its current list type. */
+  function handleEntitySelect(idx: number, entityId: string) {
+    const line = lines[idx];
+    if (!line) return;
+    if (!entityId) {
+      updateLine(idx, { partyId: undefined, salesRepresentativeId: undefined, entityLabel: "" });
+      return;
+    }
+    if (line.listType === "CUSTOMER") {
+      const c = customers.find((x) => x.id === entityId);
+      updateLine(idx, { partyType: "CUSTOMER", partyId: entityId, salesRepresentativeId: undefined, entityLabel: c ? `${c.code} — ${c.nameAr}` : "" });
+    } else if (line.listType === "SUPPLIER") {
+      const s = suppliers.find((x) => x.id === entityId);
+      updateLine(idx, { partyType: "SUPPLIER", partyId: entityId, salesRepresentativeId: undefined, entityLabel: s ? s.nameAr : "" });
+    } else if (line.listType === "SALES_REPRESENTATIVE") {
+      const r = reps.find((x) => x.id === entityId);
+      updateLine(idx, { salesRepresentativeId: entityId, partyType: undefined, partyId: undefined, entityLabel: r ? `${r.code} — ${r.nameAr}` : "" });
+    }
+  }
 
   function handleAccountChange(idx: number, accountId: string) {
     const acc = leafAccounts.find((a) => a.id === accountId);
-    // Control accounts require a party; clear any stale party otherwise.
-    const partyType = acc?.systemRole === "AR_CONTROL" ? "CUSTOMER" : acc?.systemRole === "AP_CONTROL" ? "SUPPLIER" : undefined;
-    updateLine(idx, { accountId, accountNameAr: acc?.nameAr ?? "", partyType, partyId: undefined, entityLabel: "" });
+    // The account is chosen independently; the party/rep comes from القائمة.
+    updateLine(idx, { accountId, accountNameAr: acc?.nameAr ?? "" });
   }
 
-  function handleCustomerSelect(idx: number, customerId: string) {
-    const cust = customers.find((c) => c.id === customerId);
-    if (!cust) return;
-    // Resolve the AR control account by systemRole (never by name matching).
-    updateLine(idx, {
-      entityLabel: `${cust.code} — ${cust.nameAr}`,
-      note: lines[idx]?.note || `${cust.code} — ${cust.nameAr}`,
-      accountId: arControl?.id ?? "",
-      accountNameAr: arControl?.nameAr ?? "",
-      partyType: "CUSTOMER",
-      partyId: customerId,
-    });
+  // ── Quick-create (customer / representative) — preserves all unsaved lines ──
+
+  function openQuickCustomer(idx: number) {
+    setQuickCustomerIdx(idx); setQuickCustName(""); setQuickCustPhone(""); setQuickCustError(null);
   }
 
-  function handleSupplierSelect(idx: number, supplierId: string) {
-    const supp = suppliers.find((s) => s.id === supplierId);
-    if (!supp) return;
-    updateLine(idx, {
-      entityLabel: supp.nameAr,
-      note: lines[idx]?.note || supp.nameAr,
-      accountId: apControl?.id ?? "",
-      accountNameAr: apControl?.nameAr ?? "",
-      partyType: "SUPPLIER",
-      partyId: supplierId,
-    });
-  }
-
-  /** Party selected inline when a control account was chosen directly (not via the customers/suppliers category). */
-  function handleLinePartySelect(idx: number, partyId: string) {
-    const line = lines[idx];
-    if (!line) return;
-    if (line.partyType === "CUSTOMER") {
-      const c = customers.find((x) => x.id === partyId);
-      updateLine(idx, { partyId, entityLabel: c ? `${c.code} — ${c.nameAr}` : "" });
-    } else if (line.partyType === "SUPPLIER") {
-      const s = suppliers.find((x) => x.id === partyId);
-      updateLine(idx, { partyId, entityLabel: s?.nameAr ?? "" });
+  async function submitQuickCustomer(e: React.FormEvent) {
+    e.preventDefault();
+    if (quickCustSaving) return; // guard double-submit
+    if (!quickCustName.trim()) { setQuickCustError(t("nameRequired")); return; }
+    setQuickCustSaving(true); setQuickCustError(null);
+    try {
+      const created = await createCustomer({ nameAr: quickCustName.trim(), phone: quickCustPhone.trim() || undefined });
+      // Insert into options immediately, de-duplicated by id.
+      setCustomers((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);
+      const idx = quickCustomerIdx;
+      if (idx !== null) {
+        updateLine(idx, { listType: "CUSTOMER", partyType: "CUSTOMER", partyId: created.id, salesRepresentativeId: undefined, entityLabel: `${created.code} — ${created.nameAr}` });
+      }
+      setQuickCustomerIdx(null);
+      void refreshCustomers(); // reconcile with the server list
+    } catch (err) {
+      setQuickCustError(err instanceof ApiClientError ? err.localizedMessage(locale) : t("customersLoadError"));
+    } finally {
+      setQuickCustSaving(false);
     }
+  }
+
+  function onQuickRepCreated(created: SalesRepresentative) {
+    setReps((prev) => [created, ...prev.filter((r) => r.id !== created.id)]);
+    const idx = quickRepIdx;
+    if (idx !== null) {
+      updateLine(idx, { listType: "SALES_REPRESENTATIVE", salesRepresentativeId: created.id, partyType: undefined, partyId: undefined, entityLabel: `${created.code} — ${created.nameAr}` });
+    }
+    setQuickRepIdx(null);
+    void refreshRepresentatives();
   }
 
   function handleDebitChange(idx: number, val: string) {
@@ -304,7 +365,7 @@ export default function JournalPage() {
     const newLines: JournalLine[] = template.lines.map((l) => {
       const acc = leafAccounts.find((a) => a.id === l.accountId);
       return {
-        category: "all",
+        listType: "NONE" as JournalListType,
         accountId: l.accountId,
         accountNameAr: acc?.nameAr ?? l.accountNameAr,
         entityLabel: "",
@@ -355,6 +416,7 @@ export default function JournalPage() {
     } catch (err) {
       const w = parseTreasuryWarning(err);
       if (w) setNegWarning(w); // open the confirmation modal; keep the form intact
+      else if (err instanceof ApiClientError) setCreateError(err.localizedMessage(locale));
       else setCreateError(t("loadFailed"));
     } finally {
       setCreateLoading(false);
@@ -517,7 +579,8 @@ export default function JournalPage() {
                             <thead>
                               <tr className="bg-surface border-b-2 border-border text-right">
                                 <th className="px-3 py-2 text-xs font-semibold text-textSecondary w-8">#</th>
-                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary">الحساب</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary">{t("accountLabel")}</th>
+                                <th className="px-3 py-2 text-xs font-semibold text-textSecondary">{t("selection")}</th>
                                 <th className="px-3 py-2 text-xs font-semibold text-textSecondary">البيان</th>
                                 <th className="px-3 py-2 text-xs font-bold text-red-700 text-end w-32">مدين</th>
                                 <th className="px-3 py-2 text-xs font-bold text-green-700 text-end w-32">دائن</th>
@@ -536,6 +599,15 @@ export default function JournalPage() {
                                       <span className="font-mono text-xs text-textSecondary me-2">{line.accountCode}</span>
                                       {locale === "ar" ? line.accountNameAr : line.accountNameEn}
                                     </td>
+                                    <td className="px-3 py-2 text-xs">
+                                      {line.salesRepresentative
+                                        ? <span className="text-primary">{t("listReps")}: {line.salesRepresentative.code} — {line.salesRepresentative.nameAr}</span>
+                                        : line.partyType === "CUSTOMER"
+                                        ? <span className="text-primary">{t("listCustomers")}: {line.partyLabel ?? "—"}</span>
+                                        : line.partyType === "SUPPLIER"
+                                        ? <span className="text-primary">{t("listSuppliers")}: {line.partyLabel ?? "—"}</span>
+                                        : <span className="text-textSecondary">—</span>}
+                                    </td>
                                     <td className="px-3 py-2 text-textSecondary text-xs">{line.note ?? "—"}</td>
                                     <td className={"px-3 py-2 text-end tabular-nums font-medium text-sm " + (isDebit ? "bg-red-50 text-red-700" : "text-textSecondary")}>
                                       {isDebit ? formatCurrency(line.debit, locale) : ""}
@@ -549,7 +621,7 @@ export default function JournalPage() {
                               {/* totals row */}
                               <tr className="bg-surface border-t-2 border-border">
                                 <td />
-                                <td colSpan={2} className="px-3 py-1.5 text-xs font-semibold text-textSecondary text-end">
+                                <td colSpan={3} className="px-3 py-1.5 text-xs font-semibold text-textSecondary text-end">
                                   الإجمالي
                                 </td>
                                 <td className="px-3 py-1.5 text-end tabular-nums font-bold text-red-700 text-sm">
@@ -600,6 +672,16 @@ export default function JournalPage() {
       >
         <form onSubmit={(e) => void handleCreate(e)} className="space-y-5" dir="rtl">
           {createError && <Alert variant="error">{createError}</Alert>}
+          {masterDataError && (
+            <Alert variant="error">
+              <span className="flex items-center justify-between gap-3">
+                <span>{masterDataError}</span>
+                <button type="button" className="underline text-sm shrink-0" onClick={() => void refreshMasterData()}>
+                  {t("retry")}
+                </button>
+              </span>
+            </Alert>
+          )}
 
           {/* ── Header fields ───────────────────────────────────────────── */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
@@ -691,10 +773,10 @@ export default function JournalPage() {
               <thead>
                 <tr className="bg-surface border-b-2 border-border">
                   <th className="px-2 py-2 text-center text-xs text-textSecondary font-semibold w-8">#</th>
-                  <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold w-36">القائمة</th>
-                  <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold">الحساب</th>
+                  <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold w-32">{t("listLabel")}</th>
+                  <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold w-56">{t("selection")}</th>
+                  <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold">{t("accountLabel")}</th>
                   <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold">البيان</th>
-                  <th className="px-2 py-2 text-start text-xs text-textSecondary font-semibold w-40">المندوب</th>
                   <th className="px-2 py-2 text-center text-xs font-bold text-red-700 w-28">مدين</th>
                   <th className="px-2 py-2 text-center text-xs font-bold text-green-700 w-28">دائن</th>
                   <th className="w-7" />
@@ -702,15 +784,15 @@ export default function JournalPage() {
               </thead>
               <tbody>
                 {lines.map((line, idx) => {
-                  const isCustomers = line.category === "customers";
-                  const isSuppliers = line.category === "suppliers";
-                  const isSpecial   = isCustomers || isSuppliers;
-                  const pool = isSpecial ? [] : filterAccounts(line.category || "all", leafAccounts);
+                  // القائمة no longer filters accounts — الحساب searches every
+                  // active leaf account; the party/rep comes from القائمة/الاختيار.
+                  const pool = leafAccounts;
                   const q = (comboSearch[idx] ?? "").toLowerCase();
                   const visible = q
                     ? pool.filter((a) => (a.nameAr + " " + (a.nameEn ?? "") + " " + a.code).toLowerCase().includes(q))
                     : pool;
                   const selectedAcc = line.accountId ? leafAccounts.find((a) => a.id === line.accountId) : null;
+                  const entityValue = line.listType === "SALES_REPRESENTATIVE" ? (line.salesRepresentativeId ?? "") : (line.partyId ?? "");
 
                   return (
                     <tr
@@ -722,147 +804,133 @@ export default function JournalPage() {
                         {idx + 1}
                       </td>
 
-                      {/* القائمة */}
-                      <td className="px-1.5 py-1.5">
+                      {/* القائمة — the line's single mutually-exclusive dimension */}
+                      <td className="px-1.5 py-1.5 align-top">
                         <select
                           className={selectCls}
-                          value={line.category}
-                          onChange={(e) => handleCategoryChange(idx, e.target.value)}
+                          value={line.listType}
+                          onChange={(e) => handleListTypeChange(idx, e.target.value as JournalListType)}
                         >
-                          <option value="">— القائمة —</option>
-                          {CATEGORIES.map((c) => (
-                            <option key={c.id} value={c.id}>{c.label}</option>
-                          ))}
+                          <option value="NONE">{t("listNone")}</option>
+                          <option value="CUSTOMER">{t("listCustomers")}</option>
+                          <option value="SUPPLIER">{t("listSuppliers")}</option>
+                          <option value="SALES_REPRESENTATIVE">{t("listReps")}</option>
                         </select>
                       </td>
 
-                      {/* الحساب */}
-                      <td className="px-1.5 py-1.5">
-                        {isCustomers ? (
-                          <div className="space-y-1">
-                            <select
-                              className={selectCls}
-                              value=""
-                              onChange={(e) => handleCustomerSelect(idx, e.target.value)}
-                            >
-                              <option value="">— اختر العميل —</option>
-                              {customers.map((c) => (
-                                <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
-                              ))}
-                            </select>
-                            {line.entityLabel && (
-                              <div className="text-xs text-primary font-medium px-1">✓ {line.entityLabel}</div>
-                            )}
-                            {line.entityLabel && !line.accountId && (
-                              <div className="text-xs text-amber-600 px-1">
-                                ⚠ لم يُعثر على حساب ذمم — غيّر القائمة لـ «الذمم المدينة» واختر يدوياً
-                              </div>
-                            )}
-                          </div>
-                        ) : isSuppliers ? (
-                          <div className="space-y-1">
-                            <select
-                              className={selectCls}
-                              value=""
-                              onChange={(e) => handleSupplierSelect(idx, e.target.value)}
-                            >
-                              <option value="">— اختر المورد —</option>
-                              {suppliers.map((s) => (
-                                <option key={s.id} value={s.id}>{s.nameAr}</option>
-                              ))}
-                            </select>
-                            {line.entityLabel && (
-                              <div className="text-xs text-primary font-medium px-1">✓ {line.entityLabel}</div>
-                            )}
-                            {line.entityLabel && !line.accountId && (
-                              <div className="text-xs text-amber-600 px-1">
-                                ⚠ لم يُعثر على حساب موردين — غيّر القائمة لـ «الذمم الدائنة» واختر يدوياً
-                              </div>
-                            )}
-                          </div>
+                      {/* الاختيار — dynamic entity picker + contextual quick-create */}
+                      <td className="px-1.5 py-1.5 align-top">
+                        {line.listType === "NONE" ? (
+                          <div className="text-xs text-textSecondary px-1 py-1.5 select-none">—</div>
                         ) : (
-                          <div className="relative">
-                            {line.accountId && openComboIdx !== idx ? (
-                              <div
-                                className="flex items-center gap-1 rounded border border-border bg-background px-2 py-1.5 text-sm cursor-pointer hover:border-primary"
-                                onClick={() => setOpenComboIdx(idx)}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpenComboIdx(idx); }}
-                              >
-                                <span className="font-mono text-xs text-textSecondary me-1">{selectedAcc?.code}</span>
-                                <span className="flex-1 truncate min-w-0">{selectedAcc?.nameAr ?? line.accountNameAr}</span>
-                                <button
-                                  type="button"
-                                  className="text-textSecondary hover:text-danger ms-1 shrink-0 text-xs"
-                                  onClick={(e) => { e.stopPropagation(); handleAccountChange(idx, ""); }}
-                                >✕</button>
-                              </div>
-                            ) : (
-                              <input
-                                type="text"
+                          <div className="space-y-1">
+                            <div className="flex gap-1">
+                              <select
                                 className={selectCls}
-                                placeholder={line.category && line.category !== "all" ? "ابحث في الحسابات..." : "ابحث في جميع الحسابات..."}
-                                value={comboSearch[idx] ?? ""}
-                                onChange={(e) => {
-                                  setOpenComboIdx(idx);
-                                  setComboSearch((p) => ({ ...p, [idx]: e.target.value }));
-                                }}
-                                onFocus={() => setOpenComboIdx(idx)}
-                                onBlur={() => setTimeout(() => {
-                                  setOpenComboIdx((c) => (c === idx ? null : c));
-                                  setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
-                                }, 200)}
-                              />
-                            )}
-                            {openComboIdx === idx && (
-                              <div className="absolute top-full mt-0.5 start-0 z-30 min-w-full w-64 max-h-52 overflow-y-auto rounded border border-border bg-surface shadow-lg">
-                                {visible.length === 0 ? (
-                                  <div className="px-3 py-2 text-xs text-textSecondary">لا توجد نتائج مطابقة</div>
-                                ) : (
-                                  visible.slice(0, 30).map((a) => (
-                                    <button
-                                      key={a.id}
-                                      type="button"
-                                      className="w-full text-start px-2 py-1.5 text-sm hover:bg-background transition-colors"
-                                      onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        handleAccountChange(idx, a.id);
-                                        setOpenComboIdx(null);
-                                        setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
-                                      }}
-                                    >
-                                      <span className="font-mono text-xs text-textSecondary me-1">{a.code}</span>
-                                      {a.nameAr}
-                                    </button>
-                                  ))
-                                )}
-                                {visible.length > 30 && (
-                                  <div className="px-2 py-1 text-xs text-textSecondary border-t border-border">
-                                    {visible.length - 30} نتيجة أخرى — اكتب للتضييق
-                                  </div>
-                                )}
-                              </div>
+                                value={entityValue}
+                                onChange={(e) => handleEntitySelect(idx, e.target.value)}
+                              >
+                                <option value="">
+                                  {line.listType === "CUSTOMER" ? t("selectCustomer")
+                                    : line.listType === "SUPPLIER" ? t("selectSupplier")
+                                    : t("selectRep")}
+                                </option>
+                                {line.listType === "CUSTOMER" && customers.map((c) => (
+                                  <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
+                                ))}
+                                {line.listType === "SUPPLIER" && suppliers.map((s) => (
+                                  <option key={s.id} value={s.id}>{s.nameAr}</option>
+                                ))}
+                                {line.listType === "SALES_REPRESENTATIVE" && reps.map((r) => (
+                                  <option key={r.id} value={r.id}>{r.code} — {r.nameAr}</option>
+                                ))}
+                              </select>
+                              {line.listType === "CUSTOMER" && (
+                                <button type="button" onClick={() => openQuickCustomer(idx)} title={t("newCustomer")}
+                                  className="shrink-0 rounded border border-primary px-2 text-xs text-primary hover:bg-primary hover:text-white transition-colors">+</button>
+                              )}
+                              {line.listType === "SALES_REPRESENTATIVE" && (
+                                <button type="button" onClick={() => setQuickRepIdx(idx)} title={t("newRep")}
+                                  className="shrink-0 rounded border border-primary px-2 text-xs text-primary hover:bg-primary hover:text-white transition-colors">+</button>
+                              )}
+                            </div>
+                            {line.entityLabel && (
+                              <div className="text-xs text-primary font-medium px-1 truncate">✓ {line.entityLabel}</div>
                             )}
                           </div>
-                        )}
-                        {/* Party required when a control account (AR/AP) is chosen directly */}
-                        {line.partyType && line.category !== "customers" && line.category !== "suppliers" && (
-                          <select
-                            value={line.partyId ?? ""}
-                            onChange={(e) => handleLinePartySelect(idx, e.target.value)}
-                            className="mt-1 w-full rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs focus:outline-none"
-                          >
-                            <option value="">{line.partyType === "CUSTOMER" ? "— العميل (مطلوب) —" : "— المورد (مطلوب) —"}</option>
-                            {line.partyType === "CUSTOMER"
-                              ? customers.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>)
-                              : suppliers.map((s) => <option key={s.id} value={s.id}>{s.nameAr}</option>)}
-                          </select>
                         )}
                       </td>
 
+                      {/* الحساب — searches every active leaf account */}
+                      <td className="px-1.5 py-1.5 align-top">
+                        <div className="relative">
+                          {line.accountId && openComboIdx !== idx ? (
+                            <div
+                              className="flex items-center gap-1 rounded border border-border bg-background px-2 py-1.5 text-sm cursor-pointer hover:border-primary"
+                              onClick={() => setOpenComboIdx(idx)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpenComboIdx(idx); }}
+                            >
+                              <span className="font-mono text-xs text-textSecondary me-1">{selectedAcc?.code}</span>
+                              <span className="flex-1 truncate min-w-0">{selectedAcc?.nameAr ?? line.accountNameAr}</span>
+                              <button
+                                type="button"
+                                className="text-textSecondary hover:text-danger ms-1 shrink-0 text-xs"
+                                onClick={(e) => { e.stopPropagation(); handleAccountChange(idx, ""); }}
+                              >✕</button>
+                            </div>
+                          ) : (
+                            <input
+                              type="text"
+                              className={selectCls}
+                              placeholder={t("searchAccounts")}
+                              value={comboSearch[idx] ?? ""}
+                              onChange={(e) => {
+                                setOpenComboIdx(idx);
+                                setComboSearch((p) => ({ ...p, [idx]: e.target.value }));
+                              }}
+                              onFocus={() => setOpenComboIdx(idx)}
+                              onBlur={() => setTimeout(() => {
+                                setOpenComboIdx((c) => (c === idx ? null : c));
+                                setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
+                              }, 200)}
+                            />
+                          )}
+                          {openComboIdx === idx && (
+                            <div className="absolute top-full mt-0.5 start-0 z-30 min-w-full w-64 max-h-52 overflow-y-auto rounded border border-border bg-surface shadow-lg">
+                              {visible.length === 0 ? (
+                                <div className="px-3 py-2 text-xs text-textSecondary">لا توجد نتائج مطابقة</div>
+                              ) : (
+                                visible.slice(0, 30).map((a) => (
+                                  <button
+                                    key={a.id}
+                                    type="button"
+                                    className="w-full text-start px-2 py-1.5 text-sm hover:bg-background transition-colors"
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      handleAccountChange(idx, a.id);
+                                      setOpenComboIdx(null);
+                                      setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
+                                    }}
+                                  >
+                                    <span className="font-mono text-xs text-textSecondary me-1">{a.code}</span>
+                                    {a.nameAr}
+                                  </button>
+                                ))
+                              )}
+                              {visible.length > 30 && (
+                                <div className="px-2 py-1 text-xs text-textSecondary border-t border-border">
+                                  {visible.length - 30} نتيجة أخرى — اكتب للتضييق
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
                       {/* البيان */}
-                      <td className="px-1.5 py-1.5">
+                      <td className="px-1.5 py-1.5 align-top">
                         <input
                           type="text"
                           className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
@@ -871,20 +939,6 @@ export default function JournalPage() {
                           onChange={(e) => updateLine(idx, { note: e.target.value })}
                           maxLength={200}
                         />
-                      </td>
-
-                      {/* المندوب (اختياري، على مستوى السطر) */}
-                      <td className="px-1.5 py-1.5">
-                        <select
-                          className={selectCls}
-                          value={line.salesRepresentativeId ?? ""}
-                          onChange={(e) => updateLine(idx, { salesRepresentativeId: e.target.value || undefined })}
-                        >
-                          <option value="">— بدون —</option>
-                          {reps.map((r) => (
-                            <option key={r.id} value={r.id}>{r.code} — {r.nameAr}</option>
-                          ))}
-                        </select>
                       </td>
 
                       {/* مدين */}
@@ -1002,6 +1056,30 @@ export default function JournalPage() {
         onCancel={() => setNegWarning(null)}
         onConfirm={() => void submitJournal(true)}
       />
+
+      {/* Quick-create customer — canonical API; preserves all unsaved lines */}
+      <Modal open={quickCustomerIdx !== null} onClose={() => !quickCustSaving && setQuickCustomerIdx(null)} title={t("newCustomer")} className="max-w-md w-full">
+        <form onSubmit={(e) => void submitQuickCustomer(e)} className="space-y-3" dir={locale === "ar" ? "rtl" : "ltr"}>
+          {quickCustError && <Alert variant="error">{quickCustError}</Alert>}
+          <div>
+            <label className="block text-xs text-textSecondary mb-1">{t("customerNameAr")} <span className="text-red-500">*</span></label>
+            <Input value={quickCustName} onChange={(e) => setQuickCustName(e.target.value)} autoFocus maxLength={200} />
+          </div>
+          <div>
+            <label className="block text-xs text-textSecondary mb-1">{t("phoneOptional")}</label>
+            <Input value={quickCustPhone} onChange={(e) => setQuickCustPhone(e.target.value)} maxLength={30} dir="ltr" />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setQuickCustomerIdx(null)} disabled={quickCustSaving}>{t("cancel")}</Button>
+            <Button type="submit" disabled={quickCustSaving || !quickCustName.trim()}>{quickCustSaving ? t("saving") : t("save")}</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Quick-create representative — reuses the canonical rep form modal */}
+      {quickRepIdx !== null && (
+        <RepresentativeFormModal rep={null} onClose={() => setQuickRepIdx(null)} onSaved={onQuickRepCreated} />
+      )}
     </div>
   );
 }

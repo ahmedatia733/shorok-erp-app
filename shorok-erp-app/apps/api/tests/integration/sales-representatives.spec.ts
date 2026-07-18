@@ -463,6 +463,31 @@ describe("sales representatives", () => {
     expect(upd.body.code).toBe("representative_inactive");
   });
 
+  // ── Journal line party/rep labels (unified selector reload) ────────────────
+
+  it("a saved journal reloads its customer/supplier/rep entity labels on each line", async () => {
+    const repId = (await createRep({ nameAr: "مندوب التسمية" })).body.id;
+    // Dr AR[customer] 100 / Cr revenue 100 (rep-tagged) — one customer party
+    // line and one rep line in the same balanced entry.
+    const posted = await postJournal([
+      { accountId: arCtl, debit: "100", credit: "0", partyType: "CUSTOMER", partyId: customerId },
+      { accountId: revenue, debit: "0", credit: "100", salesRepresentativeId: repId },
+    ]);
+    expect(posted.status).toBeLessThan(300);
+
+    const reload = await request(server()).get(`/api/v1/journal/${posted.body.id}`).set(H());
+    expect(reload.status).toBe(200);
+    const custLine = reload.body.lines.find((l: any) => l.partyType === "CUSTOMER");
+    const repLine = reload.body.lines.find((l: any) => l.salesRepresentativeId === repId);
+    // Customer line carries a human label; rep line carries the rep object and
+    // null party — exactly what the unified selector needs to rehydrate.
+    expect(custLine.partyLabel).toContain("عميل مندوب");
+    expect(custLine.salesRepresentativeId).toBeNull();
+    expect(repLine.salesRepresentative.id).toBe(repId);
+    expect(repLine.partyType).toBeNull();
+    expect(repLine.partyId).toBeNull();
+  });
+
   // ── Invoice-status filter ───────────────────────────────────────────────────
 
   it("filters invoice rows by status without dropping journal rows", async () => {

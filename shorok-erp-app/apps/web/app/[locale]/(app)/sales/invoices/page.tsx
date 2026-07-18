@@ -186,7 +186,11 @@ function ConfirmModal({ invoice, onClose, onConfirmed, locale }: ConfirmModalPro
       const result = await confirmSalesInvoice(invoice.id, {});
       onConfirmed(result);
     } catch (e) {
+      // Surface the real, typed localized reason (insufficient stock, missing
+      // posting profile, closed period, …) instead of a generic message; keep
+      // the dedicated config-error CTA and a fallback only for the unexpected.
       if (isPostingConfigError(e)) setConfigError(true);
+      else if (e instanceof ApiClientError) setError(e.localizedMessage(locale));
       else setError("فشل تأكيد الفاتورة. يرجى التحقق من البيانات والمحاولة مجدداً.");
     } finally {
       setSubmitting(false);

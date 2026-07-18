@@ -10,6 +10,11 @@ export interface JournalLineRow {
   debit: string;
   credit: string;
   note: string | null;
+  partyType?: "CUSTOMER" | "SUPPLIER" | null;
+  partyId?: string | null;
+  partyLabel?: string | null;
+  salesRepresentativeId?: string | null;
+  salesRepresentative?: { id: string; code: string; nameAr: string } | null;
 }
 
 export interface JournalEntryRow {

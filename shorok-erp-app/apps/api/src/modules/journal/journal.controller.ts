@@ -168,13 +168,14 @@ export class JournalController {
     const data = hasMore ? rows.slice(0, query.limit) : rows;
     const nextCursor = hasMore ? (data[data.length - 1]?.id ?? null) : null;
 
+    const partyLabels = await this.resolvePartyLabels(data);
     return {
       data: data.map((entry) => {
         const totalDebit = entry.lines.reduce(
           (acc, l) => acc.plus(l.debit.toString()),
           new Decimal(0),
         );
-        return this._formatEntry(entry, totalDebit);
+        return this._formatEntry(entry, totalDebit, partyLabels);
       }),
       nextCursor,
     };
@@ -202,7 +203,8 @@ export class JournalController {
       (acc, l) => acc.plus(l.debit.toString()),
       new Decimal(0),
     );
-    return this._formatEntry(entry, totalDebit);
+    const partyLabels = await this.resolvePartyLabels([entry]);
+    return this._formatEntry(entry, totalDebit, partyLabels);
   }
 
   /**
@@ -268,6 +270,7 @@ export class JournalController {
       }>;
     },
     totalDebit: Decimal,
+    partyLabels?: Map<string, string>,
   ) {
     return {
       id: entry.id,
@@ -291,11 +294,39 @@ export class JournalController {
         note: l.note,
         partyType: l.partyType ?? null,
         partyId: l.partyId ?? null,
+        // Human-readable label for a customer/supplier party (rep name comes
+        // from salesRepresentative), so a reloaded entry shows its entity.
+        partyLabel: l.partyId ? partyLabels?.get(l.partyId) ?? null : null,
         salesRepresentativeId: l.salesRepresentativeId ?? null,
         salesRepresentative: l.salesRepresentative
           ? { id: l.salesRepresentative.id, code: l.salesRepresentative.code, nameAr: l.salesRepresentative.nameAr }
           : null,
       })),
     };
+  }
+
+  /** Batch-resolves customer/supplier display labels for a set of entries. */
+  private async resolvePartyLabels(
+    entries: Array<{ lines: Array<{ partyType?: string | null; partyId?: string | null }> }>,
+  ): Promise<Map<string, string>> {
+    const customerIds = new Set<string>();
+    const supplierIds = new Set<string>();
+    for (const e of entries) {
+      for (const l of e.lines) {
+        if (!l.partyId) continue;
+        if (l.partyType === "CUSTOMER") customerIds.add(l.partyId);
+        else if (l.partyType === "SUPPLIER") supplierIds.add(l.partyId);
+      }
+    }
+    const labels = new Map<string, string>();
+    if (customerIds.size) {
+      const rows = await this.prisma.customer.findMany({ where: { id: { in: [...customerIds] } }, select: { id: true, code: true, nameAr: true } });
+      for (const c of rows) labels.set(c.id, `${c.code} — ${c.nameAr}`);
+    }
+    if (supplierIds.size) {
+      const rows = await this.prisma.supplier.findMany({ where: { id: { in: [...supplierIds] } }, select: { id: true, nameAr: true } });
+      for (const s of rows) labels.set(s.id, s.nameAr);
+    }
+    return labels;
   }
 }
