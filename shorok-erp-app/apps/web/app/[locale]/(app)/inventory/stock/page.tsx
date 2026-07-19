@@ -7,9 +7,19 @@ import { Input } from "../../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { getInventoryBalance, type InventoryItem } from "../../../../../lib/payments-client";
 import { listBranches, type BranchSummary } from "../../../../../lib/inventory-client";
+import { money } from "../../../../../lib/line-calc";
 
 function fmt(v: string | number, dec = 2) {
   return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+/** Selling value of the stock on hand = metersOnHand × sale price per meter. */
+function calcSaleValue(r: InventoryItem) {
+  return money(r.metersOnHand, r.defaultSalePricePerMeter);
+}
+/** Accounting inventory cost = boardsOnHand × weighted-average cost per board. */
+function calcCostValue(r: InventoryItem) {
+  return money(r.boardsOnHand, r.avgCost);
 }
 
 export default function StockPage() {
@@ -146,9 +156,14 @@ export default function StockPage() {
                         <TR>
                           <TH>الكود</TH>
                           <TH>اسم الصنف</TH>
-                          <TH>مقاس اللوح (م)</TH>
+                          <TH>مقاس اللوح (م²)</TH>
                           <TH>الألواح</TH>
                           <TH>الأمتار</TH>
+                          <TH title="سعر بيع المتر">سعر المتر (بيع)</TH>
+                          <TH title="سعر شراء المتر الافتراضي">تكلفة المتر (شراء)</TH>
+                          <TH title="متوسط التكلفة المرجّح لكل لوح — للمحاسبة">متوسط التكلفة/لوح</TH>
+                          <TH title="قيمة البيع = الأمتار × سعر بيع المتر">قيمة البيع</TH>
+                          <TH title="قيمة المخزون المحاسبية = الألواح × متوسط التكلفة">قيمة التكلفة</TH>
                         </TR>
                       </THead>
                       <TBody>
@@ -159,6 +174,11 @@ export default function StockPage() {
                             <TD>{fmt(r.sizeMetersPerBoard)}</TD>
                             <TD className="font-medium">{fmt(r.boardsOnHand, 0)}</TD>
                             <TD className="font-medium">{fmt(r.metersOnHand)}</TD>
+                            <TD className="text-blue-700" dir="ltr">{fmt(r.defaultSalePricePerMeter)}</TD>
+                            <TD className="text-amber-700" dir="ltr">{fmt(r.defaultPurchasePricePerMeter)}</TD>
+                            <TD className="text-textSecondary" dir="ltr">{fmt(r.avgCost)}</TD>
+                            <TD className="text-blue-700 font-medium" dir="ltr">{fmt(calcSaleValue(r))}</TD>
+                            <TD className="text-amber-700 font-medium" dir="ltr">{fmt(calcCostValue(r))}</TD>
                           </TR>
                         ))}
                       </TBody>

@@ -14,6 +14,13 @@ import { resolveVariantCost, COST_MISSING_LABEL, COST_ESTIMATE_LABEL, type CostS
 import { isPostingConfigError } from "../../../../../lib/posting-config";
 import { ProductVariantSelect } from "../../../../../components/features/product-variant-select";
 import { type VariantItem } from "../../../../../lib/variant-select";
+import { switchVariantLine } from "../../../../../lib/variant-line";
+import {
+  boardArea,
+  totalMeters as calcTotalMeters,
+  lineTotalPerBoard,
+  taxAmount as calcTax,
+} from "../../../../../lib/line-calc";
 import {
   listSalesInvoices,
   getSalesInvoice,
@@ -35,8 +42,6 @@ import { AP_COLORS, apColorMap } from "../../../../../lib/ap-colors";
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
-const SIZE_K = 5.25;
-const SIZE_S = 4.0;
 
 interface BranchOption {
   id: string;
@@ -96,34 +101,21 @@ function mkLine(): LineFormState {
 }
 
 function recomputeLine(line: LineFormState, variant?: VariantOption): Partial<LineFormState> {
-  const boards = parseFloat(line.boardsQuantity) || 0;
-  const L = parseFloat(line.customL) || 0;
-  const W = parseFloat(line.customW) || 0;
-
-  // م² = حجم اللوح الواحد فقط (not multiplied by count)
-  const singleBoardSqm =
-    L > 0 && W > 0 ? L * W :
-    line.sizeChoice === "K" ? SIZE_K :
-    line.sizeChoice === "S" ? SIZE_S :
-    (variant ? parseFloat(variant.sizeMetersPerBoard) : 0);
-
-  // الكمية (م) = مجموع الأمتار — معلومة فقط، لا تؤثر على الإجمالي
-  const totalMeters = singleBoardSqm > 0 ? boards * singleBoardSqm : 0;
-
-  // الإجمالي = العدد × سعر الوحدة (العدد فقط هو الذي يؤثر)
-  const price     = parseFloat(line.unitPrice) || 0;
-  const cost      = parseFloat(line.costPrice) || 0;
-  const lineTotal = boards * price;
-  const lineCost  = boards * cost;
-  const taxRate   = parseFloat(line.taxRate) || 0;
-  const taxAmount = lineTotal * taxRate / 100;
+  // Decimal-safe (see lib/line-calc). م² per board = custom طول×عرض, كبير(5.25)/
+  // صغير(4), or the variant's stored size. Sales lines price PER BOARD:
+  //   lineTotal = عدد × سعر البيع. الكمية (م) = عدد × م²/لوح is informational only.
+  const perBoard  = boardArea(line.sizeChoice, line.customL, line.customW, variant?.sizeMetersPerBoard ?? "");
+  const meters    = calcTotalMeters(line.boardsQuantity || "0", perBoard);
+  const lineTotal = lineTotalPerBoard(line.boardsQuantity || "0", line.unitPrice || "0");
+  const lineCost  = lineTotalPerBoard(line.boardsQuantity || "0", line.costPrice || "0");
+  const tax       = calcTax(lineTotal, line.taxRate || "0");
 
   return {
-    sqm:            singleBoardSqm > 0 ? singleBoardSqm.toFixed(4) : "",
-    metersQuantity: totalMeters > 0    ? totalMeters.toFixed(4)     : "",
-    lineTotal:      lineTotal > 0      ? lineTotal.toFixed(2)        : "",
-    lineCost:       lineCost > 0       ? lineCost.toFixed(2)         : "",
-    taxAmount:      taxAmount > 0      ? taxAmount.toFixed(2)        : "",
+    sqm:            parseFloat(perBoard)  > 0 ? perBoard  : "",
+    metersQuantity: parseFloat(meters)    > 0 ? meters    : "",
+    lineTotal:      parseFloat(lineTotal) > 0 ? lineTotal : "",
+    lineCost:       parseFloat(lineCost)  > 0 ? lineCost  : "",
+    taxAmount:      parseFloat(tax)       > 0 ? tax       : "",
   };
 }
 
@@ -359,8 +351,9 @@ function InvoiceForm({
   function onVariantChange(idx: number, variantId: string) {
     const variant = variantMap.get(variantId);
     updateLine(idx, {
-      productVariantId: variantId,
-      unitPrice: variant?.defaultSalePrice ?? "0",
+      // Clear the previous variant's size overrides and load the new variant's
+      // own SALE price per meter — never keep a stale price or size.
+      ...switchVariantLine(variantId, variant?.defaultSalePrice),
       // Empty (not "0") when no cost is recorded, so the informational cost is
       // never a fabricated zero. COGS is unaffected (server uses avg_cost).
       costPrice: variant?.costValue ?? "",

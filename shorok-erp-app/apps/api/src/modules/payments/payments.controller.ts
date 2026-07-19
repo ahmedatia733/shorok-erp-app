@@ -394,6 +394,12 @@ export class PaymentsController {
       sizeMetersPerBoard: r.productVariant.sizeMetersPerBoard.toString(),
       boardsOnHand: r.boardsOnHand.toString(),
       metersOnHand: r.metersOnHand.toString(),
+      // Prices/cost are DISTINCT concepts, exposed separately so the UI never
+      // conflates them: sale price and purchase cost are per-meter defaults;
+      // avgCost is the server-maintained weighted-average accounting cost/board.
+      defaultSalePricePerMeter: r.productVariant.defaultSalePricePerMeter.toString(),
+      defaultPurchasePricePerMeter: r.productVariant.defaultPurchasePricePerMeter.toString(),
+      avgCost: r.productVariant.avgCost.toString(),
     }));
   }
 }

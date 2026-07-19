@@ -18,7 +18,15 @@ import {
 import { AP_COLORS, apColorMap } from "../../../../../../lib/ap-colors";
 import { ProductVariantSelect } from "../../../../../../components/features/product-variant-select";
 import { type VariantItem } from "../../../../../../lib/variant-select";
-import { boardArea, totalArea, BOARD_AREA_LARGE, BOARD_AREA_SMALL } from "../../../../../../lib/purchase-sizing";
+import { switchVariantLine } from "../../../../../../lib/variant-line";
+import {
+  boardArea,
+  totalMeters as calcTotalMeters,
+  lineTotalPerMeter,
+  taxAmount as calcTax,
+  BOARD_AREA_LARGE,
+  BOARD_AREA_SMALL,
+} from "../../../../../../lib/line-calc";
 
 const SIZE_K = BOARD_AREA_LARGE; // كبير — 5.25 م²/لوح
 const SIZE_S = BOARD_AREA_SMALL; // صغير — 4 م²/لوح
@@ -64,28 +72,19 @@ function mkLine(): InvoiceLine {
 }
 
 function recompute(line: InvoiceLine, variant?: VariantOption): Partial<InvoiceLine> {
-  const boards = parseFloat(line.boardsQuantity) || 0;
-  const L = parseFloat(line.customL) || 0;
-  const W = parseFloat(line.customW) || 0;
-
-  // Area (م²) per board — standard كبير/صغير, custom طول×عرض, or the
-  // variant's stored size. This is what the "مساحة اللوح" field shows, so
-  // كبير/صغير now display 5.25 / 4 instead of an empty cell.
-  const variantSize = variant ? parseFloat(variant.sizeMetersPerBoard) : 0;
-  const perBoard = boardArea(line.sizeChoice, L, W, variantSize);
-
-  // Total line area (م²) = boards × area per board.
-  const meters = totalArea(boards, perBoard);
-
-  const price = parseFloat(line.unitPrice) || 0;
-  const lineTotal = meters * price;
-  const taxRate = parseFloat(line.taxRate) || 0;
-  const taxAmount = (lineTotal * taxRate) / 100;
+  // Area (م²) per board — standard كبير/صغير, custom طول×عرض, or the variant's
+  // stored size. All arithmetic is Decimal-safe (see lib/line-calc), so the
+  // preview equals what the API posts. Purchase lines price PER METER:
+  //   totalMeters = boards × areaPerBoard,  lineTotal = totalMeters × price.
+  const perBoard  = boardArea(line.sizeChoice, line.customL, line.customW, variant?.sizeMetersPerBoard ?? "");
+  const meters    = calcTotalMeters(line.boardsQuantity || "0", perBoard);
+  const lineTotal = lineTotalPerMeter(meters, line.unitPrice || "0");
+  const tax       = calcTax(lineTotal, line.taxRate || "0");
   return {
-    sqm: perBoard > 0 ? perBoard.toFixed(4) : "",
-    metersQuantity: meters > 0 ? meters.toFixed(4) : "",
-    lineTotal: lineTotal > 0 ? lineTotal.toFixed(2) : "",
-    taxAmount: taxAmount > 0 ? taxAmount.toFixed(2) : "",
+    sqm:            parseFloat(perBoard)  > 0 ? perBoard  : "",
+    metersQuantity: parseFloat(meters)    > 0 ? meters    : "",
+    lineTotal:      parseFloat(lineTotal) > 0 ? lineTotal : "",
+    taxAmount:      parseFloat(tax)       > 0 ? tax       : "",
   };
 }
 
@@ -134,10 +133,9 @@ export default function NewPurchaseInvoicePage() {
 
   function onVariantChange(idx: number, vid: string) {
     const variant = variantMap.get(vid);
-    updateLine(idx, {
-      productVariantId: vid,
-      unitPrice: variant?.defaultPurchasePricePerMeter ?? "",
-    });
+    // Clear the previous variant's size overrides and load the new variant's
+    // own purchase cost per meter — never keep a stale price or size.
+    updateLine(idx, switchVariantLine(vid, variant?.defaultPurchasePricePerMeter));
   }
 
   const subtotal = lines.reduce((s, l) => s + (parseFloat(l.lineTotal) || 0), 0);
@@ -319,6 +317,7 @@ export default function NewPurchaseInvoicePage() {
                       type="number"
                       min="0"
                       step="1"
+                      data-testid={`pi-boards-${idx}`}
                       value={line.boardsQuantity}
                       onChange={(e) => updateLine(idx, { boardsQuantity: e.target.value })}
                       className="w-full text-center bg-transparent text-sm focus:outline-none"
@@ -369,10 +368,10 @@ export default function NewPurchaseInvoicePage() {
                   </td>
 
                   {/* م² — auto */}
-                  <td className="border border-border px-1 py-1 text-center text-xs text-primary font-semibold" dir="ltr">
+                  <td className="border border-border px-1 py-1 text-center text-xs text-primary font-semibold" dir="ltr" data-testid={`pi-sqm-${idx}`}>
                     {line.sqm}
                   </td>
-                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr">
+                  <td className="border border-border px-1 py-1 text-center text-xs" dir="ltr" data-testid={`pi-meters-${idx}`}>
                     {line.metersQuantity}
                   </td>
                   <td className="border border-border px-1 py-1">
@@ -388,6 +387,7 @@ export default function NewPurchaseInvoicePage() {
                       type="number"
                       min="0"
                       step="0.01"
+                      data-testid={`pi-price-${idx}`}
                       value={line.unitPrice}
                       onChange={(e) => updateLine(idx, { unitPrice: e.target.value })}
                       className="w-full text-center bg-transparent text-sm focus:outline-none"
@@ -397,6 +397,7 @@ export default function NewPurchaseInvoicePage() {
                   <td
                     className="border border-border px-1 py-1 text-center font-semibold text-xs"
                     dir="ltr"
+                    data-testid={`pi-total-${idx}`}
                   >
                     {line.lineTotal}
                   </td>

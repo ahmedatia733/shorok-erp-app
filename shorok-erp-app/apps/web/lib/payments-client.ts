@@ -64,6 +64,10 @@ export interface InventoryItem {
   sizeMetersPerBoard: string;
   boardsOnHand: string;
   metersOnHand: string;
+  // Distinct pricing concepts — kept separate so the UI never conflates them.
+  defaultSalePricePerMeter: string;      // selling price per meter
+  defaultPurchasePricePerMeter: string;  // default purchase cost per meter
+  avgCost: string;                       // weighted-average accounting cost per board
 }
 
 export const listPaymentAccounts = () =>

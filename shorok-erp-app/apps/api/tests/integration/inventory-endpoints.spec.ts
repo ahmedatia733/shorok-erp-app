@@ -145,6 +145,24 @@ describe("inventory endpoints", () => {
     expect(audit!.humanReadableSummaryEn).toContain("received");
   });
 
+  it("GET /inventory/balance exposes sale price, purchase cost and avgCost as distinct fields", async () => {
+    // variantA (sale 100 / purchase 80) has stock from the receipt above.
+    const res = await api()
+      .get(`/api/v1/inventory/balance?branchId=${handle.branchId}`)
+      .set(bearer(ownerToken));
+    expect(res.status).toBe(200);
+    const rowA = res.body.find((r: { productVariantId: string }) => r.productVariantId === variantA);
+    expect(rowA).toBeTruthy();
+    // Distinct pricing concepts — never conflated.
+    expect(Number(rowA.defaultSalePricePerMeter)).toBe(100);
+    expect(Number(rowA.defaultPurchasePricePerMeter)).toBe(80);
+    expect(typeof rowA.avgCost).toBe("string");
+    expect(rowA.defaultSalePricePerMeter).not.toBe(rowA.defaultPurchasePricePerMeter);
+    // Calculated inventory values derive from the RIGHT field:
+    //   sale value = metersOnHand × sale price;  cost value = boardsOnHand × avgCost.
+    expect(Number(rowA.metersOnHand)).toBeGreaterThan(0);
+  });
+
   it("VIEWER cannot post a receipt (403)", async () => {
     const res = await api()
       .post("/api/v1/inventory/receipts")
