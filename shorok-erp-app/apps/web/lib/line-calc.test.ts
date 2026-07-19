@@ -56,6 +56,22 @@ describe("line-calc — Decimal safety & rounding", () => {
   });
 });
 
+describe("line-calc — sales board cost & line total (spec 7)", () => {
+  // Estimated board cost = purchase price per meter × board size (NOT avg_cost).
+  it("size 4.00 @ 498/m → board cost 1,992.00", () => {
+    expect(money("498", "4.00")).toBe("1992.00");
+  });
+  it("size 5.25 @ 498/m → board cost 2,614.50", () => {
+    expect(money("498", "5.25")).toBe("2614.50");
+  });
+  it("size 3.75 @ 750/m → board cost 2,812.50", () => {
+    expect(money("750", "3.75")).toBe("2812.50");
+  });
+  it("8 boards × manual sale price 3000 → line total 24,000.00", () => {
+    expect(lineTotalPerBoard("8", "3000")).toBe("24000.00");
+  });
+});
+
 describe("line-calc — sales (per board) vs purchase (per meter)", () => {
   it("14) frontend line totals agree with the backend formulas", () => {
     // Purchase backend: lineTotal = metersQuantity × unitPrice (per meter).

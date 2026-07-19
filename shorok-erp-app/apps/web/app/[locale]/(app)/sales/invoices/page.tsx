@@ -10,7 +10,6 @@ import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { useHasRole } from "../../../../../lib/auth";
-import { resolveVariantCost, COST_MISSING_LABEL, COST_ESTIMATE_LABEL, type CostSource } from "../../../../../lib/variant-cost";
 import { isPostingConfigError } from "../../../../../lib/posting-config";
 import { ProductVariantSelect } from "../../../../../components/features/product-variant-select";
 import { type VariantItem } from "../../../../../lib/variant-select";
@@ -20,6 +19,7 @@ import {
   totalMeters as calcTotalMeters,
   lineTotalPerBoard,
   taxAmount as calcTax,
+  money,
 } from "../../../../../lib/line-calc";
 import {
   listSalesInvoices,
@@ -54,9 +54,10 @@ interface VariantOption {
   skuNameAr: string;
   sizeMetersPerBoard: string;
   defaultSalePrice: string;
-  /** Resolved informational cost (avg_cost → default → null); see resolveVariantCost. */
-  costValue: string | null;
-  costSource: CostSource;
+  /** Estimated board cost = defaultPurchasePricePerMeter × sizeMetersPerBoard
+   *  (Decimal-safe). Replaces the stale avg_cost that reflected the old 500
+   *  meter price. Informational preview only — COGS still uses avg_cost. */
+  boardCost: string;
 }
 
 interface LineFormState {
@@ -98,6 +99,15 @@ function mkLine(): LineFormState {
     taxAmount: "",
     lineCost: "",
   };
+}
+
+/** Compact numeric label for the variant dropdown (Latin digits + separators).
+ *  `dp` fixes the decimals (cost → 2 dp "1,992.00"); omit for a bare price "498". */
+function fmtLabel(v?: string | null, dp?: number): string {
+  if (v == null || v === "") return "—";
+  const n = Number(v);
+  if (Number.isNaN(n)) return "—";
+  return n.toLocaleString("en-US", dp != null ? { minimumFractionDigits: dp, maximumFractionDigits: dp } : {});
 }
 
 function recomputeLine(line: LineFormState, variant?: VariantOption): Partial<LineFormState> {
@@ -330,8 +340,8 @@ function InvoiceForm({
     skuCode: v.skuCode,
     colorNameAr: v.skuNameAr,
     sizeMetersPerBoard: v.sizeMetersPerBoard,
-    price: v.defaultSalePrice,
-    cost: v.costSource === "missing" ? "غير مسجل" : `${v.costValue}${v.costSource === "estimate" ? ` (${COST_ESTIMATE_LABEL})` : ""}`,
+    price: v.defaultSalePrice,  // سعر المتر (بيع)
+    cost: v.boardCost,          // تكلفة اللوح = سعر شراء المتر × مقاس اللوح
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -351,12 +361,12 @@ function InvoiceForm({
   function onVariantChange(idx: number, variantId: string) {
     const variant = variantMap.get(variantId);
     updateLine(idx, {
-      // Clear the previous variant's size overrides and load the new variant's
-      // own SALE price per meter — never keep a stale price or size.
-      ...switchVariantLine(variantId, variant?.defaultSalePrice),
-      // Empty (not "0") when no cost is recorded, so the informational cost is
-      // never a fabricated zero. COGS is unaffected (server uses avg_cost).
-      costPrice: variant?.costValue ?? "",
+      // The sale price is entered MANUALLY: leave it EMPTY on selection and
+      // clear any price/size carried from the previous variant (pass "").
+      ...switchVariantLine(variantId, ""),
+      // Estimated board cost = purchase price/m × board size (informational
+      // profit preview only; COGS still posts from avg_cost server-side).
+      costPrice: variant?.boardCost ?? "",
     });
   }
 
@@ -560,8 +570,8 @@ function InvoiceForm({
               <th className="border border-border px-2 py-1.5 text-center w-14">م²</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">الوحدة</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">سعر البيع</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">سعر التكلفة</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">سعر بيع اللوح</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">تكلفة اللوح</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">الإجمالي</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة%</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة</th>
@@ -571,9 +581,6 @@ function InvoiceForm({
           </thead>
           <tbody>
             {lines.map((line, idx) => {
-              const selVariant = variantMap.get(line.productVariantId);
-              const costMissing = selVariant?.costSource === "missing";
-              const costEstimate = selVariant?.costSource === "estimate";
               const lineProfit =
                 (parseFloat(line.lineTotal) || 0) - (parseFloat(line.lineCost) || 0);
               const profitPct =
@@ -591,7 +598,9 @@ function InvoiceForm({
                       variants={variantItems}
                       value={line.productVariantId}
                       onChange={(id) => onVariantChange(idx, id)}
-                      renderExtra={(v) => `بيع ${v.price ?? "—"} · تكلفة ${v.cost ?? "غير مسجل"}`}
+                      renderExtra={(v) =>
+                        `سعر المتر ${fmtLabel(v.price)} — تكلفة اللوح ${fmtLabel(v.cost, 2)}`
+                      }
                     />
                   </td>
                   {/* عدد */}
@@ -660,18 +669,13 @@ function InvoiceForm({
                       onChange={(e) => updateLine(idx, { unitPrice: e.target.value })}
                       className="w-full text-center bg-transparent text-sm focus:outline-none" dir="ltr" />
                   </td>
-                  {/* سعر التكلفة */}
+                  {/* تكلفة اللوح — estimate = سعر شراء المتر × مقاس اللوح (editable) */}
                   <td className="border border-border px-1 py-1">
                     <input type="number" min="0" step="0.01" value={line.costPrice}
                       onChange={(e) => updateLine(idx, { costPrice: e.target.value })}
-                      placeholder={costMissing ? COST_MISSING_LABEL : ""}
-                      title={costMissing ? COST_MISSING_LABEL : costEstimate ? `${COST_ESTIMATE_LABEL} — من سعر الشراء الافتراضي` : ""}
-                      className={
-                        "w-full text-center bg-transparent text-xs focus:outline-none " +
-                        (costMissing ? "placeholder:text-red-500 placeholder:text-[10px]" : costEstimate ? "text-amber-600" : "")
-                      }
+                      title="تكلفة اللوح التقديرية = سعر شراء المتر × مقاس اللوح"
+                      className="w-full text-center bg-transparent text-xs focus:outline-none text-amber-600"
                       dir="ltr" />
-                    {costEstimate && <span className="block text-[9px] text-amber-600 text-center leading-none">{COST_ESTIMATE_LABEL}</span>}
                   </td>
                   {/* الإجمالي */}
                   <td className="border border-border px-1 py-1 text-center font-semibold text-xs" dir="ltr">
@@ -1042,18 +1046,16 @@ export default function SalesInvoicesPage() {
         setBranches(brs);
         setLeafAccounts(accts.filter((a) => a.isLeaf && a.active));
         setVariants(
-          varRows.map((v) => {
-            const cost = resolveVariantCost(v.avgCost, v.defaultPurchasePricePerMeter);
-            return {
-              id: v.id,
-              skuCode: v.sku.code,
-              skuNameAr: v.sku.colorNameAr,
-              sizeMetersPerBoard: v.sizeMetersPerBoard,
-              defaultSalePrice: v.defaultSalePricePerMeter,
-              costValue: cost.value,
-              costSource: cost.source,
-            };
-          }),
+          varRows.map((v) => ({
+            id: v.id,
+            skuCode: v.sku.code,
+            skuNameAr: v.sku.colorNameAr,
+            sizeMetersPerBoard: v.sizeMetersPerBoard,
+            defaultSalePrice: v.defaultSalePricePerMeter,
+            // Current estimated board cost from the (corrected) purchase price
+            // per meter × board size — NOT the stale avg_cost.
+            boardCost: money(v.defaultPurchasePricePerMeter, v.sizeMetersPerBoard),
+          })),
         );
       } catch {
         // ignore

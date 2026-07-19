@@ -27,4 +27,13 @@ describe("switchVariantLine", () => {
     expect(switchVariantLine("v", undefined).unitPrice).toBe("");
     expect(switchVariantLine("v", null).unitPrice).toBe("");
   });
+
+  it("sales passes an empty price so the input stays blank and old size clears", () => {
+    // Sales entry: the sale price is typed manually, so onVariantChange passes "".
+    const reset = switchVariantLine("variant-B", "");
+    expect(reset.unitPrice).toBe("");
+    expect(reset.sizeChoice).toBe("");
+    expect(reset.customL).toBe("");
+    expect(reset.customW).toBe("");
+  });
 });
