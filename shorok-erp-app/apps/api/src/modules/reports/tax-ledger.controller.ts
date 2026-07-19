@@ -19,6 +19,36 @@ const REF_TYPE_LABELS: Record<string, string> = {
   expense:          "مصروف",
 };
 
+// Reference types whose VAT belongs to the INPUT side (purchases/expenses) or
+// the OUTPUT side (sales). A single VAT account can hold both, and reversals
+// flip the debit/credit sign, so we classify by the transaction's ORIGIN — not
+// by which side the line lands on. A cancellation reversal carries the original
+// document's referenceType, so its (opposite-signed) VAT line nets against the
+// original on the same side, driving the cancelled document to zero net VAT.
+const INPUT_REF_TYPES  = new Set(["purchase_invoice", "purchase_return", "expense"]);
+const OUTPUT_REF_TYPES = new Set(["sales_invoice", "sales_return"]);
+
+type VatDirection = "input" | "output";
+
+/**
+ * Signed VAT contribution of one journal line, classified by transaction origin.
+ * - input  (purchase/expense): amount = debit − credit  (original +, reversal −)
+ * - output (sale):             amount = credit − debit   (original +, reversal −)
+ * - manual/unknown: by the line's own side (debit → input, credit → output)
+ */
+function classifyVatLine(
+  referenceType: string,
+  debit: Decimal,
+  credit: Decimal,
+): { direction: VatDirection; amount: Decimal } {
+  if (INPUT_REF_TYPES.has(referenceType))  return { direction: "input",  amount: debit.minus(credit) };
+  if (OUTPUT_REF_TYPES.has(referenceType)) return { direction: "output", amount: credit.minus(debit) };
+  // Manual journal / unknown source: fall back to the line's natural side.
+  return debit.gte(credit)
+    ? { direction: "input",  amount: debit.minus(credit) }
+    : { direction: "output", amount: credit.minus(debit) };
+}
+
 @Controller("reports")
 export class TaxLedgerController {
   constructor(private readonly prisma: PrismaService) {}
@@ -107,6 +137,8 @@ export class TaxLedgerController {
             referenceType: true,
             referenceId: true,
             description: true,
+            status: true,
+            reversalOfId: true,
           },
         },
         account: { select: { id: true, code: true, nameAr: true } },
@@ -118,8 +150,10 @@ export class TaxLedgerController {
     });
 
     // ── Opening balance (all before fromDate) ─────────────────────────────
-    let openingDebit  = new Decimal(0);
-    let openingCredit = new Decimal(0);
+    let openingDebit     = new Decimal(0);
+    let openingCredit    = new Decimal(0);
+    let openingInputVat  = new Decimal(0);
+    let openingOutputVat = new Decimal(0);
     const periodLines: typeof lines = [];
 
     for (const line of lines) {
@@ -127,6 +161,13 @@ export class TaxLedgerController {
       if (d < fromDate) {
         openingDebit  = openingDebit.plus(line.debit.toString());
         openingCredit = openingCredit.plus(line.credit.toString());
+        const c = classifyVatLine(
+          line.journalEntry.referenceType ?? "journal",
+          new Decimal(line.debit.toString()),
+          new Decimal(line.credit.toString()),
+        );
+        if (c.direction === "input") openingInputVat  = openingInputVat.plus(c.amount);
+        else                         openingOutputVat = openingOutputVat.plus(c.amount);
       } else if (d <= toDate) {
         periodLines.push(line);
       }
@@ -142,6 +183,9 @@ export class TaxLedgerController {
       running = running.plus(dr).minus(cr);
 
       const refType = line.journalEntry.referenceType ?? "journal";
+      const isReversal = line.journalEntry.reversalOfId != null;
+      const reversed   = line.journalEntry.status === "REVERSED";
+      const vat = classifyVatLine(refType, dr, cr);
       return {
         id:            line.id,
         entryId:       line.journalEntry.id,
@@ -159,6 +203,11 @@ export class TaxLedgerController {
         debit:         dr.gt(0) ? dr.toFixed(2) : "",
         credit:        cr.gt(0) ? cr.toFixed(2) : "",
         runningBalance: running.toFixed(2),
+        // VAT classification by transaction origin (nets reversals correctly).
+        vatDirection:  vat.direction,
+        vatAmount:     vat.amount.toFixed(2),
+        isReversal,    // this line belongs to a reversal (cancellation) entry
+        reversed,      // the entry this line belongs to has itself been reversed
       };
     });
 
@@ -234,36 +283,51 @@ export class TaxLedgerController {
     });
 
     // ── Period totals ─────────────────────────────────────────────────────
-    let periodDebit  = new Decimal(0);
-    let periodCredit = new Decimal(0);
+    // Raw debit/credit are kept for the faithful GL ledger view; input/output
+    // VAT are netted by transaction origin so reversals cancel their originals.
+    let periodDebit     = new Decimal(0);
+    let periodCredit    = new Decimal(0);
+    let periodInputVat  = new Decimal(0);
+    let periodOutputVat = new Decimal(0);
     for (const e of entries) {
       periodDebit  = periodDebit.plus(e.debit   || "0");
       periodCredit = periodCredit.plus(e.credit || "0");
+      if (e.vatDirection === "input") periodInputVat  = periodInputVat.plus(e.vatAmount);
+      else                            periodOutputVat = periodOutputVat.plus(e.vatAmount);
     }
 
-    const closingDebit  = openingDebit.plus(periodDebit);
-    const closingCredit = openingCredit.plus(periodCredit);
-    const netPosition   = closingCredit.minus(closingDebit); // positive = you owe government
+    const closingDebit     = openingDebit.plus(periodDebit);
+    const closingCredit    = openingCredit.plus(periodCredit);
+    const closingInputVat  = openingInputVat.plus(periodInputVat);
+    const closingOutputVat = openingOutputVat.plus(periodOutputVat);
+    // Net VAT position by origin: output − input. Positive = liability (owe gov).
+    const netPosition = closingOutputVat.minus(closingInputVat);
 
     return {
       from: query.from ?? null,
       to:   query.to   ?? null,
       accounts: accounts.map((a) => ({ id: a.id, code: a.code, nameAr: a.nameAr })),
       opening: {
-        debit:  openingDebit.toFixed(2),
-        credit: openingCredit.toFixed(2),
-        net:    openingDebit.minus(openingCredit).toFixed(2),
+        debit:     openingDebit.toFixed(2),
+        credit:    openingCredit.toFixed(2),
+        net:       openingDebit.minus(openingCredit).toFixed(2),
+        inputVat:  openingInputVat.toFixed(2),
+        outputVat: openingOutputVat.toFixed(2),
       },
       entries,
       periodTotals: {
-        debit:  periodDebit.toFixed(2),
-        credit: periodCredit.toFixed(2),
-        net:    periodDebit.minus(periodCredit).toFixed(2),
+        debit:     periodDebit.toFixed(2),
+        credit:    periodCredit.toFixed(2),
+        net:       periodDebit.minus(periodCredit).toFixed(2),
+        inputVat:  periodInputVat.toFixed(2),
+        outputVat: periodOutputVat.toFixed(2),
       },
       closing: {
-        debit:  closingDebit.toFixed(2),
-        credit: closingCredit.toFixed(2),
-        net:    netPosition.toFixed(2),
+        debit:     closingDebit.toFixed(2),
+        credit:    closingCredit.toFixed(2),
+        inputVat:  closingInputVat.toFixed(2),
+        outputVat: closingOutputVat.toFixed(2),
+        net:       netPosition.toFixed(2),
         // positive = liability (owe government), negative = receivable (gov owes you)
         status: netPosition.gt(0) ? "liability" : netPosition.lt(0) ? "receivable" : "zero",
       },
@@ -276,10 +340,10 @@ export class TaxLedgerController {
       from: query.from ?? null,
       to:   query.to   ?? null,
       accounts: [],
-      opening:      { debit: zero, credit: zero, net: zero },
+      opening:      { debit: zero, credit: zero, net: zero, inputVat: zero, outputVat: zero },
       entries:      [],
-      periodTotals: { debit: zero, credit: zero, net: zero },
-      closing:      { debit: zero, credit: zero, net: zero, status: "zero" },
+      periodTotals: { debit: zero, credit: zero, net: zero, inputVat: zero, outputVat: zero },
+      closing:      { debit: zero, credit: zero, net: zero, inputVat: zero, outputVat: zero, status: "zero" },
     };
   }
 }

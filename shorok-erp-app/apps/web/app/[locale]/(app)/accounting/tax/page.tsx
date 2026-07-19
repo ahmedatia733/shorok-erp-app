@@ -15,6 +15,7 @@ import {
   type TaxLedgerResult,
   type AccountRow,
 } from "../../../../../lib/tax-client";
+import { splitByDirection, taxSummary } from "../../../../../lib/tax-summary";
 
 function fmt(v: string | number) {
   const n = typeof v === "string" ? parseFloat(v) : v;
@@ -36,9 +37,12 @@ function thisMonthRange() {
 // ─── Summary cards ────────────────────────────────────────────────────────────
 
 function SummaryCards({ result }: { result: TaxLedgerResult }) {
-  const inputVAT  = parseFloat(result.periodTotals.debit)  || 0;  // ضريبة مدخلات
-  const outputVAT = parseFloat(result.periodTotals.credit) || 0;  // ضريبة مخرجات
-  const net       = parseFloat(result.closing.net);                // output - input
+  // Netted by transaction origin: a cancelled purchase's input VAT reverses to
+  // zero here instead of leaking into output VAT (raw debit/credit would).
+  const summary   = taxSummary(result);
+  const inputVAT  = summary.inputVat;   // ضريبة مدخلات (صافي)
+  const outputVAT = summary.outputVat;  // ضريبة مخرجات (صافي)
+  const net       = summary.net;        // output - input
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -100,20 +104,19 @@ function SplitPanel({
   title,
   color,
   entries,
-  type,
+  direction,
 }: {
   title: string;
   color: "blue" | "orange";
   entries: TaxEntry[];
-  type: "debit" | "credit";
+  direction: "input" | "output";
 }) {
-  const filtered = entries.filter((e) =>
-    type === "debit" ? !!e.debit : !!e.credit,
-  );
-  const total = filtered.reduce(
-    (s, e) => s + parseFloat(type === "debit" ? e.debit || "0" : e.credit || "0"),
-    0,
-  );
+  // Classify by VAT direction (origin), not raw debit/credit — a cancellation
+  // reversal lands on the SAME side as its original with a negative amount, so
+  // it nets the total down instead of appearing on the opposite side.
+  const rows  = splitByDirection(entries, direction);
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  const filtered = rows.map((r) => r.entry);
 
   const border  = color === "blue"   ? "border-blue-200"   : "border-orange-200";
   const bg      = color === "blue"   ? "bg-blue-50"        : "bg-orange-50";
@@ -140,8 +143,11 @@ function SplitPanel({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((e) => (
-                <tr key={e.id} className="border-t border-border hover:bg-surface/50">
+              {filtered.map((e) => {
+                const amt = parseFloat(e.vatAmount || "0");
+                const isNeg = amt < 0;
+                return (
+                <tr key={e.id} className={`border-t border-border hover:bg-surface/50 ${e.reversed ? "opacity-60" : ""}`}>
                   <td className="px-3 py-1.5 whitespace-nowrap">{e.date}</td>
                   <td className="px-3 py-1.5">
                     <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
@@ -154,15 +160,22 @@ function SplitPanel({
                     {e.reference && (
                       <span className="ms-1 font-mono text-xs">{e.reference}</span>
                     )}
+                    {e.isReversal && (
+                      <span className="ms-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">إلغاء / عكس</span>
+                    )}
+                    {e.reversed && !e.isReversal && (
+                      <span className="ms-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-red-50 text-red-600 line-through">ملغاة</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 text-textSecondary max-w-xs truncate">
                     {e.note || e.description}
                   </td>
-                  <td className={`px-3 py-1.5 text-end font-semibold ${text}`} dir="ltr">
-                    {fmt(type === "debit" ? e.debit : e.credit)}
+                  <td className={`px-3 py-1.5 text-end font-semibold ${isNeg ? "text-red-600" : text}`} dir="ltr">
+                    {isNeg ? `(${fmt(Math.abs(amt))})` : fmt(amt)}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             <tfoot>
               <tr className={`${bg} font-bold`}>
@@ -344,7 +357,7 @@ function FullLedger({ result }: { result: TaxLedgerResult }) {
                 <tbody key={e.id}>
                   {/* Main row */}
                   <TR
-                    className={hasDetail ? "cursor-pointer hover:bg-surface/60" : ""}
+                    className={`${hasDetail ? "cursor-pointer hover:bg-surface/60" : ""} ${e.reversed ? "opacity-60" : ""}`}
                     onClick={hasDetail ? () => toggle(e.id) : undefined}
                   >
                     {/* Expand toggle */}
@@ -366,6 +379,12 @@ function FullLedger({ result }: { result: TaxLedgerResult }) {
                         {e.referenceLabel}
                         {e.reference && <span className="ms-1 font-mono">{e.reference}</span>}
                       </span>
+                      {e.isReversal && (
+                        <span className="ms-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-red-100 text-red-700">إلغاء / عكس</span>
+                      )}
+                      {e.reversed && !e.isReversal && (
+                        <span className="ms-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-red-50 text-red-600 line-through">ملغاة</span>
+                      )}
                     </TD>
                     {/* Customer/Supplier name from invoiceDetail */}
                     <TD className="text-xs font-medium">
@@ -625,13 +644,13 @@ export default function TaxLedgerPage() {
               title="ضريبة المدخلات (مدين) — ضريبة المشتريات"
               color="blue"
               entries={result.entries}
-              type="debit"
+              direction="input"
             />
             <SplitPanel
               title="ضريبة المخرجات (دائن) — ضريبة المبيعات"
               color="orange"
               entries={result.entries}
-              type="credit"
+              direction="output"
             />
           </div>
 
@@ -653,9 +672,8 @@ export default function TaxLedgerPage() {
 }
 
 function EquationCard({ result }: { result: TaxLedgerResult }) {
-  const input  = parseFloat(result.periodTotals.debit)  || 0;
-  const output = parseFloat(result.periodTotals.credit) || 0;
-  const net    = output - input;
+  const { inputVat: input, outputVat: output } = taxSummary(result);
+  const net = output - input;
 
   return (
     <Card className="no-print">

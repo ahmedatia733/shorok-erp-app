@@ -43,12 +43,20 @@ export interface TaxEntry {
   credit: string;
   runningBalance: string;
   invoiceDetail: TaxInvoiceDetail | null;
+  // VAT classified by transaction origin (purchase → input, sale → output),
+  // so reversals net against their original instead of flipping sides.
+  vatDirection: "input" | "output";
+  vatAmount: string;   // signed net contribution to its direction (reversal = negative)
+  isReversal: boolean; // this line belongs to a reversal (cancellation) entry
+  reversed: boolean;   // the entry this line belongs to has itself been reversed
 }
 
 export interface TaxBalance {
   debit: string;
   credit: string;
   net: string;
+  inputVat: string;   // net input VAT (purchases − their reversals)
+  outputVat: string;  // net output VAT (sales − their reversals)
 }
 
 export interface TaxLedgerResult {
