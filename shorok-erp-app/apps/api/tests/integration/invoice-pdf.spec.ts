@@ -124,6 +124,30 @@ describe("invoice PDF export", () => {
     assertPdf(res, ".pdf");
   });
 
+  it("sales PDF filename is sales-invoice-SI-{number}.pdf and export mutates nothing", async () => {
+    const id = await createSalesDraft();
+    await confirmSales(id);
+    const snap = async () => ({
+      status: (await handle.prisma.salesInvoice.findUnique({ where: { id } }))!.status,
+      je: await handle.prisma.journalEntry.count(),
+      mv: await handle.prisma.inventoryMovement.count(),
+      lines: await handle.prisma.salesInvoiceLine.count(),
+    });
+    const before = await snap();
+    const res = await getPdf(`/api/v1/sales-invoices/${id}/pdf`);
+    assertPdf(res, "sales-invoice-SI-");
+    expect(res.headers["content-disposition"]).toMatch(/filename="sales-invoice-SI-\d+\.pdf"/);
+    expect(await snap()).toEqual(before); // read-only export: nothing changed
+  });
+
+  it("rejects a non-authorized role (VIEWER → 403), no PDF", async () => {
+    const id = await createSalesDraft();
+    await handle.prisma.user.create({ data: { name: "V", phone: "+201509090909", passwordHash: await bcrypt.hash("Pwd@2026!", 10), role: "VIEWER", status: "ACTIVE" } });
+    const vToken = (await request(server()).post("/api/v1/auth/login").send({ phone: "+201509090909", password: "Pwd@2026!" })).body.accessToken;
+    const res = await request(server()).get(`/api/v1/sales-invoices/${id}/pdf`).set(H(vToken));
+    expect(res.status).toBe(403);
+  });
+
   it("confirmed purchase invoice → downloadable application/pdf", async () => {
     const id = await createPurchase();
     const res = await getPdf(`/api/v1/purchase-invoices/${id}/pdf`);

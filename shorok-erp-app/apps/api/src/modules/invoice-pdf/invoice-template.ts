@@ -21,6 +21,7 @@ export interface InvoicePdfData {
   issueDate: string;
   dueDate?: string | null;
   party: { code?: string | null; name: string; phone?: string | null; address?: string | null; taxNumber?: string | null };
+  representative?: string | null; // المندوب — shown when the invoice has one
   lines: InvoicePdfLine[];
   totals: { subtotal: string; vat: string; discount?: string | null; grandTotal: string };
   notes?: string | null;
@@ -101,6 +102,7 @@ ${watermark ? `<div class="watermark">${watermark}</div>` : ""}
       <div><b>الفرع:</b> ${esc(d.branchName)}</div>
       <div><b>التاريخ:</b> ${esc(d.issueDate)}</div>
       ${d.dueDate ? `<div><b>الاستحقاق:</b> ${esc(d.dueDate)}</div>` : ""}
+      ${d.representative ? `<div><b>المندوب:</b> ${esc(d.representative)}</div>` : ""}
       ${d.paymentStatus ? `<div><b>حالة السداد:</b> ${esc(d.paymentStatus)}</div>` : ""}
     </div>
   </div>

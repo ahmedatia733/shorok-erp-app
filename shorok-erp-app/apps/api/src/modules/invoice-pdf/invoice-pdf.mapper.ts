@@ -60,6 +60,7 @@ export function salesInvoiceToPdfData(inv: any, companyNameAr: string): InvoiceP
       name: inv.customer?.nameAr ?? "",
       phone: inv.customer?.phone ?? null,
     },
+    representative: inv.salesRepresentative?.nameAr ?? null,
     lines,
     totals: {
       subtotal: money(inv.subtotal),

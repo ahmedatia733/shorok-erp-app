@@ -35,6 +35,7 @@ import {
   type SalesInvoiceRow,
   type SalesInvoiceDetail,
 } from "../../../../../lib/sales-invoices-client";
+import { downloadInvoicePdf } from "../../../../../lib/invoice-pdf-client";
 import { listCustomers, createCustomer, type CustomerRow } from "../../../../../lib/customers-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 import { listRepresentatives, type SalesRepresentative } from "../../../../../lib/sales-representatives-client";
@@ -1023,6 +1024,25 @@ export default function SalesInvoicesPage() {
 
   // Print state
   const [printInvoice, setPrintInvoice] = useState<SalesInvoiceDetail | null>(null);
+  // Direct-PDF-download state (per invoice id): which invoice is generating and
+  // which one last failed, so we can disable the button + show an Arabic error.
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  const [pdfErrorId, setPdfErrorId] = useState<string | null>(null);
+
+  async function handleSavePdf(inv: SalesInvoiceRow) {
+    if (pdfBusyId) return; // prevent duplicate/concurrent clicks
+    setPdfBusyId(inv.id);
+    setPdfErrorId(null);
+    try {
+      // Authenticated download via the canonical /sales-invoices/:id/pdf endpoint;
+      // the server sets the Content-Disposition filename (sales-invoice-SI-N.pdf).
+      await downloadInvoicePdf("sales", inv.id, `sales-invoice-SI-${inv.invoiceNumber}`);
+    } catch {
+      setPdfErrorId(inv.id);
+    } finally {
+      setPdfBusyId(null);
+    }
+  }
 
   const loadInvoices = useCallback(
     async (cursor?: string | null) => {
@@ -1365,7 +1385,7 @@ export default function SalesInvoicesPage() {
                             <TD colSpan={9} className="p-0">
                               <div className="border-t">
                                 <ExpandedRow invoice={detail} locale={locale} />
-                                <div className="p-3 no-print">
+                                <div className="p-3 no-print flex flex-wrap items-center gap-2" dir="rtl">
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -1376,6 +1396,26 @@ export default function SalesInvoicesPage() {
                                   >
                                     طباعة
                                   </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSavePdf(inv)}
+                                    disabled={pdfBusyId === inv.id}
+                                    title="تنزيل الفاتورة كملف PDF"
+                                    className="text-xs px-3 py-1 rounded border hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                                  >
+                                    {pdfBusyId === inv.id ? (
+                                      "جاري تجهيز PDF..."
+                                    ) : (
+                                      <>
+                                        <span aria-hidden>⬇</span> حفظ PDF
+                                      </>
+                                    )}
+                                  </button>
+                                  {pdfErrorId === inv.id && (
+                                    <span className="text-xs text-red-600">
+                                      تعذر إنشاء ملف PDF، حاول مرة أخرى.
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </TD>

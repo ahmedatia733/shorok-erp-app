@@ -257,6 +257,7 @@ export class SalesInvoicesController {
       include: {
         customer: { select: { id: true, code: true, nameAr: true, phone: true } },
         branch: { select: { id: true, nameAr: true } },
+        salesRepresentative: { select: { nameAr: true } },
         lines: {
           include: {
             productVariant: {
@@ -273,8 +274,10 @@ export class SalesInvoicesController {
       salesInvoiceToPdfData(inv, company?.nameAr ?? "الشركة"),
     );
 
+    // Safe filename: sales-invoice-SI-{number}.pdf (strip anything unusual).
+    const safeNumber = String(inv.invoiceNumber).replace(/[^A-Za-z0-9._-]/g, "_");
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="SI-${inv.invoiceNumber}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="sales-invoice-SI-${safeNumber}.pdf"`);
     res.setHeader("Content-Length", pdf.length);
     res.end(pdf);
   }
