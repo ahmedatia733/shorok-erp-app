@@ -28,10 +28,10 @@ describe("switchVariantLine", () => {
     expect(switchVariantLine("v", null).unitPrice).toBe("");
   });
 
-  it("13) switching variants loads the new per-meter sale price and clears old size", () => {
-    // Sales now auto-loads defaultSalePricePerMeter for the new variant.
-    const reset = switchVariantLine("variant-B", "498.00");
-    expect(reset.unitPrice).toBe("498.00"); // new variant's price, not the old one
+  it("6) SALES passes an empty price: switching clears the manual sale price + old size", () => {
+    // Sales sale price is MANUAL — onVariantChange calls switchVariantLine(id, "").
+    const reset = switchVariantLine("variant-B", "");
+    expect(reset.unitPrice).toBe("");   // never auto-filled from a default/previous value
     expect(reset.sizeChoice).toBe("");
     expect(reset.customL).toBe("");
     expect(reset.customW).toBe("");

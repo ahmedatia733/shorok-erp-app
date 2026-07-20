@@ -44,29 +44,37 @@ test.describe("sales invoice — per-meter", () => {
     await firstCustomer.click();
     await expect(custInput).not.toHaveValue(""); // a customer is selected
 
-    // 2) Select the first product variant in line 0.
+    // 2) Open the product selector and assert the dropdown shows COST only,
+    //    never the sale price, before picking the first variant.
     await page.getByRole("button", { name: /الكود \/ الصنف/ }).first().click();
-    await page.locator("ul li").first().click();
+    const firstOption = page.locator("ul li").first();
+    await expect(firstOption).toBeVisible();
+    const optionText = await firstOption.innerText();
+    expect(optionText).toContain("سعر التكلفة للمتر"); // cost label present
+    expect(optionText).not.toContain("سعر بيع المتر");  // NO sale price label
+    expect(optionText).not.toContain("بيع");            // NO "بيع 498" text
+    await firstOption.click();
 
-    // 3) Per-meter prices auto-load (both > 0) — sale and cost per metre.
-    const price = await page.getByTestId("si-price-0").inputValue();
+    // 3) Sale price stays EMPTY (manual); cost auto-loads (> 0).
+    expect(await page.getByTestId("si-price-0").inputValue()).toBe("");
     const cost = await page.getByTestId("si-cost-0").inputValue();
-    expect(Number(price)).toBeGreaterThan(0);
     expect(Number(cost)).toBeGreaterThan(0);
 
-    // 4) Enter 10 boards → meters, total and profit recompute immediately.
-    await page.getByTestId("si-boards-0").fill("10");
+    // 4) Enter boards → cost/meters compute even with an empty sale price;
+    //    the sale total stays empty until a sale price is typed.
+    await page.getByTestId("si-boards-0").fill("8");
+    expect((await page.getByTestId("si-total-0").innerText()).trim()).toBe("");
 
+    // 5) Type a manual sale price → line total recomputes per metre.
+    await page.getByTestId("si-price-0").fill("1000");
     const meters = (await page.getByTestId("si-meters-0").innerText()).trim();
     const total = (await page.getByTestId("si-total-0").innerText()).trim();
     const profit = (await page.getByTestId("si-profit-0").innerText()).trim();
 
-    // Frontend display equals the Decimal-safe per-metre helper.
-    expect(total).toBe(lineTotalPerMeter(meters, price));
+    expect(Number(meters)).toBeGreaterThan(0);
+    expect(meters).toBe(totalMeters("8", (Number(meters) / 8).toString())); // boards × area
+    expect(total).toBe(lineTotalPerMeter(meters, "1000"));                    // manual price
     const expectedCost = lineTotalPerMeter(meters, cost);
     expect(profit).toBe(subtractMoney(total, expectedCost));
-    // Sanity: total meters is boards × the loaded board area.
-    expect(Number(meters)).toBeGreaterThan(0);
-    expect(meters).toBe(totalMeters("10", (Number(meters) / 10).toString()));
   });
 });

@@ -14,6 +14,7 @@ import { isPostingConfigError } from "../../../../../lib/posting-config";
 import { ProductVariantSelect } from "../../../../../components/features/product-variant-select";
 import { type VariantItem } from "../../../../../lib/variant-select";
 import { switchVariantLine } from "../../../../../lib/variant-line";
+import { salesVariantExtra, toSalesVariantItem } from "../../../../../lib/sales-variant";
 import {
   boardArea,
   totalMeters as calcTotalMeters,
@@ -55,8 +56,8 @@ interface VariantOption {
   skuCode: string;
   skuNameAr: string;
   sizeMetersPerBoard: string;
-  /** Sale price PER METER (defaultSalePricePerMeter). */
-  defaultSalePrice: string;
+  // Sale price per meter is intentionally NOT carried on the variant option —
+  // it is entered manually and must never auto-fill or appear in the dropdown.
   /** Cost price PER METER (defaultPurchasePricePerMeter) — the visible cost
    *  preview, NOT avg_cost. Accounting COGS still posts from avg_cost. */
   defaultCostPrice: string;
@@ -107,15 +108,6 @@ function mkLine(): LineFormState {
     taxAmount: "",
     lineCost: "",
   };
-}
-
-/** Compact numeric label for the variant dropdown (Latin digits + separators).
- *  `dp` fixes the decimals (cost → 2 dp "1,992.00"); omit for a bare price "498". */
-function fmtLabel(v?: string | null, dp?: number): string {
-  if (v == null || v === "") return "—";
-  const n = Number(v);
-  if (Number.isNaN(n)) return "—";
-  return n.toLocaleString("en-US", dp != null ? { minimumFractionDigits: dp, maximumFractionDigits: dp } : {});
 }
 
 function recomputeLine(line: LineFormState, variant?: VariantOption): Partial<LineFormState> {
@@ -353,15 +345,10 @@ function InvoiceForm({
   // (case-insensitive, whitespace-tolerant via the shared SearchableSelect).
   const customerOptions: SearchableOption[] = toCustomerOptions(customers);
   const variantMap = new Map(variants.map((v) => [v.id, v]));
-  // Items for the single searchable selector (code/color/size + price/cost hints).
-  const variantItems: VariantItem[] = variants.map((v) => ({
-    id: v.id,
-    skuCode: v.skuCode,
-    colorNameAr: v.skuNameAr,
-    sizeMetersPerBoard: v.sizeMetersPerBoard,
-    price: v.defaultSalePrice,     // سعر بيع المتر
-    cost: v.defaultCostPrice,      // سعر التكلفة للمتر
-  }));
+  // Items for the single searchable selector (code/color/size + cost hint ONLY).
+  // The SALE price is entered manually and is deliberately NOT exposed here, so
+  // it can neither be shown in the dropdown nor influence the form.
+  const variantItems: VariantItem[] = variants.map(toSalesVariantItem);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -380,11 +367,11 @@ function InvoiceForm({
   function onVariantChange(idx: number, variantId: string) {
     const variant = variantMap.get(variantId);
     updateLine(idx, {
-      // Load the new variant's own PER-METER sale price and clear any price/size
-      // carried from the previous variant. Editable per existing permissions.
-      ...switchVariantLine(variantId, variant?.defaultSalePrice),
-      // Per-METER cost preview = defaultPurchasePricePerMeter (NOT avg_cost /
-      // board total). COGS still posts from avg_cost server-side.
+      // Sale price per meter is MANUAL: leave it EMPTY and clear any price/size
+      // carried from the previous variant (never load defaultSalePricePerMeter).
+      ...switchVariantLine(variantId, ""),
+      // Cost per meter auto-loads from the new variant's defaultPurchasePricePerMeter
+      // (per meter, NOT avg_cost / board total). COGS still posts from avg_cost.
       costPrice: variant?.defaultCostPrice ?? "",
     });
   }
@@ -628,9 +615,7 @@ function InvoiceForm({
                       variants={variantItems}
                       value={line.productVariantId}
                       onChange={(id) => onVariantChange(idx, id)}
-                      renderExtra={(v) =>
-                        `سعر بيع المتر ${fmtLabel(v.price)} — سعر التكلفة للمتر ${fmtLabel(v.cost)}`
-                      }
+                      renderExtra={(v) => salesVariantExtra(v.cost)}
                     />
                   </td>
                   {/* عدد الألواح */}
@@ -1093,8 +1078,7 @@ export default function SalesInvoicesPage() {
             skuCode: v.sku.code,
             skuNameAr: v.sku.colorNameAr,
             sizeMetersPerBoard: v.sizeMetersPerBoard,
-            // Per-METER prices straight from the variant (NOT avg_cost / board totals).
-            defaultSalePrice: v.defaultSalePricePerMeter,
+            // Only the per-METER COST is carried (NOT the sale price, NOT avg_cost).
             defaultCostPrice: v.defaultPurchasePricePerMeter,
           })),
         );
