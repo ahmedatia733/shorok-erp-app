@@ -17,10 +17,12 @@ import { switchVariantLine } from "../../../../../lib/variant-line";
 import {
   boardArea,
   totalMeters as calcTotalMeters,
-  lineTotalPerBoard,
+  lineTotalPerMeter,
+  subtractMoney,
   taxAmount as calcTax,
-  money,
 } from "../../../../../lib/line-calc";
+import { SearchableSelect, type SearchableOption } from "../../../../../components/ui/searchable-select";
+import { toCustomerOptions } from "../../../../../lib/customer-options";
 import {
   listSalesInvoices,
   getSalesInvoice,
@@ -53,11 +55,11 @@ interface VariantOption {
   skuCode: string;
   skuNameAr: string;
   sizeMetersPerBoard: string;
+  /** Sale price PER METER (defaultSalePricePerMeter). */
   defaultSalePrice: string;
-  /** Estimated board cost = defaultPurchasePricePerMeter × sizeMetersPerBoard
-   *  (Decimal-safe). Replaces the stale avg_cost that reflected the old 500
-   *  meter price. Informational preview only — COGS still uses avg_cost. */
-  boardCost: string;
+  /** Cost price PER METER (defaultPurchasePricePerMeter) — the visible cost
+   *  preview, NOT avg_cost. Accounting COGS still posts from avg_cost. */
+  defaultCostPrice: string;
 }
 
 interface LineFormState {
@@ -71,10 +73,13 @@ interface LineFormState {
   unitLabel: string;
   unitPrice: string;
   costPrice: string;
+  discountPct: string;
   taxRate: string;
   // computed
   sqm: string;
   metersQuantity: string;
+  grossSale: string;
+  discountAmount: string;
   lineTotal: string;
   taxAmount: string;
   lineCost: string;
@@ -92,9 +97,12 @@ function mkLine(): LineFormState {
     unitLabel: "متر",
     unitPrice: "0",
     costPrice: "0",
+    discountPct: "0",
     taxRate: "14",
     sqm: "",
     metersQuantity: "",
+    grossSale: "",
+    discountAmount: "",
     lineTotal: "",
     taxAmount: "",
     lineCost: "",
@@ -111,21 +119,29 @@ function fmtLabel(v?: string | null, dp?: number): string {
 }
 
 function recomputeLine(line: LineFormState, variant?: VariantOption): Partial<LineFormState> {
-  // Decimal-safe (see lib/line-calc). م² per board = custom طول×عرض, كبير(5.25)/
-  // صغير(4), or the variant's stored size. Sales lines price PER BOARD:
-  //   lineTotal = عدد × سعر البيع. الكمية (م) = عدد × م²/لوح is informational only.
-  const perBoard  = boardArea(line.sizeChoice, line.customL, line.customW, variant?.sizeMetersPerBoard ?? "");
-  const meters    = calcTotalMeters(line.boardsQuantity || "0", perBoard);
-  const lineTotal = lineTotalPerBoard(line.boardsQuantity || "0", line.unitPrice || "0");
-  const lineCost  = lineTotalPerBoard(line.boardsQuantity || "0", line.costPrice || "0");
-  const tax       = calcTax(lineTotal, line.taxRate || "0");
+  // Decimal-safe (see lib/line-calc). م²/لوح = custom طول×عرض, كبير(5.25)/صغير(4),
+  // or the variant's stored size. Sales lines price PER METER:
+  //   totalMeters   = عدد الألواح × م²/لوح
+  //   grossLineSale = totalMeters × سعر بيع المتر
+  //   discount      = grossLineSale × الخصم٪
+  //   lineTotal     = grossLineSale − discount
+  //   lineCost      = totalMeters × سعر التكلفة للمتر
+  const perBoard   = boardArea(line.sizeChoice, line.customL, line.customW, variant?.sizeMetersPerBoard ?? "");
+  const meters     = calcTotalMeters(line.boardsQuantity || "0", perBoard);
+  const gross      = lineTotalPerMeter(meters, line.unitPrice || "0");
+  const discountAmt = calcTax(gross, line.discountPct || "0"); // base × pct/100
+  const lineTotal  = subtractMoney(gross, discountAmt);
+  const lineCost   = lineTotalPerMeter(meters, line.costPrice || "0");
+  const tax        = calcTax(lineTotal, line.taxRate || "0");
 
   return {
-    sqm:            parseFloat(perBoard)  > 0 ? perBoard  : "",
-    metersQuantity: parseFloat(meters)    > 0 ? meters    : "",
-    lineTotal:      parseFloat(lineTotal) > 0 ? lineTotal : "",
-    lineCost:       parseFloat(lineCost)  > 0 ? lineCost  : "",
-    taxAmount:      parseFloat(tax)       > 0 ? tax       : "",
+    sqm:            parseFloat(perBoard)   > 0 ? perBoard    : "",
+    metersQuantity: parseFloat(meters)     > 0 ? meters      : "",
+    grossSale:      parseFloat(gross)      > 0 ? gross       : "",
+    discountAmount: parseFloat(discountAmt) > 0 ? discountAmt : "",
+    lineTotal:      parseFloat(lineTotal)  > 0 ? lineTotal   : "",
+    lineCost:       parseFloat(lineCost)   > 0 ? lineCost    : "",
+    taxAmount:      parseFloat(tax)        > 0 ? tax         : "",
   };
 }
 
@@ -333,6 +349,9 @@ function InvoiceForm({
   );
   const [notes, setNotes] = useState(editInvoice?.notes ?? "");
   const [lines, setLines] = useState<LineFormState[]>([mkLine(), mkLine()]);
+  // Searchable customer options — findable by code, Arabic name, or phone
+  // (case-insensitive, whitespace-tolerant via the shared SearchableSelect).
+  const customerOptions: SearchableOption[] = toCustomerOptions(customers);
   const variantMap = new Map(variants.map((v) => [v.id, v]));
   // Items for the single searchable selector (code/color/size + price/cost hints).
   const variantItems: VariantItem[] = variants.map((v) => ({
@@ -340,8 +359,8 @@ function InvoiceForm({
     skuCode: v.skuCode,
     colorNameAr: v.skuNameAr,
     sizeMetersPerBoard: v.sizeMetersPerBoard,
-    price: v.defaultSalePrice,  // سعر المتر (بيع)
-    cost: v.boardCost,          // تكلفة اللوح = سعر شراء المتر × مقاس اللوح
+    price: v.defaultSalePrice,     // سعر بيع المتر
+    cost: v.defaultCostPrice,      // سعر التكلفة للمتر
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -361,12 +380,12 @@ function InvoiceForm({
   function onVariantChange(idx: number, variantId: string) {
     const variant = variantMap.get(variantId);
     updateLine(idx, {
-      // The sale price is entered MANUALLY: leave it EMPTY on selection and
-      // clear any price/size carried from the previous variant (pass "").
-      ...switchVariantLine(variantId, ""),
-      // Estimated board cost = purchase price/m × board size (informational
-      // profit preview only; COGS still posts from avg_cost server-side).
-      costPrice: variant?.boardCost ?? "",
+      // Load the new variant's own PER-METER sale price and clear any price/size
+      // carried from the previous variant. Editable per existing permissions.
+      ...switchVariantLine(variantId, variant?.defaultSalePrice),
+      // Per-METER cost preview = defaultPurchasePricePerMeter (NOT avg_cost /
+      // board total). COGS still posts from avg_cost server-side.
+      costPrice: variant?.defaultCostPrice ?? "",
     });
   }
 
@@ -406,11 +425,11 @@ function InvoiceForm({
         notes: notes || undefined,
         lines: validLines.map((l) => ({
           productVariantId: l.productVariantId,
-          quantity: l.boardsQuantity || "1",
+          quantity: l.boardsQuantity || "1",     // boards; backend derives metres
           unitLabel: l.unitLabel || "متر",
-          unitPrice: l.unitPrice || "0",
-          costPrice: l.costPrice || "0",
-          discountPct: "0",
+          unitPrice: l.unitPrice || "0",         // per metre
+          costPrice: l.costPrice || "0",         // per metre
+          discountPct: l.discountPct || "0",
           note: l.colorCode ? `كود: ${l.colorCode}` : undefined,
         })),
       };
@@ -465,16 +484,26 @@ function InvoiceForm({
             <div>
               <label className="block text-xs text-gray-600 mb-1">العميل *</label>
               <div className="flex gap-1">
-                <select
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                >
-                  <option value="">— اختر العميل —</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
-                  ))}
-                </select>
+                <div className="flex-1" data-testid="si-customer-select">
+                  <SearchableSelect
+                    id="si-customer"
+                    value={customerId}
+                    onChange={setCustomerId}
+                    options={customerOptions}
+                    placeholder="— اختر العميل — (بحث بالاسم أو الكود أو الهاتف)"
+                    emptyText="لا يوجد عميل مطابق"
+                  />
+                </div>
+                {customerId && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomerId("")}
+                    title="مسح اختيار العميل"
+                    className="shrink-0 rounded border border-border px-2 py-1.5 text-xs text-textSecondary hover:bg-surface transition-colors"
+                  >
+                    مسح
+                  </button>
+                )}
                 {canCreateCustomer && (
                   <button
                     type="button"
@@ -562,17 +591,18 @@ function InvoiceForm({
             <tr className="bg-surface text-textSecondary text-xs">
               <th className="border border-border px-2 py-1.5 text-center w-8">#</th>
               <th className="border border-border px-2 py-1.5 text-center min-w-[240px]">الكود / الصنف</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14">عدد</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">عدد الألواح</th>
               <th className="border border-border px-2 py-1.5 text-center w-12">كبير</th>
               <th className="border border-border px-2 py-1.5 text-center w-12">صغير</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">طول</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">عرض</th>
-              <th className="border border-border px-2 py-1.5 text-center w-14">م²</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">الكمية (م)</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">الوحدة</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">سعر بيع اللوح</th>
-              <th className="border border-border px-2 py-1.5 text-center w-24">تكلفة اللوح</th>
-              <th className="border border-border px-2 py-1.5 text-center w-20">الإجمالي</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16">م²/لوح</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">إجمالي الأمتار</th>
+              <th className="border border-border px-2 py-1.5 text-center w-16">الوحدة</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">سعر بيع المتر</th>
+              <th className="border border-border px-2 py-1.5 text-center w-24">سعر التكلفة للمتر</th>
+              <th className="border border-border px-2 py-1.5 text-center w-14">الخصم %</th>
+              <th className="border border-border px-2 py-1.5 text-center w-20">إجمالي البيع</th>
               <th className="border border-border px-2 py-1.5 text-center w-14">ضريبة%</th>
               <th className="border border-border px-2 py-1.5 text-center w-20">قيمة الضريبة</th>
               <th className="border border-border px-2 py-1.5 text-center w-20 text-green-700">ربح السطر</th>
@@ -599,14 +629,15 @@ function InvoiceForm({
                       value={line.productVariantId}
                       onChange={(id) => onVariantChange(idx, id)}
                       renderExtra={(v) =>
-                        `سعر المتر ${fmtLabel(v.price)} — تكلفة اللوح ${fmtLabel(v.cost, 2)}`
+                        `سعر بيع المتر ${fmtLabel(v.price)} — سعر التكلفة للمتر ${fmtLabel(v.cost)}`
                       }
                     />
                   </td>
-                  {/* عدد */}
+                  {/* عدد الألواح */}
                   <td className="border border-border px-1 py-1">
                     <input
                       type="number" min="0" step="1"
+                      data-testid={`si-boards-${idx}`}
                       value={line.boardsQuantity}
                       onChange={(e) => updateLine(idx, { boardsQuantity: e.target.value })}
                       className="w-full text-center bg-transparent text-sm focus:outline-none"
@@ -653,8 +684,8 @@ function InvoiceForm({
                   <td className="border border-border px-1 py-1 text-center text-xs text-primary font-semibold" dir="ltr">
                     {line.sqm}
                   </td>
-                  {/* الكمية (م) */}
-                  <td className="border border-border px-1 py-1 text-center text-xs font-semibold" dir="ltr">
+                  {/* إجمالي الأمتار = عدد الألواح × م²/لوح (authoritative) */}
+                  <td className="border border-border px-1 py-1 text-center text-xs font-semibold" dir="ltr" data-testid={`si-meters-${idx}`}>
                     {line.metersQuantity}
                   </td>
                   {/* الوحدة */}
@@ -663,22 +694,31 @@ function InvoiceForm({
                       onChange={(e) => updateLine(idx, { unitLabel: e.target.value })}
                       className="w-full text-center bg-transparent text-xs focus:outline-none" />
                   </td>
-                  {/* سعر البيع */}
+                  {/* سعر بيع المتر (auto-loaded, editable) */}
                   <td className="border border-border px-1 py-1">
                     <input type="number" min="0" step="0.01" value={line.unitPrice}
+                      data-testid={`si-price-${idx}`}
                       onChange={(e) => updateLine(idx, { unitPrice: e.target.value })}
                       className="w-full text-center bg-transparent text-sm focus:outline-none" dir="ltr" />
                   </td>
-                  {/* تكلفة اللوح — estimate = سعر شراء المتر × مقاس اللوح (editable) */}
+                  {/* سعر التكلفة للمتر = defaultPurchasePricePerMeter (editable; not avg_cost) */}
                   <td className="border border-border px-1 py-1">
                     <input type="number" min="0" step="0.01" value={line.costPrice}
+                      data-testid={`si-cost-${idx}`}
                       onChange={(e) => updateLine(idx, { costPrice: e.target.value })}
-                      title="تكلفة اللوح التقديرية = سعر شراء المتر × مقاس اللوح"
+                      title="سعر التكلفة للمتر = سعر شراء المتر الافتراضي (ليس متوسط التكلفة)"
                       className="w-full text-center bg-transparent text-xs focus:outline-none text-amber-600"
                       dir="ltr" />
                   </td>
-                  {/* الإجمالي */}
-                  <td className="border border-border px-1 py-1 text-center font-semibold text-xs" dir="ltr">
+                  {/* الخصم % */}
+                  <td className="border border-border px-1 py-1">
+                    <input type="number" min="0" max="100" step="0.01" value={line.discountPct}
+                      data-testid={`si-discount-${idx}`}
+                      onChange={(e) => updateLine(idx, { discountPct: e.target.value })}
+                      className="w-full text-center bg-transparent text-xs focus:outline-none" dir="ltr" />
+                  </td>
+                  {/* إجمالي البيع = إجمالي الأمتار × سعر بيع المتر − الخصم */}
+                  <td className="border border-border px-1 py-1 text-center font-semibold text-xs" dir="ltr" data-testid={`si-total-${idx}`}>
                     {line.lineTotal}
                   </td>
                   {/* ضريبة% */}
@@ -692,7 +732,7 @@ function InvoiceForm({
                     {line.taxAmount}
                   </td>
                   {/* ربح السطر */}
-                  <td className={"border border-border px-1 py-1 text-center text-xs font-semibold " + (lineProfit >= 0 ? "text-green-700" : "text-red-600")} dir="ltr">
+                  <td className={"border border-border px-1 py-1 text-center text-xs font-semibold " + (lineProfit >= 0 ? "text-green-700" : "text-red-600")} dir="ltr" data-testid={`si-profit-${idx}`}>
                     {line.lineTotal ? (
                       <span title={`هامش ${profitPct.toFixed(1)}%`}>
                         {lineProfit.toFixed(2)}
@@ -835,11 +875,12 @@ function ExpandedRow({
           <THead>
             <TR>
               <TH>المنتج</TH>
-              <TH>الكمية</TH>
-              <TH>سعر البيع</TH>
-              <TH>التكلفة</TH>
+              <TH>عدد الألواح</TH>
+              <TH>إجمالي الأمتار</TH>
+              <TH>سعر بيع المتر</TH>
+              <TH>سعر التكلفة للمتر</TH>
               <TH>خصم%</TH>
-              <TH>إجمالي</TH>
+              <TH>إجمالي البيع</TH>
               <TH>ربح السطر</TH>
             </TR>
           </THead>
@@ -851,7 +892,8 @@ function ExpandedRow({
                   <TD>
                     {l.productVariant?.sku?.code} — {l.productVariant?.sku?.colorNameAr}
                   </TD>
-                  <TD>{l.quantity} {l.unitLabel}</TD>
+                  <TD>{l.quantity}</TD>
+                  <TD>{l.metersQuantity ?? "—"} م</TD>
                   <TD>{l.unitPrice}</TD>
                   <TD>{l.costPrice}</TD>
                   <TD>{l.discountPct}%</TD>
@@ -1051,10 +1093,9 @@ export default function SalesInvoicesPage() {
             skuCode: v.sku.code,
             skuNameAr: v.sku.colorNameAr,
             sizeMetersPerBoard: v.sizeMetersPerBoard,
+            // Per-METER prices straight from the variant (NOT avg_cost / board totals).
             defaultSalePrice: v.defaultSalePricePerMeter,
-            // Current estimated board cost from the (corrected) purchase price
-            // per meter × board size — NOT the stale avg_cost.
-            boardCost: money(v.defaultPurchasePricePerMeter, v.sizeMetersPerBoard),
+            defaultCostPrice: v.defaultPurchasePricePerMeter,
           })),
         );
       } catch {
@@ -1460,9 +1501,9 @@ export default function SalesInvoicesPage() {
             <thead>
               <tr className="bg-gray-100">
                 <th className="border border-gray-300 px-2 py-1">المنتج</th>
-                <th className="border border-gray-300 px-2 py-1">الكمية</th>
-                <th className="border border-gray-300 px-2 py-1">الوحدة</th>
-                <th className="border border-gray-300 px-2 py-1">السعر</th>
+                <th className="border border-gray-300 px-2 py-1">عدد الألواح</th>
+                <th className="border border-gray-300 px-2 py-1">إجمالي الأمتار</th>
+                <th className="border border-gray-300 px-2 py-1">سعر بيع المتر</th>
                 <th className="border border-gray-300 px-2 py-1">خصم%</th>
                 <th className="border border-gray-300 px-2 py-1">الإجمالي</th>
               </tr>
@@ -1474,7 +1515,7 @@ export default function SalesInvoicesPage() {
                     {l.productVariant?.sku?.code} — {l.productVariant?.sku?.colorNameAr}
                   </td>
                   <td className="border border-gray-300 px-2 py-1 text-center">{l.quantity}</td>
-                  <td className="border border-gray-300 px-2 py-1 text-center">{l.unitLabel}</td>
+                  <td className="border border-gray-300 px-2 py-1 text-center">{l.metersQuantity ?? "—"}</td>
                   <td className="border border-gray-300 px-2 py-1 text-left">{l.unitPrice}</td>
                   <td className="border border-gray-300 px-2 py-1 text-center">{l.discountPct}%</td>
                   <td className="border border-gray-300 px-2 py-1 text-left font-medium">{l.lineTotal}</td>

@@ -9,10 +9,11 @@ export interface SalesInvoiceLineSummary {
     sku: { code: string; colorNameAr: string } | null;
     sizeLabel: string | null;
   } | null;
-  quantity: string;
+  quantity: string;              // boards
+  metersQuantity: string | null; // total metres = boards × size
   unitLabel: string;
-  unitPrice: string;
-  costPrice: string;
+  unitPrice: string;             // per metre
+  costPrice: string;             // per metre
   discountPct: string;
   lineTotal: string;
   lineCost: string;

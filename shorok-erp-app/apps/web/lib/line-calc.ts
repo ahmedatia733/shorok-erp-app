@@ -65,19 +65,20 @@ export function totalMeters(boards: string | number, perBoard: string | number):
   return mul(boards, perBoard, METERS_DP);
 }
 
-/** Line total when the price is PER METER (purchase invoices): meters × price. */
+/** Line total when the price is PER METER (sales & purchase invoices):
+ *  meters × price. Both invoice types price per metre. */
 export function lineTotalPerMeter(meters: string | number, pricePerMeter: string | number): string {
   return mul(meters, pricePerMeter, MONEY_DP);
-}
-
-/** Line total when the price is PER BOARD/unit (sales invoices): boards × price. */
-export function lineTotalPerBoard(boards: string | number, pricePerBoard: string | number): string {
-  return mul(boards, pricePerBoard, MONEY_DP);
 }
 
 /** Generic money product (qty × price) to 2 dp — used for tax bases, cost, etc. */
 export function money(qty: string | number, price: string | number): string {
   return mul(qty, price, MONEY_DP);
+}
+
+/** Decimal-safe money subtraction a − b, to 2 dp (e.g. gross − discount). */
+export function subtractMoney(a: string | number, b: string | number): string {
+  return render(toScaled(a, WORK) - toScaled(b, WORK), WORK, MONEY_DP);
 }
 
 /** Tax amount = base × (ratePercent / 100), to 2 dp. */

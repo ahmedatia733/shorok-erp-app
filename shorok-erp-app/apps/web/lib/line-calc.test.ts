@@ -5,10 +5,10 @@
  */
 import {
   boardArea,
-  lineTotalPerBoard,
   lineTotalPerMeter,
   metersPerBoard,
   money,
+  subtractMoney,
   taxAmount,
   totalMeters,
 } from "./line-calc";
@@ -56,29 +56,42 @@ describe("line-calc — Decimal safety & rounding", () => {
   });
 });
 
-describe("line-calc — sales board cost & line total (spec 7)", () => {
-  // Estimated board cost = purchase price per meter × board size (NOT avg_cost).
-  it("size 4.00 @ 498/m → board cost 1,992.00", () => {
-    expect(money("498", "4.00")).toBe("1992.00");
+describe("line-calc — sales PER METER (confirmed rule) + spec examples", () => {
+  // Sales: totalMeters = boards × size; lineTotal = totalMeters × salePricePerMeter.
+  it("A) 10 boards × 4.00 × 498 → gross 19,920.00; cost 40 × 498 = 19,920.00", () => {
+    const meters = totalMeters("10", "4.00");        // 40.0000
+    expect(meters).toBe("40.0000");
+    expect(lineTotalPerMeter(meters, "498")).toBe("19920.00");
+    expect(lineTotalPerMeter(meters, "498")).toBe("19920.00"); // cost @ 498/m identical
   });
-  it("size 5.25 @ 498/m → board cost 2,614.50", () => {
-    expect(money("498", "5.25")).toBe("2614.50");
+  it("B) 45 boards × 5.25 × 498 → 117,652.50", () => {
+    const meters = totalMeters("45", "5.25");        // 236.2500
+    expect(meters).toBe("236.2500");
+    expect(lineTotalPerMeter(meters, "498")).toBe("117652.50");
   });
-  it("size 3.75 @ 750/m → board cost 2,812.50", () => {
-    expect(money("750", "3.75")).toBe("2812.50");
+  it("C) 8 boards × 3.75 → 30.00 m; sale 750 → 22,500.00; cost 498 → 14,940.00; profit 7,560.00", () => {
+    const meters = totalMeters("8", "3.75");          // 30.0000
+    expect(meters).toBe("30.0000");
+    const lineTotal = lineTotalPerMeter(meters, "750");
+    const lineCost = lineTotalPerMeter(meters, "498");
+    expect(lineTotal).toBe("22500.00");
+    expect(lineCost).toBe("14940.00");
+    expect(subtractMoney(lineTotal, lineCost)).toBe("7560.00");
   });
-  it("8 boards × manual sale price 3000 → line total 24,000.00", () => {
-    expect(lineTotalPerBoard("8", "3000")).toBe("24000.00");
+  it("15) discount is taken from the per-meter gross sale", () => {
+    const meters = totalMeters("10", "4.00");         // 40.0000
+    const gross = lineTotalPerMeter(meters, "498");   // 19,920.00
+    const discount = taxAmount(gross, "10");          // 10% → 1,992.00
+    expect(discount).toBe("1992.00");
+    expect(subtractMoney(gross, discount)).toBe("17928.00");
   });
 });
 
-describe("line-calc — sales (per board) vs purchase (per meter)", () => {
-  it("14) frontend line totals agree with the backend formulas", () => {
-    // Purchase backend: lineTotal = metersQuantity × unitPrice (per meter).
-    const meters = totalMeters("45", metersPerBoard("1.50", "3.50")); // 236.2500
-    expect(lineTotalPerMeter(meters, "498")).toBe("117652.50");
-    // Sales backend: lineTotal = quantity(boards) × unitPrice (per board).
-    expect(lineTotalPerBoard("45", "498")).toBe("22410.00");
+describe("line-calc — cost preview per meter (spec 3/7)", () => {
+  // The visible cost preview is defaultPurchasePricePerMeter (per meter), and the
+  // line cost = totalMeters × that. Board-total costs are NOT used any more.
+  it("40 m × 498/m = 19,920.00", () => {
+    expect(lineTotalPerMeter("40", "498")).toBe("19920.00");
   });
 });
 

@@ -69,10 +69,14 @@ export class SalesInvoicesController {
             sizeLabel: l.productVariant.sizeMetersPerBoard?.toString() ?? null,
           }
         : null,
-      quantity: l.quantity.toString(),
+      quantity: l.quantity.toString(),               // boards
+      metersQuantity:
+        l.productVariant?.sizeMetersPerBoard != null
+          ? new Decimal(l.quantity.toString()).mul(l.productVariant.sizeMetersPerBoard.toString()).toFixed(4)
+          : null,                                     // total metres = boards × size
       unitLabel: l.unitLabel,
-      unitPrice: l.unitPrice.toFixed(2),
-      costPrice: l.costPrice.toFixed(2),
+      unitPrice: l.unitPrice.toFixed(2),             // per metre
+      costPrice: l.costPrice.toFixed(2),             // per metre
       discountPct: l.discountPct.toFixed(2),
       lineTotal: l.lineTotal.toFixed(2),
       lineCost: l.lineCost.toFixed(2),
@@ -127,23 +131,46 @@ export class SalesInvoicesController {
     };
   }
 
-  private computeLineTotals(lines: CreateSalesInvoice["lines"]) {
+  /**
+   * Per-METER sales line maths (authoritative — the client-submitted line total
+   * is never trusted). The line `quantity` is the number of BOARDS; the backend
+   * independently derives the metres from the variant's stored area per board:
+   *
+   *   totalMeters   = boards × sizeMetersPerBoard
+   *   grossLineSale = totalMeters × unitPrice(per metre)
+   *   discountAmt   = grossLineSale × discountPct/100
+   *   lineTotal     = grossLineSale − discountAmt
+   *   lineCost      = totalMeters × costPrice(per metre)
+   *
+   * `sizes` maps productVariantId → sizeMetersPerBoard (Decimal), read from the
+   * DB by the caller. All arithmetic is Decimal-safe.
+   */
+  private computeLineTotals(
+    lines: CreateSalesInvoice["lines"],
+    sizes: Map<string, Decimal>,
+  ) {
     return lines.map((line) => {
-      const qty = new Decimal(line.quantity);
+      const boards = new Decimal(line.quantity);
+      const size = sizes.get(line.productVariantId) ?? new Decimal(0);
+      const meters = boards.mul(size);
       const unitPrice = new Decimal(line.unitPrice);
       const costPrice = new Decimal(line.costPrice ?? "0");
       const discountPct = new Decimal(line.discountPct ?? "0");
 
-      const lineTotal = qty.mul(unitPrice).mul(new Decimal(1).minus(discountPct.div(100)));
-      const lineCost = qty.mul(costPrice);
+      const grossLineSale = meters.mul(unitPrice);
+      const discountAmt = grossLineSale.mul(discountPct.div(100));
+      const lineTotal = grossLineSale.minus(discountAmt);
+      const lineCost = meters.mul(costPrice);
 
       return {
         productVariantId: line.productVariantId,
-        quantity: qty,
-        unitLabel: line.unitLabel ?? "وحدة",
+        quantity: boards,          // stored as boards (the user's entry)
+        meters,                    // derived total metres (informational)
+        unitLabel: line.unitLabel ?? "متر",
         unitPrice,
         costPrice,
         discountPct,
+        discountAmt,
         lineTotal,
         lineCost,
         note: line.note ?? null,
@@ -270,7 +297,9 @@ export class SalesInvoicesController {
     // invoice. It never affects posting, stock, or totals.
     if (body.salesRepresentativeId) await this.salesReps.assertAssignable(body.salesRepresentativeId);
 
-    // Validate all variants exist
+    // Validate all variants exist and capture their per-board size for the
+    // authoritative per-metre maths (never trust a client-sent size/total).
+    const variantSizes = new Map<string, Decimal>();
     for (const line of body.lines) {
       const variant = await this.prisma.productVariant.findUnique({
         where: { id: line.productVariantId },
@@ -278,16 +307,14 @@ export class SalesInvoicesController {
       if (!variant || !variant.active) {
         throw new NotFoundError({ productVariantId: line.productVariantId });
       }
+      variantSizes.set(variant.id, new Decimal(variant.sizeMetersPerBoard.toString()));
     }
 
-    const lineData = this.computeLineTotals(body.lines);
+    const lineData = this.computeLineTotals(body.lines, variantSizes);
     const taxRate = new Decimal(body.taxRate ?? "0");
 
     const subtotal = lineData.reduce((acc, l) => acc.add(l.lineTotal), new Decimal(0));
-    const discountAmount = lineData.reduce(
-      (acc, l) => acc.add(l.quantity.mul(l.unitPrice).mul(l.discountPct.div(100))),
-      new Decimal(0),
-    );
+    const discountAmount = lineData.reduce((acc, l) => acc.add(l.discountAmt), new Decimal(0));
     const taxAmount = subtotal.mul(taxRate).div(100);
     const grandTotal = subtotal.add(taxAmount);
     const totalCost = lineData.reduce((acc, l) => acc.add(l.lineCost), new Decimal(0));
@@ -412,7 +439,9 @@ export class SalesInvoicesController {
       let totalCost = new Decimal(existing.totalCost.toString());
 
       if (body.lines) {
-        // Validate variants
+        // Validate variants and capture per-board size (authoritative per-metre
+        // recalculation — a stored draft is re-priced per metre when saved).
+        const variantSizes = new Map<string, Decimal>();
         for (const line of body.lines) {
           const variant = await tx.productVariant.findUnique({
             where: { id: line.productVariantId },
@@ -420,16 +449,14 @@ export class SalesInvoicesController {
           if (!variant || !variant.active) {
             throw new NotFoundError({ productVariantId: line.productVariantId });
           }
+          variantSizes.set(variant.id, new Decimal(variant.sizeMetersPerBoard.toString()));
         }
 
-        lineData = this.computeLineTotals(body.lines);
+        lineData = this.computeLineTotals(body.lines, variantSizes);
         taxRate = body.taxRate !== undefined ? new Decimal(body.taxRate) : taxRate;
 
         subtotal = lineData.reduce((acc, l) => acc.add(l.lineTotal), new Decimal(0));
-        discountAmount = lineData.reduce(
-          (acc, l) => acc.add(l.quantity.mul(l.unitPrice).mul(l.discountPct.div(100))),
-          new Decimal(0),
-        );
+        discountAmount = lineData.reduce((acc, l) => acc.add(l.discountAmt), new Decimal(0));
         taxAmount = subtotal.mul(taxRate).div(100);
         grandTotal = subtotal.add(taxAmount);
         totalCost = lineData.reduce((acc, l) => acc.add(l.lineCost), new Decimal(0));
@@ -549,8 +576,8 @@ export class SalesInvoicesController {
     // engine's debit-XOR-credit invariant). Opening cost = Phase 4.
     const lineCosts = existing.lines.map((l) => {
       const avg = l.productVariant?.avgCost.toString() ?? "0";
-      const size = l.productVariant?.sizeMetersPerBoard.toString() ?? "0";
-      return { lineId: l.id, unitCost: new Decimal(avg), cogs: lineCogs(l.quantity.toString(), size, avg) };
+      // quantity is BOARDS; COGS = boards × avg_cost per board.
+      return { lineId: l.id, unitCost: new Decimal(avg), cogs: lineCogs(l.quantity.toString(), avg) };
     });
     const totalCogs = lineCosts.reduce((a, x) => a.add(x.cogs), new Decimal(0));
 
@@ -636,10 +663,9 @@ export class SalesInvoicesController {
       //    engine's non-negative guard hard-blocks insufficient stock.
       for (const line of existing.lines) {
         if (!line.productVariant) continue;
-        const sizePerBoard = new Decimal(line.productVariant.sizeMetersPerBoard.toString());
-        const boardsDelta = sizePerBoard.gt(0)
-          ? new Decimal(line.quantity.toString()).div(sizePerBoard).negated()
-          : new Decimal(0);
+        // quantity is BOARDS sold → deduct exactly that many boards. The engine
+        // derives the metres delta from the variant's size per board.
+        const boardsDelta = new Decimal(line.quantity.toString()).negated();
         if (!boardsDelta.isZero()) {
           await this.inventoryEngine.apply({
             branchId: existing.branchId,

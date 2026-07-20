@@ -30,12 +30,16 @@ export function salesInvoiceToPdfData(inv: any, companyNameAr: string): InvoiceP
     const lineTotal = new Decimal(l.lineTotal ?? 0);
     // Sales tax is stored at the invoice level; present it per line proportionally.
     const vat = lineTotal.mul(taxRate).div(100);
+    // Sales are priced PER METRE: quantity shown is the total metres
+    // (boards × size), so metres × unit price reconciles to the line total.
+    const size = new Decimal(l.productVariant?.sizeMetersPerBoard ?? 0);
+    const meters = new Decimal(l.quantity ?? 0).mul(size);
     return {
       code: l.productVariant?.sku?.code ?? "",
       name: l.productVariant?.sku?.colorNameAr ?? "",
-      size: l.productVariant?.sizeMetersPerBoard != null ? `${l.productVariant.sizeMetersPerBoard} م` : "",
-      unit: l.unitLabel ?? "وحدة",
-      quantity: qty(l.quantity),
+      size: l.productVariant?.sizeMetersPerBoard != null ? `${qty(l.quantity)} لوح × ${l.productVariant.sizeMetersPerBoard} م` : "",
+      unit: "متر",
+      quantity: qty(meters),
       unitPrice: money(l.unitPrice),
       subtotal: lineTotal.toFixed(2),
       vat: vat.toFixed(2),
