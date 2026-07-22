@@ -7,7 +7,13 @@ const DateStr  = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export const SalesInvoiceLineInputSchema = z.object({
   productVariantId: z.string().uuid(),
-  quantity:    QtyStr,
+  quantity:    QtyStr, // number of BOARDS
+  // Effective board size chosen on the line (like purchase invoices):
+  //   custom طول×عرض → lengthM + widthM;  كبير/صغير → lengthM only (5.25 / 4).
+  //   Omitted → the variant's stored sizeMetersPerBoard is used. The server
+  //   recomputes the effective area from these (never trusts a client total).
+  lengthM:     QtyStr.optional(),
+  widthM:      QtyStr.optional(),
   unitLabel:   z.string().max(30).optional().default("وحدة"),
   unitPrice:   MoneyStr,
   costPrice:   MoneyStr.optional().default("0"),

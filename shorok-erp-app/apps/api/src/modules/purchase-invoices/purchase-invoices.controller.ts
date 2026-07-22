@@ -438,6 +438,9 @@ export class PurchaseInvoicesController {
           productVariantId: line.productVariantId,
           movementType: "RECEIPT",
           boardsDelta: boards,
+          // Exact effective meters chosen on the line (كبير/صغير/custom), so the
+          // stock movement matches the invoice line's meters — not the variant size.
+          metersDelta: line.metersQuantity.toString(),
           reference: { type: "purchase_invoice", id: existing.id },
           actor: user,
           summaryAr: `استلام مخزون — فاتورة مشتريات ${invoiceNumber}`,
@@ -551,6 +554,8 @@ export class PurchaseInvoicesController {
             productVariantId: receipt.productVariantId,
             movementType: "ADJUSTMENT",
             boardsDelta: boards.negated(),
+            // Reverse the EXACT meters that were posted on the original receipt.
+            metersDelta: new Decimal(receipt.metersQuantity.toString()).negated().toString(),
             reference: { type: "purchase_invoice_cancel", id },
             actor: user,
             summaryAr: `إلغاء استلام مخزون — فاتورة مشتريات ${invoiceNumber}`,

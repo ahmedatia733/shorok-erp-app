@@ -1001,6 +1001,13 @@ model SalesInvoiceLine {
   invoiceId         String   @map("invoice_id") @db.Uuid
   productVariantId  String   @map("product_variant_id") @db.Uuid
   quantity          Decimal  @db.Decimal(14, 4)
+  // Custom-dimension support (nullable; matches PurchaseInvoiceLine). The
+  // effective area per board = lengthM×widthM (custom) or lengthM (كبير/صغير),
+  // else the variant size. metersQuantity is the authoritative total meters
+  // (boards × effective area) used for the line total AND inventory posting.
+  lengthM           Decimal? @map("length_m") @db.Decimal(14, 4)
+  widthM            Decimal? @map("width_m") @db.Decimal(14, 4)
+  metersQuantity    Decimal? @map("meters_quantity") @db.Decimal(14, 4)
   unitLabel         String   @default("وحدة") @map("unit_label") @db.VarChar(30)
   unitPrice         Decimal  @map("unit_price") @db.Decimal(14, 2)
   costPrice         Decimal  @default(0) @map("cost_price") @db.Decimal(14, 2)

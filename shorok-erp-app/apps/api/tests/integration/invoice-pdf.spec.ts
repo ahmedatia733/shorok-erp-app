@@ -38,7 +38,10 @@ describe("invoice PDF export", () => {
     const sku = await handle.prisma.productSku.create({ data: { code: `PDF-${seq}`, category: "NORMAL", colorNameAr: "أصفر لامع", colorNameEn: "yellow" } });
     const v = await handle.prisma.productVariant.create({ data: { skuId: sku.id, sizeMetersPerBoard: "5.25", defaultSalePricePerMeter: "525", defaultPurchasePricePerMeter: "300", avgCost: "300" } });
     if (Number(stockBoards) > 0) {
-      await handle.prisma.branchInventoryBalance.create({ data: { branchId: handle.branchId, productVariantId: v.id, boardsOnHand: stockBoards, metersOnHand: stockBoards } });
+      // Seed CONSISTENT stock: meters = boards × size (5.25), matching the
+      // engine's meter accounting.
+      const meters = (Number(stockBoards) * 5.25).toFixed(4);
+      await handle.prisma.branchInventoryBalance.create({ data: { branchId: handle.branchId, productVariantId: v.id, boardsOnHand: stockBoards, metersOnHand: meters } });
     }
     return v.id;
   };

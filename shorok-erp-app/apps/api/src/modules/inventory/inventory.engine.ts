@@ -16,6 +16,15 @@ export interface InventoryApplyInput {
   movementType: MovementType;
   /** Signed; positive for stock in, negative for stock out. */
   boardsDelta: string | number | Decimal;
+  /**
+   * Signed effective meters moved (same sign as boardsDelta). When provided —
+   * e.g. a purchase/sales invoice line with a chosen كبير/صغير/custom area — it
+   * is the EXACT total meters for this movement and drives both the movement's
+   * metersDelta and the balance. When omitted (receipts, adjustments, counts,
+   * opening), it falls back to boardsDelta × the variant's sizeMetersPerBoard,
+   * preserving the previous behavior exactly.
+   */
+  metersDelta?: string | number | Decimal;
   reference?: { type: string; id?: string | null } | null;
   actor: AuthenticatedUser;
   /** Both summaries are required so the audit row carries pre-localized text. */
@@ -94,7 +103,16 @@ export class InventoryEngine {
       // Engine refuses no-op writes — guards against silent ledger pollution.
       throw new InvalidMovementError({ reason: "zero_delta" });
     }
-    const metersDelta = boardsDelta.times(sizePerBoard);
+    // Effective meters: caller-supplied (invoice line's chosen area) or, by
+    // default, boards × the variant's size. The caller's value must carry the
+    // same sign as the boards delta so stock-in adds and stock-out removes.
+    const metersDelta =
+      input.metersDelta != null
+        ? new Decimal(input.metersDelta as string)
+        : boardsDelta.times(sizePerBoard);
+    if (!metersDelta.isZero() && metersDelta.isNegative() !== boardsDelta.isNegative()) {
+      throw new InvalidMovementError({ reason: "meters_sign_mismatch" });
+    }
 
     // Ensure the balance row exists, then take a row-level lock on it.
     // ON CONFLICT DO NOTHING keeps the upsert idempotent and avoids the
@@ -122,6 +140,7 @@ export class InventoryEngine {
     }
 
     const currentBoards = new Decimal(locked[0]!.boards_on_hand.toString());
+    const currentMeters = new Decimal(locked[0]!.meters_on_hand.toString());
     const newBoards = currentBoards.plus(boardsDelta);
     if (newBoards.isNegative()) {
       throw new InsufficientStockError({
@@ -131,7 +150,19 @@ export class InventoryEngine {
         requestedDelta: boardsDelta.toFixed(4),
       });
     }
-    const newMeters = newBoards.times(sizePerBoard);
+    // Meters accumulate the exact effective meters moved (so mixed كبير/صغير/
+    // custom lines stay correct and a later variant-size edit never rewrites the
+    // balance). For standard lines this equals newBoards × size, matching the
+    // prior behavior on the (verified consistent) existing data.
+    const newMeters = currentMeters.plus(metersDelta);
+    if (newMeters.isNegative()) {
+      throw new InsufficientStockError({
+        branchId: input.branchId,
+        productVariantId: input.productVariantId,
+        currentMeters: currentMeters.toFixed(4),
+        requestedMetersDelta: metersDelta.toFixed(4),
+      });
+    }
 
     await tx.branchInventoryBalance.update({
       where: {

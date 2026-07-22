@@ -89,6 +89,8 @@ export const createSalesInvoice = (body: {
   lines: Array<{
     productVariantId: string;
     quantity: string;
+    lengthM?: string;
+    widthM?: string;
     unitLabel?: string;
     unitPrice: string;
     costPrice?: string;

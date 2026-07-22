@@ -414,6 +414,11 @@ function InvoiceForm({
         lines: validLines.map((l) => ({
           productVariantId: l.productVariantId,
           quantity: l.boardsQuantity || "1",     // boards; backend derives metres
+          // Chosen board area so the backend computes the SAME effective metres
+          // (كبير→5.25 / صغير→4 via lengthM; custom طول×عرض via lengthM+widthM;
+          // omitted → the variant size). Matches the purchase-invoice contract.
+          lengthM: l.customL || (l.sizeChoice === "K" ? "5.25" : l.sizeChoice === "S" ? "4" : undefined),
+          widthM: l.customW || undefined,
           unitLabel: l.unitLabel || "متر",
           unitPrice: l.unitPrice || "0",         // per metre
           costPrice: l.costPrice || "0",         // per metre

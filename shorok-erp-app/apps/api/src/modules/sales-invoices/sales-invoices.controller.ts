@@ -71,9 +71,11 @@ export class SalesInvoicesController {
         : null,
       quantity: l.quantity.toString(),               // boards
       metersQuantity:
-        l.productVariant?.sizeMetersPerBoard != null
-          ? new Decimal(l.quantity.toString()).mul(l.productVariant.sizeMetersPerBoard.toString()).toFixed(4)
-          : null,                                     // total metres = boards × size
+        l.metersQuantity != null
+          ? new Decimal(l.metersQuantity.toString()).toFixed(4)   // persisted effective metres
+          : l.productVariant?.sizeMetersPerBoard != null
+            ? new Decimal(l.quantity.toString()).mul(l.productVariant.sizeMetersPerBoard.toString()).toFixed(4)
+            : null,                                                // legacy fallback = boards × size
       unitLabel: l.unitLabel,
       unitPrice: l.unitPrice.toFixed(2),             // per metre
       costPrice: l.costPrice.toFixed(2),             // per metre
@@ -151,8 +153,15 @@ export class SalesInvoicesController {
   ) {
     return lines.map((line) => {
       const boards = new Decimal(line.quantity);
-      const size = sizes.get(line.productVariantId) ?? new Decimal(0);
-      const meters = boards.mul(size);
+      const variantSize = sizes.get(line.productVariantId) ?? new Decimal(0);
+      // Effective board area (same rule as PurchaseInvoiceLine):
+      //   custom طول×عرض → lengthM×widthM;  كبير/صغير → lengthM (5.25 / 4);
+      //   omitted → the variant's stored size. Never trust a client total.
+      const lengthM = line.lengthM ? new Decimal(line.lengthM) : null;
+      const widthM = line.widthM ? new Decimal(line.widthM) : null;
+      const meters = lengthM
+        ? boards.mul(lengthM).mul(widthM ?? new Decimal(1))
+        : boards.mul(variantSize);
       const unitPrice = new Decimal(line.unitPrice);
       const costPrice = new Decimal(line.costPrice ?? "0");
       const discountPct = new Decimal(line.discountPct ?? "0");
@@ -164,8 +173,10 @@ export class SalesInvoicesController {
 
       return {
         productVariantId: line.productVariantId,
-        quantity: boards,          // stored as boards (the user's entry)
-        meters,                    // derived total metres (informational)
+        quantity: boards,          // boards (the user's entry)
+        lengthM,                   // persisted chosen dimensions (nullable)
+        widthM,
+        meters,                    // authoritative total metres (boards × effective area)
         unitLabel: line.unitLabel ?? "متر",
         unitPrice,
         costPrice,
@@ -352,6 +363,9 @@ export class SalesInvoicesController {
             create: lineData.map((l) => ({
               productVariantId: l.productVariantId,
               quantity: l.quantity.toFixed(4),
+              lengthM: l.lengthM ? l.lengthM.toFixed(4) : null,
+              widthM: l.widthM ? l.widthM.toFixed(4) : null,
+              metersQuantity: l.meters.toFixed(4),
               unitLabel: l.unitLabel,
               unitPrice: l.unitPrice.toFixed(2),
               costPrice: l.costPrice.toFixed(2),
@@ -471,6 +485,9 @@ export class SalesInvoicesController {
             invoiceId: id,
             productVariantId: l.productVariantId,
             quantity: l.quantity.toFixed(4),
+            lengthM: l.lengthM ? l.lengthM.toFixed(4) : null,
+            widthM: l.widthM ? l.widthM.toFixed(4) : null,
+            metersQuantity: l.meters.toFixed(4),
             unitLabel: l.unitLabel,
             unitPrice: l.unitPrice.toFixed(2),
             costPrice: l.costPrice.toFixed(2),
@@ -666,15 +683,20 @@ export class SalesInvoicesController {
       //    engine's non-negative guard hard-blocks insufficient stock.
       for (const line of existing.lines) {
         if (!line.productVariant) continue;
-        // quantity is BOARDS sold → deduct exactly that many boards. The engine
-        // derives the metres delta from the variant's size per board.
+        // quantity is BOARDS sold → deduct exactly that many boards. Metres come
+        // from the line's persisted effective total (كبير/صغير/custom); legacy
+        // draft lines without it fall back to boards × the variant size.
         const boardsDelta = new Decimal(line.quantity.toString()).negated();
+        const effMeters = line.metersQuantity != null
+          ? new Decimal(line.metersQuantity.toString())
+          : new Decimal(line.quantity.toString()).mul(line.productVariant.sizeMetersPerBoard.toString());
         if (!boardsDelta.isZero()) {
           await this.inventoryEngine.apply({
             branchId: existing.branchId,
             productVariantId: line.productVariant.id,
             movementType: "SALE",
             boardsDelta: boardsDelta.toFixed(4),
+            metersDelta: effMeters.negated().toFixed(4),
             reference: { type: "sales_invoice", id: existing.id },
             actor: user,
             summaryAr: `صرف من المخزون — فاتورة مبيعات ${invoiceNumber}`,
@@ -795,22 +817,20 @@ export class SalesInvoicesController {
 
         // Restore inventory via a compensating ADJUSTMENT — the original SALE
         // movements are RETAINED (history stays intact), matching the purchase
-        // cancel. We add the boards back per line.
-        const siLines = await tx.salesInvoiceLine.findMany({
-          where: { invoiceId: id },
-          include: { productVariant: { select: { id: true, sizeMetersPerBoard: true } } },
+        // cancel. Reverse the EXACT boards and metres each SALE movement posted
+        // (so custom-area sales restore the exact metres they removed).
+        const saleMovements = await tx.inventoryMovement.findMany({
+          where: { referenceType: "sales_invoice", referenceId: existing.id, movementType: "SALE" },
         });
-        for (const line of siLines) {
-          if (!line.productVariant) continue;
-          const sizePerBoard = new Decimal(line.productVariant.sizeMetersPerBoard.toString());
-          const metersQty = new Decimal(line.quantity.toString());
-          const boardsToRestore = metersQty.div(sizePerBoard);
-          if (boardsToRestore.isZero()) continue;
+        for (const mv of saleMovements) {
+          const boards = new Decimal(mv.boardsQuantity.toString());   // negative (stock out)
+          if (boards.isZero()) continue;
           await this.inventoryEngine.apply({
-            branchId: existing.branchId,
-            productVariantId: line.productVariant.id,
+            branchId: mv.branchId,
+            productVariantId: mv.productVariantId,
             movementType: "ADJUSTMENT",
-            boardsDelta: boardsToRestore.toFixed(4),
+            boardsDelta: boards.negated().toFixed(4),
+            metersDelta: new Decimal(mv.metersQuantity.toString()).negated().toFixed(4),
             reference: { type: "sales_invoice_cancel", id: existing.id },
             actor: user,
             summaryAr: `استرجاع مخزون — إلغاء فاتورة ${invoiceNumber}`,
