@@ -190,4 +190,48 @@ describe("sales-rep reports", () => {
     const res = await summary("preset=this_month", viewerToken);
     expect(res.status).toBe(403);
   });
+
+  it("§6 invoice-line details: sizeMode + historical values + canonical route", async () => {
+    const st = await request(server()).get(`/api/v1/reports/sales-representatives/${repA}/statement?preset=custom&from=2026-04-01&to=2026-04-30`).set(auth());
+    const inv = st.body.invoices[0]; // the April custom-dim sale
+    const res = await request(server()).get(`/api/v1/reports/sales-representatives/${repA}/statement/invoices/${inv.id}/lines?preset=custom&from=2026-04-01&to=2026-04-30`).set(auth());
+    expect(res.status).toBe(200);
+    expect(res.body.invoiceWebRoute).toContain(inv.id); // opens the canonical sales invoice
+    const l = res.body.lines[0];
+    expect(l.sizeMode).toBe("CUSTOM");
+    expect(l.lengthM).toBe("2.0000"); expect(l.widthM).toBe("1.5000");
+    expect(l.metersQuantity).toBe("6.0000");           // persisted
+    expect(D(l.lineNet).toFixed(2)).toBe("5400.00");
+    expect(D(l.lineGrossProfit).toFixed(2)).toBe("4600.00"); // 5400 - 800
+  });
+
+  it("§7 products drill-down: contributing lines reconcile to the aggregate", async () => {
+    const filter = `preset=custom&from=2026-01-01&to=2026-12-31&salesRepresentativeId=${repA}&productCode=SKU-SMALL`;
+    const agg = (await request(server()).get(`/api/v1/reports/sales-representatives/products?${filter}`).set(auth())).body.rows[0];
+    const drill = (await request(server()).get(`/api/v1/reports/sales-representatives/products/drill-down?${filter}`).set(auth())).body;
+    const net = drill.lines.reduce((a: Decimal, r: any) => a.plus(r.lineNet), new Decimal(0));
+    expect(net.toFixed(2)).toBe(agg.netSales);
+    expect(drill.lines.every((r: any) => r.invoiceWebRoute.includes(r.invoiceId))).toBe(true);
+  });
+
+  it("§8 profitability grouped by branch reconciles to the branch net sales", async () => {
+    const res = await request(server()).get(`/api/v1/reports/sales/profitability?preset=custom&from=2026-01-01&to=2026-12-31&groupDim=branch`).set(auth());
+    expect(res.status).toBe(200);
+    const total = res.body.groups.reduce((a: Decimal, g: any) => a.plus(g.netSales), new Decimal(0));
+    expect(total.toFixed(2)).toBe("28000.00"); // 22000 (Waraq/A) + 6000 (Sohag/B)
+  });
+
+  it("§9/§10 income statement (posted only) + net profit reconcile; cancelled excluded", async () => {
+    const q = "from=2026-01-01&to=2026-12-31";
+    const is = (await request(server()).get(`/api/v1/reports/income-statement?${q}`).set(auth())).body;
+    // Revenue = Σ confirmed subtotal (28000); COGS = historical (4900); cancelled reversed → excluded.
+    expect(D(is.revenue).toFixed(2)).toBe("28000.00");
+    expect(D(is.costOfSales).toFixed(2)).toBe("4900.00");
+    expect(D(is.grossProfit).toFixed(2)).toBe("23100.00");
+    const np = (await request(server()).get(`/api/v1/reports/financial/net-profit?${q}`).set(auth())).body;
+    expect(np.netRevenue).toBe(is.revenue);
+    expect(np.costOfSales).toBe(is.costOfSales);
+    expect(np.grossProfit).toBe(is.grossProfit);
+    expect(np.netProfit).toBe(is.netProfit); // reconciles exactly
+  });
 });

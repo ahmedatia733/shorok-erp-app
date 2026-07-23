@@ -195,6 +195,118 @@ export class SalesRepReportsService {
     return { from: f.from, to: f.to, groupBy, series, totals: this.totalizeSeries(series) };
   }
 
+  /** §6 — per-line details for ONE invoice (historical values; never recomputed
+   *  from current variant). Rep filter keeps it scoped to the statement. */
+  async invoiceLines(f: ReportFilters, invoiceId: string) {
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT sku.code AS product_code, sku.color_name_ar AS product_name,
+             v.size_meters_per_board::text AS variant_size,
+             l.length_m::text AS length_m, l.width_m::text AS width_m,
+             l.quantity AS boards, l.meters_quantity AS meters,
+             l.unit_price AS unit_price, l.discount_pct AS discount_pct,
+             (l.meters_quantity * l.unit_price - l.line_total) AS discount,
+             l.line_total AS net, coalesce(l.unit_cost_at_posting, 0) AS cost_per_board,
+             (l.quantity * coalesce(l.unit_cost_at_posting, 0)) AS line_cogs
+      FROM sales_invoices si
+      JOIN sales_invoice_lines l ON l.invoice_id = si.id
+      JOIN product_variants v ON v.id = l.product_variant_id
+      JOIN product_skus sku ON sku.id = v.sku_id
+      WHERE si.id = ${invoiceId}::uuid AND ${this.where(f)}
+      ORDER BY l.id
+    `);
+    return {
+      invoiceId,
+      invoiceWebRoute: `/sales/invoices?open=${invoiceId}`, // canonical sales-invoice route
+      lines: rows.map((r) => {
+        const sizeMode = r.width_m != null ? "CUSTOM"
+          : r.length_m != null ? (new Decimal(r.length_m).eq("5.25") ? "LARGE" : new Decimal(r.length_m).eq("4") ? "SMALL" : "CUSTOM")
+          : "DEFAULT";
+        const net = this.num(r.net), cogs = this.num(r.line_cogs);
+        return {
+          productCode: r.product_code, productName: r.product_name,
+          variantSize: this.num(r.variant_size, 4), sizeMode,
+          lengthM: r.length_m ? this.num(r.length_m, 4) : null,
+          widthM: r.width_m ? this.num(r.width_m, 4) : null,
+          boards: this.num(r.boards, 4), metersQuantity: this.num(r.meters, 4),
+          salePricePerMeter: this.num(r.unit_price), lineDiscount: this.num(r.discount),
+          lineNet: net, costPerBoard: this.num(r.cost_per_board), lineCogs: cogs,
+          lineGrossProfit: new Decimal(net).minus(cogs).toFixed(2),
+        };
+      }),
+    };
+  }
+
+  /** §7 — the exact invoices + lines behind a rep×product aggregate row. */
+  async productsDrillDown(f: ReportFilters) {
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT si.id AS invoice_id, si.invoice_number::text AS invoice_number, si.invoice_date::text AS invoice_date,
+             c.name_ar AS customer_name, b.name_ar AS branch_name, sku.code AS product_code,
+             l.quantity AS boards, l.meters_quantity AS meters, l.line_total AS net,
+             (l.quantity * coalesce(l.unit_cost_at_posting,0)) AS cogs
+      FROM sales_invoices si
+      JOIN sales_invoice_lines l ON l.invoice_id = si.id
+      JOIN product_variants v ON v.id = l.product_variant_id
+      JOIN product_skus sku ON sku.id = v.sku_id
+      JOIN customers c ON c.id = si.customer_id
+      JOIN branches b ON b.id = si.branch_id
+      WHERE ${this.where(f)}
+      ORDER BY si.invoice_date DESC, si.invoice_number DESC
+    `);
+    return {
+      lines: rows.map((r) => {
+        const net = this.num(r.net), cogs = this.num(r.cogs);
+        return {
+          invoiceId: r.invoice_id, invoiceNumber: r.invoice_number, invoiceDate: r.invoice_date,
+          invoiceWebRoute: `/sales/invoices?open=${r.invoice_id}`,
+          customerName: r.customer_name, branchName: r.branch_name, productCode: r.product_code,
+          boards: this.num(r.boards, 4), meters: this.num(r.meters, 4), lineNet: net,
+          lineCogs: cogs, lineGrossProfit: new Decimal(net).minus(cogs).toFixed(2),
+        };
+      }),
+    };
+  }
+
+  /** §8 — profitability with a switchable grouping dimension. */
+  async profitability(f: ReportFilters, groupBy: "representative" | "branch" | "customer" | "product" | GroupBy) {
+    const dim: Record<string, { key: Prisma.Sql; label: Prisma.Sql }> = {
+      representative: { key: Prisma.raw("si.sales_representative_id::text"), label: Prisma.raw("coalesce(rep.name_ar, '— بدون مندوب —')") },
+      branch:        { key: Prisma.raw("si.branch_id::text"),  label: Prisma.raw("b.name_ar") },
+      customer:      { key: Prisma.raw("c.code"),               label: Prisma.raw("c.name_ar") },
+      product:       { key: Prisma.raw("sku.code"),             label: Prisma.raw("sku.color_name_ar") },
+      day:     { key: Prisma.raw(groupKeyExpr("day", "si.invoice_date")),     label: Prisma.raw(groupKeyExpr("day", "si.invoice_date")) },
+      month:   { key: Prisma.raw(groupKeyExpr("month", "si.invoice_date")),   label: Prisma.raw(groupKeyExpr("month", "si.invoice_date")) },
+      quarter: { key: Prisma.raw(groupKeyExpr("quarter", "si.invoice_date")), label: Prisma.raw(groupKeyExpr("quarter", "si.invoice_date")) },
+      year:    { key: Prisma.raw(groupKeyExpr("year", "si.invoice_date")),    label: Prisma.raw(groupKeyExpr("year", "si.invoice_date")) },
+    };
+    const g = dim[groupBy]!;
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT ${g.key} AS grp_key, ${g.label} AS grp_label,
+             ${Prisma.raw(M.invoices)} AS invoices, ${Prisma.raw(M.boards)} AS boards, ${Prisma.raw(M.meters)} AS meters,
+             ${Prisma.raw(M.gross)} AS gross, ${Prisma.raw(M.discount)} AS discount,
+             ${Prisma.raw(M.net)} AS net, ${Prisma.raw(M.cogs)} AS cogs
+      FROM sales_invoices si
+      JOIN sales_invoice_lines l ON l.invoice_id = si.id
+      JOIN product_variants v ON v.id = l.product_variant_id
+      JOIN product_skus sku ON sku.id = v.sku_id
+      JOIN customers c ON c.id = si.customer_id
+      JOIN branches b ON b.id = si.branch_id
+      LEFT JOIN sales_representatives rep ON rep.id = si.sales_representative_id
+      WHERE ${this.where(f)}
+      GROUP BY grp_key, grp_label
+      ORDER BY net DESC
+    `);
+    const groups = rows.map((r) => {
+      const net = this.num(r.net), cogs = this.num(r.cogs);
+      return {
+        key: r.grp_key, label: r.grp_label, invoiceCount: Number(r.invoices),
+        boards: this.num(r.boards, 4), metersSold: this.num(r.meters, 4),
+        grossSales: this.num(r.gross), discounts: this.num(r.discount), netSales: net,
+        cogs, grossProfit: new Decimal(net).minus(cogs).toFixed(2),
+      };
+    });
+    return { from: f.from, to: f.to, groupBy, groups };
+  }
+
   private totalize(reps: ReturnType<SalesRepReportsService["repRow"]>[]) {
     const add = (k: keyof (typeof reps)[number]) => reps.reduce((a, r) => a.plus(r[k] as string), new Decimal(0));
     return {

@@ -49,24 +49,53 @@ export class SalesRepReportsController {
     return this.svc.summary(this.filters(q));
   }
 
-  // §11 net-sales and §12 gross-profit are projections of the same per-rep row
-  // set (absolute values only) — exposed as dedicated endpoints for the UI.
+  // §11 net-sales — purpose-specific DTO (net-sales columns only, no COGS/GP).
   @Get("net-sales")
   @Roles("OWNER", "ACCOUNTANT")
-  netSales(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
-    return this.svc.summary(this.filters(q));
+  async netSales(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
+    const s = await this.svc.summary(this.filters(q));
+    return {
+      from: s.from, to: s.to,
+      representatives: s.representatives.map((r) => ({
+        salesRepresentativeId: r.salesRepresentativeId, salesRepresentativeName: r.salesRepresentativeName,
+        invoiceCount: r.invoiceCount, boards: r.boards, metersSold: r.metersSold,
+        metersReturned: r.metersReturned, netMeters: r.netMeters,
+        grossSales: r.grossSales, discounts: r.discounts, returns: r.returns, netSales: r.netSales,
+      })),
+      totals: { invoiceCount: s.totals.invoiceCount, boards: s.totals.boards, metersSold: s.totals.metersSold,
+                grossSales: s.totals.grossSales, discounts: s.totals.discounts, netSales: s.totals.netSales },
+      salesReturnsSupported: false,
+    };
   }
 
+  // §12 gross-profit — purpose-specific DTO (net-sales, COGS, gross profit).
   @Get("gross-profit")
   @Roles("OWNER", "ACCOUNTANT")
-  grossProfit(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
-    return this.svc.summary(this.filters(q));
+  async grossProfit(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
+    const s = await this.svc.summary(this.filters(q));
+    return {
+      from: s.from, to: s.to,
+      representatives: s.representatives.map((r) => ({
+        salesRepresentativeId: r.salesRepresentativeId, salesRepresentativeName: r.salesRepresentativeName,
+        invoiceCount: r.invoiceCount, netMeters: r.netMeters, netSales: r.netSales,
+        cogs: r.cogs, grossProfit: r.grossProfit,
+      })),
+      totals: { invoiceCount: s.totals.invoiceCount, netSales: s.totals.netSales, cogs: s.totals.cogs, grossProfit: s.totals.grossProfit },
+      note: "مجمل الربح = صافي المبيعات − تكلفة البضاعة المباعة (ليس صافي الربح).",
+    };
   }
 
   @Get("products")
   @Roles("OWNER", "ACCOUNTANT")
   products(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
     return this.svc.products(this.filters(q));
+  }
+
+  // §7 drill-down: the exact invoice lines behind a rep×product aggregate.
+  @Get("products/drill-down")
+  @Roles("OWNER", "ACCOUNTANT")
+  productsDrillDown(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
+    return this.svc.productsDrillDown(this.filters(q));
   }
 
   @Get(":id/statement")
@@ -77,22 +106,48 @@ export class SalesRepReportsController {
   ) {
     return this.svc.statement(this.filters(q, id), q.page, q.pageSize);
   }
+
+  // §6 invoice-line details for a rep's statement invoice.
+  @Get(":id/statement/invoices/:invoiceId/lines")
+  @Roles("OWNER", "ACCOUNTANT")
+  invoiceLines(
+    @Param("id") id: string,
+    @Param("invoiceId") invoiceId: string,
+    @Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType,
+  ) {
+    return this.svc.invoiceLines(this.filters(q, id), invoiceId);
+  }
 }
 
-/** Time-series (daily/monthly/quarterly/yearly) — one shared engine. */
+const ProfitabilityQuery = FilterQuery.extend({
+  groupDim: z.enum(["representative", "branch", "customer", "product", "day", "month", "quarter", "year"]).default("representative"),
+});
+type ProfitabilityQueryType = z.infer<typeof ProfitabilityQuery>;
+
+/** Time-series (daily/monthly/quarterly/yearly) + profitability — shared engine. */
 @Controller("reports/sales")
 export class SalesTimeSeriesController {
   constructor(private readonly svc: SalesRepReportsService) {}
 
-  @Get("time-series")
-  @Roles("OWNER", "ACCOUNTANT")
-  timeSeries(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
+  private toFilters(q: FilterQueryType): ReportFilters {
     const range = resolveRange(q.preset as DatePreset, { from: q.from, to: q.to });
-    const filters: ReportFilters = {
+    return {
       from: range.from, to: range.to,
       salesRepresentativeId: q.salesRepresentativeId, branchId: q.branchId, customerId: q.customerId,
       productVariantId: q.productVariantId, productCode: q.productCode, productNameAr: q.productNameAr,
     };
-    return this.svc.timeSeries(filters, q.groupBy as GroupBy);
+  }
+
+  @Get("time-series")
+  @Roles("OWNER", "ACCOUNTANT")
+  timeSeries(@Query(new ZodValidationPipe(FilterQuery)) q: FilterQueryType) {
+    return this.svc.timeSeries(this.toFilters(q), q.groupBy as GroupBy);
+  }
+
+  // §8 profitability with a switchable grouping dimension.
+  @Get("profitability")
+  @Roles("OWNER", "ACCOUNTANT")
+  profitability(@Query(new ZodValidationPipe(ProfitabilityQuery)) q: ProfitabilityQueryType) {
+    return this.svc.profitability(this.toFilters(q as FilterQueryType), q.groupDim);
   }
 }

@@ -11,6 +11,8 @@ import { SupplierAgingController } from "./supplier-aging.controller";
 import { CashFlowController } from "./cash-flow.controller";
 import { SalesRepReportsController, SalesTimeSeriesController } from "./sales-rep-reports.controller";
 import { SalesRepReportsService } from "./sales-rep-reports.service";
+import { FinancialReportsService } from "./financial-reports.service";
+import { NetProfitController } from "./net-profit.controller";
 import { AccountingStatementsModule } from "../accounting-statements/accounting-statements.module";
 
 @Module({
@@ -27,7 +29,8 @@ import { AccountingStatementsModule } from "../accounting-statements/accounting-
     CashFlowController,
     SalesRepReportsController,
     SalesTimeSeriesController,
+    NetProfitController,
   ],
-  providers: [DashboardService, SalesRepReportsService],
+  providers: [DashboardService, SalesRepReportsService, FinancialReportsService],
 })
 export class ReportsModule {}
