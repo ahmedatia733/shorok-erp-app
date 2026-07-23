@@ -275,7 +275,7 @@ describe("double-entry propagation to statements (Section R)", () => {
     const variant = await handle.prisma.productVariant.create({
       data: {
         skuId: sku.id, sizeMetersPerBoard: "1", defaultSalePricePerMeter: "1000",
-        defaultPurchasePricePerMeter: "560", avgCost: "560",
+        defaultPurchasePricePerMeter: "560", avgCost: "560", avgCostPerMeter: "560",
       },
     });
     await handle.prisma.branchInventoryBalance.create({

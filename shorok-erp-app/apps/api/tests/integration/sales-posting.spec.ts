@@ -52,7 +52,7 @@ describe("sales invoice posting (Phase 3B)", () => {
   const freshVariant = async (avgCost: string, stockBoards: string) => {
     const sku = await handle.prisma.productSku.create({ data: { code: `SP3B-${++seq}`, category: "NORMAL", colorNameAr: "ص", colorNameEn: "c" } });
     const v = await handle.prisma.productVariant.create({
-      data: { skuId: sku.id, sizeMetersPerBoard: "1", defaultSalePricePerMeter: "1000", defaultPurchasePricePerMeter: "560", avgCost: avgCost },
+      data: { skuId: sku.id, sizeMetersPerBoard: "1", defaultSalePricePerMeter: "1000", defaultPurchasePricePerMeter: "560", avgCost: avgCost, avgCostPerMeter: avgCost },
     });
     if (new Decimal(stockBoards).gt(0)) {
       await handle.prisma.branchInventoryBalance.create({

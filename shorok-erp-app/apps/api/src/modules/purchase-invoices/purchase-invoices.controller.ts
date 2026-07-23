@@ -419,19 +419,28 @@ export class PurchaseInvoicesController {
         const boards = new Decimal(line.boardsQuantity.toString());
         if (boards.isZero()) continue;
 
-        // WAC uses the global on-hand BEFORE this receipt; avg_cost builds
-        // forward from 0 (Phase 4 owns opening cost). Cost basis is ex-tax.
+        // WAC uses the global on-hand BEFORE this receipt; builds forward from 0
+        // (Phase 4 owns opening cost). Cost basis is ex-tax. Two parallel WACs:
+        //   avgCost         — LEGACY per board  = lineTotal / boards
+        //   avgCostPerMeter — CANONICAL per m²  = lineTotal / metersQuantity
+        // The per-metre WAC is the accountant's confirmed valuation unit.
         const unitCost = unitCostPerBoard(line.lineTotal.toString(), boards);
+        const receivedMeters = new Decimal(line.metersQuantity.toString());
+        const costPerMeter = receivedMeters.gt(0)
+          ? new Decimal(line.lineTotal.toString()).div(receivedMeters)
+          : new Decimal(0);
         const agg = await tx.branchInventoryBalance.aggregate({
-          _sum: { boardsOnHand: true },
+          _sum: { boardsOnHand: true, metersOnHand: true },
           where: { productVariantId: line.productVariantId },
         });
         const onHand = new Decimal(agg._sum.boardsOnHand?.toString() ?? "0");
+        const metersOnHand = new Decimal(agg._sum.metersOnHand?.toString() ?? "0");
         const variant = await tx.productVariant.findUnique({
           where: { id: line.productVariantId },
-          select: { avgCost: true },
+          select: { avgCost: true, avgCostPerMeter: true },
         });
         const newAvg = weightedAverageCost(onHand, variant?.avgCost.toString() ?? "0", boards, unitCost);
+        const newAvgPerMeter = weightedAverageCost(metersOnHand, variant?.avgCostPerMeter.toString() ?? "0", receivedMeters, costPerMeter);
 
         await this.inventoryEngine.apply({
           branchId: existing.branchId,
@@ -451,7 +460,7 @@ export class PurchaseInvoicesController {
 
         await tx.productVariant.update({
           where: { id: line.productVariantId },
-          data: { avgCost: newAvg.toFixed(4), costUpdatedAt: new Date() },
+          data: { avgCost: newAvg.toFixed(4), avgCostPerMeter: newAvgPerMeter.toFixed(4), costUpdatedAt: new Date() },
         });
         await tx.purchaseInvoiceLine.update({
           where: { id: line.id },

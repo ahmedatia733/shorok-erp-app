@@ -14,8 +14,9 @@ import { groupKeyExpr, type GroupBy } from "./report-range";
  *  - Net line sale = line_total (already net of the line discount, ex-VAT);
  *    Σ line_total == invoice.subtotal, so revenue excludes VAT.
  *  - Gross line sale = meters_quantity × unit_price; discount = gross − net.
- *  - COGS = the HISTORICAL cost snapshot taken at posting
- *    (quantity × unit_cost_at_posting) — never the mutable current avg_cost.
+ *  - COGS = the HISTORICAL cost snapshot taken at posting: the meter-based
+ *    line_cogs_at_posting when present, else the legacy per-board fallback
+ *    (quantity × unit_cost_at_posting). Never the mutable current avg cost.
  *  - Returns: no canonical sales-return document flow exists yet → 0.
  */
 
@@ -39,7 +40,10 @@ const M = {
   gross:    `coalesce(sum(l.meters_quantity * l.unit_price), 0)`,
   net:      `coalesce(sum(l.line_total), 0)`,
   discount: `coalesce(sum(l.meters_quantity * l.unit_price - l.line_total), 0)`,
-  cogs:     `coalesce(sum(l.quantity * coalesce(l.unit_cost_at_posting, 0)), 0)`,
+  // Historical COGS: the NEW meter-based lineCogsAtPosting when present, else the
+  // LEGACY per-board snapshot (boards × unit_cost_at_posting). Never recomputed
+  // from the current mutable avg cost.
+  cogs:     `coalesce(sum(coalesce(l.line_cogs_at_posting, l.quantity * coalesce(l.unit_cost_at_posting, 0))), 0)`,
 };
 
 @Injectable()
@@ -111,7 +115,7 @@ export class SalesRepReportsService {
              coalesce(sum(l.quantity),0) AS boards, coalesce(sum(l.meters_quantity),0) AS meters,
              coalesce(sum(l.meters_quantity*l.unit_price - l.line_total),0) AS discount,
              coalesce(sum(l.line_total),0) AS net,
-             coalesce(sum(l.quantity*coalesce(l.unit_cost_at_posting,0)),0) AS cogs
+             coalesce(sum(coalesce(l.line_cogs_at_posting, l.quantity*coalesce(l.unit_cost_at_posting,0))),0) AS cogs
       FROM sales_invoices si
       JOIN sales_invoice_lines l ON l.invoice_id = si.id
       JOIN product_variants v ON v.id = l.product_variant_id
@@ -206,7 +210,7 @@ export class SalesRepReportsService {
              l.unit_price AS unit_price, l.discount_pct AS discount_pct,
              (l.meters_quantity * l.unit_price - l.line_total) AS discount,
              l.line_total AS net, coalesce(l.unit_cost_at_posting, 0) AS cost_per_board,
-             (l.quantity * coalesce(l.unit_cost_at_posting, 0)) AS line_cogs
+             coalesce(l.line_cogs_at_posting, l.quantity * coalesce(l.unit_cost_at_posting, 0)) AS line_cogs, l.unit_cost_per_meter_at_posting::text AS cost_per_meter
       FROM sales_invoices si
       JOIN sales_invoice_lines l ON l.invoice_id = si.id
       JOIN product_variants v ON v.id = l.product_variant_id
@@ -229,8 +233,10 @@ export class SalesRepReportsService {
           widthM: r.width_m ? this.num(r.width_m, 4) : null,
           boards: this.num(r.boards, 4), metersQuantity: this.num(r.meters, 4),
           salePricePerMeter: this.num(r.unit_price), lineDiscount: this.num(r.discount),
-          lineNet: net, costPerBoard: this.num(r.cost_per_board), lineCogs: cogs,
-          lineGrossProfit: new Decimal(net).minus(cogs).toFixed(2),
+          lineNet: net,
+          costPerMeterAtPosting: r.cost_per_meter != null ? this.num(r.cost_per_meter, 4) : null, // تكلفة المتر وقت البيع
+          costPerBoard: this.num(r.cost_per_board),  // legacy per-board snapshot
+          lineCogs: cogs, lineGrossProfit: new Decimal(net).minus(cogs).toFixed(2),
         };
       }),
     };
@@ -242,7 +248,7 @@ export class SalesRepReportsService {
       SELECT si.id AS invoice_id, si.invoice_number::text AS invoice_number, si.invoice_date::text AS invoice_date,
              c.name_ar AS customer_name, b.name_ar AS branch_name, sku.code AS product_code,
              l.quantity AS boards, l.meters_quantity AS meters, l.line_total AS net,
-             (l.quantity * coalesce(l.unit_cost_at_posting,0)) AS cogs
+             coalesce(l.line_cogs_at_posting, l.quantity * coalesce(l.unit_cost_at_posting,0)) AS cogs
       FROM sales_invoices si
       JOIN sales_invoice_lines l ON l.invoice_id = si.id
       JOIN product_variants v ON v.id = l.product_variant_id

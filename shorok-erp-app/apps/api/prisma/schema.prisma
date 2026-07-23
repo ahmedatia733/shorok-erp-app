@@ -361,7 +361,11 @@ model ProductVariant {
   priceOverrideTolerancePercent Decimal?  @map("price_override_tolerance_percent") @db.Decimal(5, 2)
   // Phase 3A — weighted-average cost (WAC), server-maintained only. Starts at
   // 0 and builds forward from purchase postings (opening value = Phase 4).
+  // avgCost is PER BOARD (legacy). avgCostPerMeter is the NEW canonical WAC per
+  // SQUARE METER (the accountant's confirmed cost/valuation unit). Both are
+  // maintained forward on every purchase; avgCost is kept only for compatibility.
   avgCost                       Decimal   @default(0) @map("avg_cost") @db.Decimal(14, 4)
+  avgCostPerMeter               Decimal   @default(0) @map("avg_cost_per_meter") @db.Decimal(14, 4)
   costUpdatedAt                 DateTime? @map("cost_updated_at") @db.Timestamptz(6)
   active                        Boolean   @default(true)
   createdAt                     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -1016,8 +1020,16 @@ model SalesInvoiceLine {
   lineCost          Decimal  @default(0) @map("line_cost") @db.Decimal(14, 2)
   note              String?  @db.VarChar(300)
   // Phase 3B — posting-time snapshots (server-stamped at confirm; COGS uses
-  // product_variants.avg_cost, never the user-entered cost_price above)
+  // product_variants.avg_cost, never the user-entered cost_price above).
+  // unitCostAtPosting is the LEGACY cost PER BOARD (kept, unchanged meaning).
   unitCostAtPosting Decimal? @map("unit_cost_at_posting") @db.Decimal(14, 2)
+  // NEW canonical meter-based COGS snapshots (immutable at posting):
+  //   unitCostPerMeterAtPosting = product_variants.avg_cost_per_meter at confirm
+  //   lineCogsAtPosting         = metersQuantity × unitCostPerMeterAtPosting
+  // Reports/reversals use lineCogsAtPosting so they reproduce the exact original
+  // posting without depending on mutable product values. NULL on legacy rows.
+  unitCostPerMeterAtPosting Decimal? @map("unit_cost_per_meter_at_posting") @db.Decimal(14, 4)
+  lineCogsAtPosting         Decimal? @map("line_cogs_at_posting") @db.Decimal(14, 2)
   taxRateAtPosting  Decimal? @map("tax_rate_at_posting") @db.Decimal(5, 2)
 
   invoice        SalesInvoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)

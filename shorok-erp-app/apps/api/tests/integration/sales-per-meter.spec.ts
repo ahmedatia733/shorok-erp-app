@@ -51,7 +51,7 @@ describe("sales invoices — per-meter pricing", () => {
   const freshVariant = async (size: string, salePerMeter: string, purchasePerMeter: string, avgCost: string, stockBoards: string) => {
     const sku = await handle.prisma.productSku.create({ data: { code: `PM-${++seq}`, category: "NORMAL", colorNameAr: "ص", colorNameEn: "c" } });
     const v = await handle.prisma.productVariant.create({
-      data: { skuId: sku.id, sizeMetersPerBoard: size, defaultSalePricePerMeter: salePerMeter, defaultPurchasePricePerMeter: purchasePerMeter, avgCost },
+      data: { skuId: sku.id, sizeMetersPerBoard: size, defaultSalePricePerMeter: salePerMeter, defaultPurchasePricePerMeter: purchasePerMeter, avgCost, avgCostPerMeter: new Decimal(avgCost).div(size).toFixed(4) },
     });
     if (new Decimal(stockBoards).gt(0)) {
       await handle.prisma.branchInventoryBalance.create({

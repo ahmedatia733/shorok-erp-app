@@ -563,7 +563,7 @@ export class SalesInvoicesController {
         customer: true,
         lines: {
           include: {
-            productVariant: { select: { id: true, sizeMetersPerBoard: true, avgCost: true } },
+            productVariant: { select: { id: true, sizeMetersPerBoard: true, avgCost: true, avgCostPerMeter: true } },
           },
         },
       },
@@ -589,15 +589,23 @@ export class SalesInvoicesController {
     const cogsAccountId      = profile?.cogsAccountId      ?? null;
     const inventoryAccountId = profile?.inventoryAccountId ?? null;
 
-    // COGS from avg_cost (never the user-entered cost_price). Per line:
-    // boards = quantityMeters / sizeMetersPerBoard, cost = boards × avg_cost.
-    // When avg_cost is 0 the line contributes 0 and, if the whole invoice's
-    // COGS is 0, the COGS entry is skipped (a zero entry would break the
-    // engine's debit-XOR-credit invariant). Opening cost = Phase 4.
+    // CANONICAL meter-based COGS (the accountant's confirmed unit):
+    //   lineCogs = metersQuantity × avg_cost_per_meter (exact metres sold —
+    //   correct for partial/custom cuts, unlike a full-board charge).
+    // The legacy per-BOARD cost (avg_cost) is still snapshotted for compatibility
+    // but no longer drives the posting. avg_cost_per_meter = 0 → line COGS 0.
     const lineCosts = existing.lines.map((l) => {
-      const avg = l.productVariant?.avgCost.toString() ?? "0";
-      // quantity is BOARDS; COGS = boards × avg_cost per board.
-      return { lineId: l.id, unitCost: new Decimal(avg), cogs: lineCogs(l.quantity.toString(), avg) };
+      const avgPerMeter = new Decimal(l.productVariant?.avgCostPerMeter?.toString() ?? "0");
+      const meters = l.metersQuantity != null
+        ? new Decimal(l.metersQuantity.toString())
+        : new Decimal(l.quantity.toString()).mul(l.productVariant?.sizeMetersPerBoard?.toString() ?? "0");
+      const cogs = meters.mul(avgPerMeter);
+      return {
+        lineId: l.id,
+        legacyUnitCostPerBoard: new Decimal(l.productVariant?.avgCost?.toString() ?? "0"),
+        unitCostPerMeter: avgPerMeter,
+        cogs,
+      };
     });
     const totalCogs = lineCosts.reduce((a, x) => a.add(x.cogs), new Decimal(0));
 
@@ -708,7 +716,12 @@ export class SalesInvoicesController {
         const cost = lineCosts.find((c) => c.lineId === line.id);
         await tx.salesInvoiceLine.update({
           where: { id: line.id },
-          data: { unitCostAtPosting: (cost?.unitCost ?? new Decimal(0)).toFixed(2), taxRateAtPosting: existing.taxRate },
+          data: {
+            unitCostAtPosting: (cost?.legacyUnitCostPerBoard ?? new Decimal(0)).toFixed(2),  // legacy per-board
+            unitCostPerMeterAtPosting: (cost?.unitCostPerMeter ?? new Decimal(0)).toFixed(4), // NEW per-meter
+            lineCogsAtPosting: (cost?.cogs ?? new Decimal(0)).toFixed(2),                     // NEW immutable total
+            taxRateAtPosting: existing.taxRate,
+          },
         });
       }
 
@@ -720,6 +733,9 @@ export class SalesInvoicesController {
           customerTxId: customerTx.id,
           journalEntryId: revenuePosted.journalEntryId,
           cogsJournalEntryId,
+          // totalCost = the posted historical COGS (Σ meter-based lineCogsAtPosting),
+          // so the invoice reconciles to its COGS journal.
+          totalCost: totalCogs.toFixed(2),
           arAccountId,
           revenueAccountId,
           taxAccountId: vatOutputAccountId,

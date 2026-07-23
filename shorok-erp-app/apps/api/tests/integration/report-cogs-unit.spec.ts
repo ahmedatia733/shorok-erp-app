@@ -1,7 +1,12 @@
 /**
- * §1 — PROVE the unit of SalesInvoiceLine.unitCostAtPosting and the correct
- * reporting-COGS expression, using the REAL purchase→WAC→sale→journal flow
- * (never seeding avg_cost directly, so the unit cannot be assumed).
+ * LEGACY costing documentation. The CANONICAL model is now meter-based — see
+ * `meter-costing.spec.ts` (lineCogs = metersQuantity × avgCostPerMeter). This
+ * file documents that the LEGACY per-BOARD snapshots are still preserved
+ * (avg_cost, unit_cost_at_posting) and that for NATIVE-size sales the two bases
+ * coincide (boards × per-board == metres × per-metre == the posted COGS journal).
+ *
+ * Proves the unit of SalesInvoiceLine.unitCostAtPosting via the REAL
+ * purchase→WAC→sale→journal flow (never seeding avg_cost directly).
  *
  * Evidence chain (see costing.ts / sales confirm):
  *   purchase: unitCost = lineTotalExTax / boards            → cost PER BOARD

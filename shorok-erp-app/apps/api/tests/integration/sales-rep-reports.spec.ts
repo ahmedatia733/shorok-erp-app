@@ -77,8 +77,9 @@ describe("sales-rep reports", () => {
 
     const skuS = await handle.prisma.productSku.create({ data: { code: "SKU-SMALL", category: "NORMAL", colorNameAr: "صغير", colorNameEn: "s" } });
     const skuL = await handle.prisma.productSku.create({ data: { code: "SKU-LARGE", category: "NORMAL", colorNameAr: "كبير", colorNameEn: "l" } });
-    vSmall = (await handle.prisma.productVariant.create({ data: { skuId: skuS.id, sizeMetersPerBoard: "4.0000", defaultSalePricePerMeter: "0", defaultPurchasePricePerMeter: "0", avgCost: "400" } })).id;
-    vLarge = (await handle.prisma.productVariant.create({ data: { skuId: skuL.id, sizeMetersPerBoard: "5.2500", defaultSalePricePerMeter: "0", defaultPurchasePricePerMeter: "0", avgCost: "525" } })).id;
+    // Canonical cost is PER METER (100/m); legacy per-board kept for compat.
+    vSmall = (await handle.prisma.productVariant.create({ data: { skuId: skuS.id, sizeMetersPerBoard: "4.0000", defaultSalePricePerMeter: "0", defaultPurchasePricePerMeter: "0", avgCost: "400", avgCostPerMeter: "100" } })).id;
+    vLarge = (await handle.prisma.productVariant.create({ data: { skuId: skuL.id, sizeMetersPerBoard: "5.2500", defaultSalePricePerMeter: "0", defaultPurchasePricePerMeter: "0", avgCost: "525", avgCostPerMeter: "100" } })).id;
 
     // Plenty of stock in both branches.
     await seedStock(vSmall, waraq, "200", "4.0000");
@@ -118,8 +119,8 @@ describe("sales-rep reports", () => {
     expect(D(A.metersSold).toFixed(2)).toBe("35.00");         // 8 + 21 + 6
     expect(D(A.netSales).toFixed(2)).toBe("22000.00");        // 4000 + 12600 + 5400
     expect(D(A.discounts).toFixed(2)).toBe("600.00");
-    expect(D(A.cogs).toFixed(2)).toBe("3700.00");             // 800 + 2100 + 800 (NOT 9999-based)
-    expect(D(A.grossProfit).toFixed(2)).toBe("18300.00");     // 22000 - 3700
+    expect(D(A.cogs).toFixed(2)).toBe("3500.00");             // 8×100 + 21×100 + 6×100 (meter-based; NOT 9999)
+    expect(D(A.grossProfit).toFixed(2)).toBe("18500.00");     // 22000 - 3500
     // Rep B isolated.
     expect(B.invoiceCount).toBe(1);
     expect(D(B.netSales).toFixed(2)).toBe("6000.00");
@@ -156,7 +157,7 @@ describe("sales-rep reports", () => {
     const net = rows.reduce((a: Decimal, r: any) => a.plus(r.netSales), new Decimal(0));
     const gp = rows.reduce((a: Decimal, r: any) => a.plus(r.grossProfit), new Decimal(0));
     expect(net.toFixed(2)).toBe("22000.00");
-    expect(gp.toFixed(2)).toBe("18300.00");
+    expect(gp.toFixed(2)).toBe("18500.00");
     const small = rows.find((r: any) => r.productCode === "SKU-SMALL");
     expect(small.productName).toBe("صغير");
   });
@@ -168,7 +169,7 @@ describe("sales-rep reports", () => {
     // All confirmed sales net = 22000 (A) + 6000 (B) = 28000; GP 18300 + 4800 = 23100.
     for (const r of [month, quarter, year]) {
       expect(D(r.totals.netSales).toFixed(2)).toBe("28000.00");
-      expect(D(r.totals.grossProfit).toFixed(2)).toBe("23100.00");
+      expect(D(r.totals.grossProfit).toFixed(2)).toBe("23300.00");
     }
     expect(month.series.map((s: any) => s.period)).toEqual(["2026-03", "2026-04"]);
     expect(quarter.series.map((s: any) => s.period)).toEqual(["2026-Q1", "2026-Q2"]);
@@ -202,7 +203,7 @@ describe("sales-rep reports", () => {
     expect(l.lengthM).toBe("2.0000"); expect(l.widthM).toBe("1.5000");
     expect(l.metersQuantity).toBe("6.0000");           // persisted
     expect(D(l.lineNet).toFixed(2)).toBe("5400.00");
-    expect(D(l.lineGrossProfit).toFixed(2)).toBe("4600.00"); // 5400 - 800
+    expect(D(l.lineGrossProfit).toFixed(2)).toBe("4800.00"); // 5400 - 600 (6 m × 100/m)
   });
 
   it("§7 products drill-down: contributing lines reconcile to the aggregate", async () => {
@@ -226,8 +227,8 @@ describe("sales-rep reports", () => {
     const is = (await request(server()).get(`/api/v1/reports/income-statement?${q}`).set(auth())).body;
     // Revenue = Σ confirmed subtotal (28000); COGS = historical (4900); cancelled reversed → excluded.
     expect(D(is.revenue).toFixed(2)).toBe("28000.00");
-    expect(D(is.costOfSales).toFixed(2)).toBe("4900.00");
-    expect(D(is.grossProfit).toFixed(2)).toBe("23100.00");
+    expect(D(is.costOfSales).toFixed(2)).toBe("4700.00");
+    expect(D(is.grossProfit).toFixed(2)).toBe("23300.00");
     const np = (await request(server()).get(`/api/v1/reports/financial/net-profit?${q}`).set(auth())).body;
     expect(np.netRevenue).toBe(is.revenue);
     expect(np.costOfSales).toBe(is.costOfSales);
