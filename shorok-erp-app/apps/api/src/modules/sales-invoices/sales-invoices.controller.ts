@@ -573,6 +573,19 @@ export class SalesInvoicesController {
       throw new ValidationError({ reason: "invoice_not_draft", status: existing.status });
     }
 
+    // Persisted-meters invariant (Gate 0.A): a NEW document must carry a strictly
+    // positive persisted metersQuantity on every line before it can post — the
+    // canonical commercial/inventory/costing quantity. We never silently fall
+    // back to quantity × current variant size for a confirmable draft (that would
+    // let a mis-entered line post a wrong COGS/inventory quantity). The read-time
+    // fallback elsewhere stays ONLY for legacy rows.
+    for (const line of existing.lines) {
+      const m = line.metersQuantity != null ? new Decimal(line.metersQuantity.toString()) : null;
+      if (m == null || !m.isFinite() || m.lte(0)) {
+        throw new ValidationError({ reason: "line_meters_required", lineId: line.id });
+      }
+    }
+
     const grandTotal = new Decimal(existing.grandTotal.toString());
     const subtotal = new Decimal(existing.subtotal.toString());
     const taxAmount = new Decimal(existing.taxAmount.toString());

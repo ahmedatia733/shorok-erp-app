@@ -41,6 +41,8 @@ enum MovementType {
   SALE
   ADJUSTMENT
   COUNT_CORRECTION
+  SALE_RETURN
+  PURCHASE_RETURN
 }
 
 enum OrderStatus {
@@ -206,6 +208,8 @@ model Branch {
   salesInvoices      SalesInvoice[]           @relation("SalesInvoiceBranch")
   receiptVouchers    ReceiptVoucher[]         @relation("ReceiptVoucherBranch")
   paymentVouchers    PaymentVoucher[]         @relation("PaymentVoucherBranch")
+  salesReturns       SalesReturn[]            @relation("SalesReturnBranch")
+  purchaseReturns    PurchaseReturn[]         @relation("PurchaseReturnBranch")
 
   @@map("branches")
 }
@@ -247,6 +251,8 @@ model User {
   paymentVouchersCreated  PaymentVoucher[]      @relation("PaymentVoucherCreatedBy")
   paymentVouchersPosted   PaymentVoucher[]      @relation("PaymentVoucherPostedBy")
   paymentVouchersReversed PaymentVoucher[]      @relation("PaymentVoucherReversedBy")
+  salesReturnsCreated     SalesReturn[]         @relation("SalesReturnCreatedBy")
+  purchaseReturnsCreated  PurchaseReturn[]      @relation("PurchaseReturnCreatedBy")
 
   @@map("users")
 }
@@ -378,6 +384,8 @@ model ProductVariant {
   factoryEntries       FactoryLedgerEntry[]
   purchaseInvoiceLines PurchaseInvoiceLine[]
   salesInvoiceLines    SalesInvoiceLine[]
+  salesReturnLines     SalesReturnLine[]        @relation("SalesReturnLineVariant")
+  purchaseReturnLines  PurchaseReturnLine[]     @relation("PurchaseReturnLineVariant")
 
   @@unique([skuId, sizeMetersPerBoard])
   @@index([skuId])
@@ -398,6 +406,7 @@ model Supplier {
   purchaseInvoices PurchaseInvoice[]
   expenses         Expense[]
   paymentVouchers  PaymentVoucher[]
+  purchaseReturns  PurchaseReturn[] @relation("PurchaseReturnSupplier")
 
   @@map("suppliers")
 }
@@ -421,6 +430,7 @@ model SalesRepresentative {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   salesInvoices  SalesInvoice[]
+  salesReturns   SalesReturn[]  @relation("SalesReturnRep")
   journalEntries JournalEntry[]
   journalLines   JournalLine[]
 
@@ -794,6 +804,7 @@ model PurchaseInvoice {
   factoryLedgerEntry FactoryLedgerEntry?        @relation(fields: [factoryLedgerEntryId], references: [id], onDelete: SetNull)
   lines              PurchaseInvoiceLine[]
   paymentAllocations PaymentVoucherAllocation[]
+  purchaseReturns    PurchaseReturn[]           @relation("PurchaseReturnOriginalInvoice")
 
   @@index([supplierId])
   @@index([branchId])
@@ -824,6 +835,7 @@ model PurchaseInvoiceLine {
 
   invoice        PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   productVariant ProductVariant  @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+  returnLines    PurchaseReturnLine[] @relation("PurchaseReturnLineOriginal")
 
   @@index([invoiceId])
   @@map("purchase_invoice_lines")
@@ -877,6 +889,7 @@ model Customer {
   transactions    CustomerTransaction[]
   salesInvoices   SalesInvoice[]
   receiptVouchers ReceiptVoucher[]
+  salesReturns    SalesReturn[]    @relation("SalesReturnCustomer")
 
   @@map("customers")
 }
@@ -993,6 +1006,7 @@ model SalesInvoice {
   lines               SalesInvoiceLine[]
   orders              CustomerOrder[]            @relation("OrderSalesInvoice")
   receiptAllocations  ReceiptVoucherAllocation[]
+  salesReturns        SalesReturn[]              @relation("SalesReturnOriginalInvoice")
 
   @@index([customerId])
   @@index([invoiceDate(sort: Desc)])
@@ -1034,9 +1048,171 @@ model SalesInvoiceLine {
 
   invoice        SalesInvoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   productVariant ProductVariant @relation(fields: [productVariantId], references: [id])
+  returnLines    SalesReturnLine[] @relation("SalesReturnLineOriginal")
 
   @@index([invoiceId])
   @@map("sales_invoice_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Returns (مردودات) — additive, backward-compatible. A confirmed invoice is
+// an IMMUTABLE accounting document; merchandise coming back is recorded as an
+// INDEPENDENT return document linked to the original invoice, never by editing
+// the invoice. Square metres are the canonical commercial/inventory/costing
+// quantity; board/piece counts and dimensions are operational snapshots.
+// Historical prices/costs are taken from the ORIGINAL invoice line snapshots,
+// never from current product prices/costs. One invoice may have many returns
+// (partial or full); the invoice's return status is COMPUTED (NONE/PARTIAL/FULL)
+// and never changes the invoice's own CONFIRMED status.
+// ═══════════════════════════════════════════════════════════════════
+
+model SalesReturn {
+  id                     String    @id @default(uuid()) @db.Uuid
+  returnNumber           BigInt    @unique @default(autoincrement()) @map("return_number")
+  originalSalesInvoiceId String    @map("original_sales_invoice_id") @db.Uuid
+  customerId             String    @map("customer_id") @db.Uuid
+  branchId               String    @map("branch_id") @db.Uuid
+  salesRepresentativeId  String?   @map("sales_representative_id") @db.Uuid
+  returnDate             DateTime  @map("return_date") @db.Date
+  status                 String    @default("DRAFT") @db.VarChar(20)
+  reason                 String?   @db.VarChar(300)
+  notes                  String?   @db.VarChar(1000)
+  // KEEP_AS_CUSTOMER_CREDIT | OFFSET_OUTSTANDING_BALANCE | CASH_REFUND | BANK_REFUND
+  settlementMode         String    @default("KEEP_AS_CUSTOMER_CREDIT") @map("settlement_mode") @db.VarChar(40)
+  refundTreasuryAccountId String?  @map("refund_treasury_account_id") @db.Uuid
+  subtotal               Decimal   @default(0) @db.Decimal(14, 2)       // returned net ex-tax
+  discountTotal          Decimal   @default(0) @map("discount_total") @db.Decimal(14, 2)
+  taxTotal               Decimal   @default(0) @map("tax_total") @db.Decimal(14, 2)
+  grandTotal             Decimal   @default(0) @map("grand_total") @db.Decimal(14, 2)
+  cogsReversalTotal      Decimal   @default(0) @map("cogs_reversal_total") @db.Decimal(14, 2)
+  journalEntryId         String?   @map("journal_entry_id") @db.Uuid
+  cogsJournalEntryId     String?   @map("cogs_journal_entry_id") @db.Uuid
+  customerTransactionId  String?   @map("customer_transaction_id") @db.Uuid
+  salesReturnsAccountId  String?   @map("sales_returns_account_id") @db.Uuid
+  confirmedAt            DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  confirmedBy            String?   @map("confirmed_by") @db.Uuid
+  cancelledAt            DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy            String?   @map("cancelled_by") @db.Uuid
+  cancellationReason     String?   @map("cancellation_reason") @db.VarChar(300)
+  createdBy              String    @map("created_by") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  originalInvoice     SalesInvoice         @relation("SalesReturnOriginalInvoice", fields: [originalSalesInvoiceId], references: [id], onDelete: Restrict)
+  customer            Customer             @relation("SalesReturnCustomer", fields: [customerId], references: [id])
+  branch              Branch               @relation("SalesReturnBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  salesRepresentative SalesRepresentative? @relation("SalesReturnRep", fields: [salesRepresentativeId], references: [id], onDelete: Restrict)
+  creator             User                 @relation("SalesReturnCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  lines               SalesReturnLine[]
+
+  @@index([originalSalesInvoiceId])
+  @@index([customerId])
+  @@index([branchId])
+  @@index([salesRepresentativeId])
+  @@index([status])
+  @@index([returnDate(sort: Desc)])
+  @@map("sales_returns")
+}
+
+model SalesReturnLine {
+  id                            String   @id @default(uuid()) @db.Uuid
+  salesReturnId                 String   @map("sales_return_id") @db.Uuid
+  originalSalesInvoiceLineId    String   @map("original_sales_invoice_line_id") @db.Uuid
+  productVariantId              String   @map("product_variant_id") @db.Uuid
+  lengthM                       Decimal? @map("length_m") @db.Decimal(14, 4)
+  widthM                        Decimal? @map("width_m") @db.Decimal(14, 4)
+  returnedBoards                Decimal  @map("returned_boards") @db.Decimal(14, 4)          // operational piece/board count
+  returnedMetersQuantity        Decimal  @map("returned_meters_quantity") @db.Decimal(14, 4) // CANONICAL quantity
+  originalSalePricePerMeter     Decimal  @map("original_sale_price_per_meter") @db.Decimal(14, 2)
+  originalDiscountPct           Decimal  @default(0) @map("original_discount_pct") @db.Decimal(5, 2)
+  originalTaxRate               Decimal  @default(0) @map("original_tax_rate") @db.Decimal(5, 2)
+  returnSubtotal                Decimal  @map("return_subtotal") @db.Decimal(14, 2)          // gross (metres × price)
+  returnDiscount                Decimal  @default(0) @map("return_discount") @db.Decimal(14, 2)
+  returnNetExTax                Decimal  @map("return_net_ex_tax") @db.Decimal(14, 2)
+  returnTax                     Decimal  @default(0) @map("return_tax") @db.Decimal(14, 2)
+  returnTotal                   Decimal  @map("return_total") @db.Decimal(14, 2)
+  originalCostPerMeterAtPosting Decimal? @map("original_cost_per_meter_at_posting") @db.Decimal(14, 4)
+  returnCogs                    Decimal  @default(0) @map("return_cogs") @db.Decimal(14, 2)   // historical COGS reversed
+  inventoryDisposition          String   @default("RETURN_TO_AVAILABLE_STOCK") @map("inventory_disposition") @db.VarChar(40)
+  reason                        String?  @db.VarChar(300)
+  note                          String?  @db.VarChar(300)
+
+  salesReturn         SalesReturn      @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  originalInvoiceLine SalesInvoiceLine @relation("SalesReturnLineOriginal", fields: [originalSalesInvoiceLineId], references: [id], onDelete: Restrict)
+  productVariant      ProductVariant   @relation("SalesReturnLineVariant", fields: [productVariantId], references: [id])
+
+  @@index([salesReturnId])
+  @@index([originalSalesInvoiceLineId])
+  @@map("sales_return_lines")
+}
+
+model PurchaseReturn {
+  id                        String    @id @default(uuid()) @db.Uuid
+  returnNumber              BigInt    @unique @default(autoincrement()) @map("return_number")
+  originalPurchaseInvoiceId String    @map("original_purchase_invoice_id") @db.Uuid
+  supplierId                String    @map("supplier_id") @db.Uuid
+  branchId                  String    @map("branch_id") @db.Uuid
+  returnDate                DateTime  @map("return_date") @db.Date
+  status                    String    @default("DRAFT") @db.VarChar(20)
+  reason                    String?   @db.VarChar(300)
+  notes                     String?   @db.VarChar(1000)
+  // KEEP_AS_SUPPLIER_CREDIT | OFFSET_OUTSTANDING_BALANCE | CASH_REFUND | BANK_REFUND
+  settlementMode            String    @default("KEEP_AS_SUPPLIER_CREDIT") @map("settlement_mode") @db.VarChar(40)
+  refundTreasuryAccountId   String?   @map("refund_treasury_account_id") @db.Uuid
+  subtotal                  Decimal   @default(0) @db.Decimal(14, 2)       // returned net ex-tax
+  taxTotal                  Decimal   @default(0) @map("tax_total") @db.Decimal(14, 2)
+  grandTotal                Decimal   @default(0) @map("grand_total") @db.Decimal(14, 2)
+  inventoryValueOut         Decimal   @default(0) @map("inventory_value_out") @db.Decimal(14, 2)
+  journalEntryId            String?   @map("journal_entry_id") @db.Uuid
+  confirmedAt               DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  confirmedBy               String?   @map("confirmed_by") @db.Uuid
+  cancelledAt               DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy               String?   @map("cancelled_by") @db.Uuid
+  cancellationReason        String?   @map("cancellation_reason") @db.VarChar(300)
+  createdBy                 String    @map("created_by") @db.Uuid
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  originalInvoice PurchaseInvoice     @relation("PurchaseReturnOriginalInvoice", fields: [originalPurchaseInvoiceId], references: [id], onDelete: Restrict)
+  supplier        Supplier            @relation("PurchaseReturnSupplier", fields: [supplierId], references: [id], onDelete: Restrict)
+  branch          Branch              @relation("PurchaseReturnBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  creator         User                @relation("PurchaseReturnCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  lines           PurchaseReturnLine[]
+
+  @@index([originalPurchaseInvoiceId])
+  @@index([supplierId])
+  @@index([branchId])
+  @@index([status])
+  @@index([returnDate(sort: Desc)])
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnLine {
+  id                             String   @id @default(uuid()) @db.Uuid
+  purchaseReturnId               String   @map("purchase_return_id") @db.Uuid
+  originalPurchaseInvoiceLineId  String   @map("original_purchase_invoice_line_id") @db.Uuid
+  productVariantId               String   @map("product_variant_id") @db.Uuid
+  lengthM                        Decimal? @map("length_m") @db.Decimal(14, 4)
+  widthM                         Decimal? @map("width_m") @db.Decimal(14, 4)
+  returnedBoards                 Decimal  @map("returned_boards") @db.Decimal(14, 4)
+  returnedMetersQuantity         Decimal  @map("returned_meters_quantity") @db.Decimal(14, 4)
+  originalPurchasePricePerMeter  Decimal  @map("original_purchase_price_per_meter") @db.Decimal(14, 2)
+  originalTaxRate                Decimal  @default(0) @map("original_tax_rate") @db.Decimal(5, 2)
+  returnNetExTax                 Decimal  @map("return_net_ex_tax") @db.Decimal(14, 2)
+  returnTax                      Decimal  @default(0) @map("return_tax") @db.Decimal(14, 2)
+  returnTotal                    Decimal  @map("return_total") @db.Decimal(14, 2)
+  historicalInventoryCostPerMeter Decimal @map("historical_inventory_cost_per_meter") @db.Decimal(14, 4)
+  inventoryValueOut              Decimal  @map("inventory_value_out") @db.Decimal(14, 2)
+  reason                         String?  @db.VarChar(300)
+  note                           String?  @db.VarChar(300)
+
+  purchaseReturn      PurchaseReturn      @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  originalInvoiceLine PurchaseInvoiceLine @relation("PurchaseReturnLineOriginal", fields: [originalPurchaseInvoiceLineId], references: [id], onDelete: Restrict)
+  productVariant      ProductVariant      @relation("PurchaseReturnLineVariant", fields: [productVariantId], references: [id])
+
+  @@index([purchaseReturnId])
+  @@index([originalPurchaseInvoiceLineId])
+  @@map("purchase_return_lines")
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1089,6 +1265,7 @@ model PostingProfile {
   arAccountId               String?  @map("ar_account_id") @db.Uuid
   apAccountId               String?  @map("ap_account_id") @db.Uuid
   revenueAccountId          String?  @map("revenue_account_id") @db.Uuid
+  salesReturnsAccountId     String?  @map("sales_returns_account_id") @db.Uuid
   cogsAccountId             String?  @map("cogs_account_id") @db.Uuid
   inventoryAccountId        String?  @map("inventory_account_id") @db.Uuid
   vatInputAccountId         String?  @map("vat_input_account_id") @db.Uuid

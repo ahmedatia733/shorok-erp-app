@@ -60,6 +60,12 @@ export class InventorySummaryBuilder {
           return "COUNT_CORRECTION_NO_VARIANCE";
         }
         return isPositive ? "COUNT_CORRECTION_POSITIVE" : "COUNT_CORRECTION_NEGATIVE";
+      // Returns pass their own pre-localized summaries to InventoryEngine.apply,
+      // so these only need a safe fallback key on the generic builder path.
+      case "SALE_RETURN":
+        return isPositive ? "RECEIPT" : "SALE";
+      case "PURCHASE_RETURN":
+        return isPositive ? "RECEIPT" : "SALE";
     }
   }
 

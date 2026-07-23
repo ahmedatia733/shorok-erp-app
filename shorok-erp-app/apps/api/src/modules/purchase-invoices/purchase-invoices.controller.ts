@@ -361,6 +361,17 @@ export class PurchaseInvoicesController {
       throw new ValidationError({ reason: "invoice_not_draft", status: existing.status });
     }
 
+    // Persisted-meters invariant (Gate 0.A): every line must carry a strictly
+    // positive metersQuantity before posting — it drives inventory metres AND the
+    // per-metre WAC. Reject a draft with missing/invalid metres rather than
+    // deriving a wrong quantity from the current variant size.
+    for (const line of existing.lines) {
+      const m = new Decimal(line.metersQuantity.toString());
+      if (!m.isFinite() || m.lte(0)) {
+        throw new ValidationError({ reason: "line_meters_required", lineId: line.id });
+      }
+    }
+
     // Phase 3A (T030): confirm now posts through the PostingEngine.
     // Accounts resolve from the PostingProfile in force on the invoice date;
     // if a slot is missing we TEMPORARILY fall back to the account IDs the

@@ -20,6 +20,8 @@ export const MovementTypeEnum = z.enum([
   "SALE",
   "ADJUSTMENT",
   "COUNT_CORRECTION",
+  "SALE_RETURN",
+  "PURCHASE_RETURN",
 ]);
 export type MovementType = z.infer<typeof MovementTypeEnum>;
 
