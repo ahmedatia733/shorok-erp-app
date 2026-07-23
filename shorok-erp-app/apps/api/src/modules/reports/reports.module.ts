@@ -9,6 +9,8 @@ import { TaxLedgerController } from "./tax-ledger.controller";
 import { SupplierStatementController } from "./supplier-statement.controller";
 import { SupplierAgingController } from "./supplier-aging.controller";
 import { CashFlowController } from "./cash-flow.controller";
+import { SalesRepReportsController, SalesTimeSeriesController } from "./sales-rep-reports.controller";
+import { SalesRepReportsService } from "./sales-rep-reports.service";
 import { AccountingStatementsModule } from "../accounting-statements/accounting-statements.module";
 
 @Module({
@@ -23,7 +25,9 @@ import { AccountingStatementsModule } from "../accounting-statements/accounting-
     SupplierStatementController,
     SupplierAgingController,
     CashFlowController,
+    SalesRepReportsController,
+    SalesTimeSeriesController,
   ],
-  providers: [DashboardService],
+  providers: [DashboardService, SalesRepReportsService],
 })
 export class ReportsModule {}

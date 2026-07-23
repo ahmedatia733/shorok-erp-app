@@ -14,4 +14,9 @@ module.exports = {
   },
   testTimeout: 30000,
   maxWorkers: 1,
+  // Hard-fail before any DB connection unless TEST_DATABASE_URL is a valid,
+  // dedicated LOCAL test database (globalSetup = whole run; setupFiles = each
+  // worker, where it also repoints DATABASE_URL at the test DB).
+  globalSetup: "<rootDir>/tests/integration/db-safety-guard.ts",
+  setupFiles: ["<rootDir>/tests/integration/jest-setup-worker.ts"],
 };
