@@ -118,6 +118,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
             onToggle={() => setPurchasingOpen((v) => !v)}
           >
             <NavLink href={`/${locale}/purchasing/invoices`} label={t("purchaseInvoices")} />
+            <NavLink href={`/${locale}/purchasing/returns`} label="مردودات المشتريات" />
             <NavLink href={`/${locale}/purchasing/supplier-payments`} label="دفعات الموردين" />
             <NavLink href={`/${locale}/suppliers`} label={t("suppliers")} />
             <NavLink href={`/${locale}/factory-orders`} label={t("factoryOrders")} />
@@ -131,6 +132,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
           >
             <NavLink href={`/${locale}/orders`} label={t("orders")} />
             <NavLink href={`/${locale}/sales/invoices`} label="فواتير المبيعات" />
+            <NavLink href={`/${locale}/sales/returns`} label="مردودات المبيعات" />
             <NavLink href={`/${locale}/sales/representatives`} label={t("salesRepresentatives")} />
           </NavSection>
 

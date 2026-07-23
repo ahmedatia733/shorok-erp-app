@@ -23,6 +23,8 @@ const TYPES: Array<MovementType | "ALL"> = [
   "SALE",
   "ADJUSTMENT",
   "COUNT_CORRECTION",
+  "SALE_RETURN",
+  "PURCHASE_RETURN",
 ];
 
 const typeBadge: Record<MovementType, "info" | "success" | "warning" | "neutral"> = {
@@ -30,6 +32,8 @@ const typeBadge: Record<MovementType, "info" | "success" | "warning" | "neutral"
   SALE: "info",
   ADJUSTMENT: "warning",
   COUNT_CORRECTION: "neutral",
+  SALE_RETURN: "success",
+  PURCHASE_RETURN: "warning",
 };
 
 const typeLabel: Record<MovementType, string> = {
@@ -37,6 +41,8 @@ const typeLabel: Record<MovementType, string> = {
   SALE: "بيع",
   ADJUSTMENT: "تسوية",
   COUNT_CORRECTION: "تصحيح جرد",
+  SALE_RETURN: "مردود مبيعات",
+  PURCHASE_RETURN: "مردود مشتريات",
 };
 
 export default function MovementsPage() {

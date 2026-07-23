@@ -1,0 +1,104 @@
+"use client";
+
+import { apiCall } from "./api-client";
+
+// ── shared shapes ────────────────────────────────────────────────────────────
+export type ReturnStatus = "DRAFT" | "CONFIRMED" | "CANCELLED";
+
+export interface ReturnableLine {
+  originalLineId: string;
+  productVariantId: string;
+  originalMeters: string;
+  originalBoards: string;
+  returnedMeters: string;
+  returnedBoards: string;
+  remainingMeters: string;
+  remainingBoards: string;
+  originalNetExTax: string;
+  originalUnitPrice: string;
+  originalTaxRate: string;
+  originalLineCogs: string;
+  originalCostPerMeter: string | null;
+}
+
+export interface SalesReturnable {
+  invoice: { id: string; status: string; branchId: string; customerId: string; salesRepresentativeId: string | null; taxRate: string; returnStatus: "NONE" | "PARTIAL" | "FULL" };
+  lines: ReturnableLine[];
+}
+export interface PurchaseReturnable {
+  invoice: { id: string; status: string; branchId: string; supplierId: string; returnStatus: "NONE" | "PARTIAL" | "FULL" };
+  lines: Array<{ originalLineId: string; productVariantId: string; originalMeters: string; originalBoards: string; returnedMeters: string; returnedBoards: string; remainingMeters: string; remainingBoards: string; originalUnitPrice: string; originalTaxRate: string; originalNetExTax: string }>;
+}
+
+export interface SalesReturnLineDetail {
+  id: string;
+  returnedBoards: string;
+  returnedMetersQuantity: string;
+  originalSalePricePerMeter: string;
+  returnNetExTax: string;
+  returnTax: string;
+  returnTotal: string;
+  returnCogs: string;
+}
+export interface PurchaseReturnLineDetail {
+  id: string;
+  returnedBoards: string;
+  returnedMetersQuantity: string;
+  originalPurchasePricePerMeter: string;
+  returnNetExTax: string;
+  returnTax: string;
+  returnTotal: string;
+}
+export interface SalesReturnRow {
+  id: string;
+  returnNumber: string;
+  originalSalesInvoiceId: string;
+  returnDate: string;
+  status: ReturnStatus;
+  settlementMode: string;
+  subtotal: string;
+  taxTotal: string;
+  grandTotal: string;
+  cogsReversalTotal: string;
+  customer?: { id: string; code: string; nameAr: string } | null;
+  originalInvoice?: { id: string; invoiceNumber: string } | null;
+  lines?: SalesReturnLineDetail[];
+}
+export interface PurchaseReturnRow {
+  id: string;
+  returnNumber: string;
+  originalPurchaseInvoiceId: string;
+  returnDate: string;
+  status: ReturnStatus;
+  settlementMode: string;
+  subtotal: string;
+  taxTotal: string;
+  grandTotal: string;
+  inventoryValueOut: string;
+  supplier?: { id: string; nameAr: string } | null;
+  originalInvoice?: { id: string; invoiceNumber: string } | null;
+  lines?: PurchaseReturnLineDetail[];
+}
+
+export interface SalesReturnLineInput { originalSalesInvoiceLineId: string; returnedMeters: string; returnedBoards?: string; reason?: string; note?: string }
+export interface PurchaseReturnLineInput { originalPurchaseInvoiceLineId: string; returnedMeters: string; returnedBoards?: string; reason?: string; note?: string }
+
+// ── sales returns ────────────────────────────────────────────────────────────
+export const listSalesReturns = (q: { status?: string; limit?: number } = {}) =>
+  apiCall<{ items: SalesReturnRow[]; nextCursor: string | null }>(`/sales-returns?limit=${q.limit ?? 50}${q.status ? `&status=${q.status}` : ""}`);
+export const getSalesReturn = (id: string) => apiCall<SalesReturnRow>(`/sales-returns/${id}`);
+export const getSalesReturnable = (invoiceId: string) => apiCall<SalesReturnable>(`/sales-returns/returnable/${invoiceId}`);
+export const createSalesReturn = (body: { originalSalesInvoiceId: string; returnDate: string; reason?: string; notes?: string; settlementMode?: string; refundTreasuryAccountId?: string; lines: SalesReturnLineInput[] }) =>
+  apiCall<SalesReturnRow>(`/sales-returns`, { method: "POST", body });
+export const confirmSalesReturn = (id: string) => apiCall<SalesReturnRow>(`/sales-returns/${id}/confirm`, { method: "POST", body: {} });
+export const cancelSalesReturn = (id: string, reason?: string) => apiCall<SalesReturnRow>(`/sales-returns/${id}/cancel`, { method: "POST", body: { reason } });
+
+// ── purchase returns ─────────────────────────────────────────────────────────
+export const listPurchaseReturns = (q: { status?: string; limit?: number } = {}) =>
+  apiCall<{ items: PurchaseReturnRow[]; nextCursor: string | null }>(`/purchase-returns?limit=${q.limit ?? 50}${q.status ? `&status=${q.status}` : ""}`);
+export const getPurchaseReturn = (id: string) => apiCall<PurchaseReturnRow>(`/purchase-returns/${id}`);
+export const getPurchaseReturnable = (invoiceId: string) => apiCall<PurchaseReturnable>(`/purchase-returns/returnable/${invoiceId}`);
+export const createPurchaseReturn = (body: { originalPurchaseInvoiceId: string; returnDate: string; reason?: string; notes?: string; settlementMode?: string; refundTreasuryAccountId?: string; lines: PurchaseReturnLineInput[] }) =>
+  apiCall<PurchaseReturnRow>(`/purchase-returns`, { method: "POST", body });
+export const confirmPurchaseReturn = (id: string) => apiCall<PurchaseReturnRow>(`/purchase-returns/${id}/confirm`, { method: "POST", body: {} });
+export const cancelPurchaseReturn = (id: string, reason?: string) => apiCall<PurchaseReturnRow>(`/purchase-returns/${id}/cancel`, { method: "POST", body: { reason } });
