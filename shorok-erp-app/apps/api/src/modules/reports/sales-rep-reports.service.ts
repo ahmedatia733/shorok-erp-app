@@ -68,6 +68,64 @@ export class SalesRepReportsService {
 
   private num = (v: unknown, dp = 2) => new Decimal((v as { toString(): string })?.toString() ?? "0").toFixed(dp);
 
+  /** CONFIRMED sales-return predicate (returnDate-based; rep/branch/customer/
+   *  product filters mirror `where`). Draft/cancelled returns are excluded. */
+  private returnsWhere(f: ReportFilters): Prisma.Sql {
+    const parts: Prisma.Sql[] = [
+      Prisma.sql`sr.status = 'CONFIRMED'`,
+      Prisma.sql`sr.return_date BETWEEN ${f.from}::date AND ${f.to}::date`,
+    ];
+    if (f.salesRepresentativeId) parts.push(Prisma.sql`sr.sales_representative_id = ${f.salesRepresentativeId}::uuid`);
+    if (f.branchId)    parts.push(Prisma.sql`sr.branch_id = ${f.branchId}::uuid`);
+    if (f.customerId)  parts.push(Prisma.sql`sr.customer_id = ${f.customerId}::uuid`);
+    if (f.productVariantId) parts.push(Prisma.sql`rl.product_variant_id = ${f.productVariantId}::uuid`);
+    if (f.productCode) parts.push(Prisma.sql`sku.code = ${f.productCode}`);
+    if (f.productNameAr) parts.push(Prisma.sql`sku.color_name_ar ILIKE ${"%" + f.productNameAr + "%"}`);
+    return Prisma.join(parts, " AND ");
+  }
+
+  /** Σ confirmed sales returns grouped by an arbitrary key expression (on the
+   *  sr/rl/sku/c/b/rep aliases). Values: net ex-tax, reversed COGS, metres. */
+  private async returnsByKey(f: ReportFilters, keyExpr: Prisma.Sql) {
+    const rows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT ${keyExpr} AS grp_key,
+             coalesce(sum(rl.return_net_ex_tax), 0) AS ret_net,
+             coalesce(sum(rl.return_cogs), 0) AS ret_cogs,
+             coalesce(sum(rl.returned_meters_quantity), 0) AS ret_meters
+      FROM sales_returns sr
+      JOIN sales_return_lines rl ON rl.sales_return_id = sr.id
+      JOIN product_variants v ON v.id = rl.product_variant_id
+      JOIN product_skus sku ON sku.id = v.sku_id
+      JOIN customers c ON c.id = sr.customer_id
+      JOIN branches b ON b.id = sr.branch_id
+      LEFT JOIN sales_representatives rep ON rep.id = sr.sales_representative_id
+      WHERE ${this.returnsWhere(f)}
+      GROUP BY grp_key
+    `);
+    return new Map(rows.map((r) => [String(r.grp_key ?? ""), {
+      net: new Decimal(r.ret_net.toString()), cogs: new Decimal(r.ret_cogs.toString()), meters: new Decimal(r.ret_meters.toString()),
+    }]));
+  }
+
+  /** Subtract a rep/group's confirmed returns from its gross figures. */
+  private applyReturns<T extends { metersReturned: string; netMeters: string; returns: string; netSales: string; cogs: string; grossProfit: string }>(
+    base: T, ret?: { net: Decimal; cogs: Decimal; meters: Decimal },
+  ): T {
+    if (!ret) return base;
+    const netSales = new Decimal(base.netSales).minus(ret.net);
+    const cogs = new Decimal(base.cogs).minus(ret.cogs);
+    const netMeters = new Decimal(base.netMeters).minus(ret.meters);
+    return {
+      ...base,
+      metersReturned: ret.meters.toFixed(4),
+      netMeters: netMeters.toFixed(4),
+      returns: ret.net.toFixed(2),
+      netSales: netSales.toFixed(2),
+      cogs: cogs.toFixed(2),
+      grossProfit: netSales.minus(cogs).toFixed(2),
+    };
+  }
+
   private repRow = (r: any) => ({
     salesRepresentativeId: r.rep_id,
     salesRepresentativeName: r.rep_name ?? "— بدون مندوب —",
@@ -101,8 +159,10 @@ export class SalesRepReportsService {
       GROUP BY si.sales_representative_id, rep.name_ar
       ORDER BY net DESC
     `);
-    const reps = rows.map((r) => this.repRow(r));
-    return { from: f.from, to: f.to, representatives: reps, totals: this.totalize(reps) };
+    // Net confirmed sales returns (attributed to the ORIGINAL invoice's rep).
+    const retMap = await this.returnsByKey(f, Prisma.raw("sr.sales_representative_id::text"));
+    const reps = rows.map((r) => this.applyReturns(this.repRow(r), retMap.get(String(r.rep_id ?? ""))));
+    return { from: f.from, to: f.to, salesReturnsSupported: true, representatives: reps, totals: this.totalize(reps) };
   }
 
   /** §8 — a representative's summary cards + their confirmed invoices (paged). */
@@ -301,16 +361,29 @@ export class SalesRepReportsService {
       GROUP BY grp_key, grp_label
       ORDER BY net DESC
     `);
+    // Returns key expression parallel to the group dimension, on return aliases.
+    const retDim: Record<string, Prisma.Sql> = {
+      representative: Prisma.raw("sr.sales_representative_id::text"),
+      branch:  Prisma.raw("sr.branch_id::text"),
+      customer: Prisma.raw("c.code"),
+      product: Prisma.raw("sku.code"),
+      day:     Prisma.raw(groupKeyExpr("day", "sr.return_date")),
+      month:   Prisma.raw(groupKeyExpr("month", "sr.return_date")),
+      quarter: Prisma.raw(groupKeyExpr("quarter", "sr.return_date")),
+      year:    Prisma.raw(groupKeyExpr("year", "sr.return_date")),
+    };
+    const retMap = await this.returnsByKey(f, retDim[groupBy]!);
     const groups = rows.map((r) => {
       const net = this.num(r.net), cogs = this.num(r.cogs);
-      return {
+      const base = {
         key: r.grp_key, label: r.grp_label, invoiceCount: Number(r.invoices),
-        boards: this.num(r.boards, 4), metersSold: this.num(r.meters, 4),
-        grossSales: this.num(r.gross), discounts: this.num(r.discount), netSales: net,
+        boards: this.num(r.boards, 4), metersSold: this.num(r.meters, 4), metersReturned: "0.0000", netMeters: this.num(r.meters, 4),
+        grossSales: this.num(r.gross), discounts: this.num(r.discount), returns: "0.00", netSales: net,
         cogs, grossProfit: new Decimal(net).minus(cogs).toFixed(2),
       };
+      return this.applyReturns(base, retMap.get(String(r.grp_key ?? "")));
     });
-    return { from: f.from, to: f.to, groupBy, groups };
+    return { from: f.from, to: f.to, groupBy, salesReturnsSupported: true, groups };
   }
 
   private totalize(reps: ReturnType<SalesRepReportsService["repRow"]>[]) {
