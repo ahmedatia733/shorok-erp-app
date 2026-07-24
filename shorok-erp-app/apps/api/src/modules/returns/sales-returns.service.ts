@@ -13,6 +13,7 @@ import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 import { ReturnableService } from "./returnable.service";
 import { allocateReturn, zeroAlready, type OriginalLineEconomics, type AlreadyReturned } from "./return-allocation";
+import { patchText, newText } from "./text-fields";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: unknown) => new Decimal((v as { toString(): string } | null)?.toString() ?? "0");
@@ -174,8 +175,8 @@ export class SalesReturnsService {
       originalCostPerMeterAtPosting: orig.originalCostPerMeter,
       returnCogs: alloc.cogs.toFixed(2),
       inventoryDisposition: req.inventoryDisposition ?? "RETURN_TO_AVAILABLE_STOCK",
-      reason: req.reason ?? null,
-      note: req.note ?? null,
+      reason: newText(req.reason),
+      note: newText(req.note),
     };
   }
 
@@ -265,8 +266,8 @@ export class SalesReturnsService {
           salesRepresentativeId: inv.salesRepresentativeId,
           returnDate: new Date(body.returnDate),
           status: "DRAFT",
-          reason: body.reason ?? null,
-          notes: body.notes ?? null,
+          reason: newText(body.reason),
+          notes: newText(body.notes),
           settlementMode: body.settlementMode,
           subtotal: t.subtotal.toFixed(2),
           discountTotal: t.discountTotal.toFixed(2),
@@ -313,8 +314,8 @@ export class SalesReturnsService {
         where: { id },
         data: {
           returnDate: body.returnDate ? new Date(body.returnDate) : undefined,
-          reason: body.reason ?? undefined,
-          notes: body.notes ?? undefined,
+          reason: patchText(body.reason),
+          notes: patchText(body.notes),
           settlementMode: body.settlementMode ?? undefined,
           subtotal: t.subtotal.toFixed(2),
           discountTotal: t.discountTotal.toFixed(2),

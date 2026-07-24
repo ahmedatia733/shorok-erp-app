@@ -13,6 +13,7 @@ import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 import { ReturnableService } from "./returnable.service";
 import { allocateReturn, type OriginalLineEconomics, type AlreadyReturned } from "./return-allocation";
+import { patchText, newText } from "./text-fields";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: unknown) => new Decimal((v as { toString(): string } | null)?.toString() ?? "0");
@@ -137,7 +138,7 @@ export class PurchaseReturnsService {
         data: {
           originalPurchaseInvoiceId: inv.id, supplierId: inv.supplierId, branchId: inv.branchId,
           returnDate: new Date(body.returnDate), status: "DRAFT",
-          reason: body.reason ?? null, notes: body.notes ?? null,
+          reason: newText(body.reason), notes: newText(body.notes),
           settlementMode: body.settlementMode,
           subtotal: t.subtotal.toFixed(2), taxTotal: t.taxTotal.toFixed(2),
           grandTotal: t.grandTotal.toFixed(2), inventoryValueOut: t.inventoryValueOut.toFixed(2),
@@ -166,7 +167,7 @@ export class PurchaseReturnsService {
       returnNetExTax: b.alloc.net.toFixed(2), returnTax: b.alloc.tax.toFixed(2), returnTotal: b.alloc.total.toFixed(2),
       historicalInventoryCostPerMeter: new Decimal(b.orig.originalUnitPrice).toFixed(4),
       inventoryValueOut: b.alloc.net.toFixed(2),
-      reason: b.req.reason ?? null, note: b.req.note ?? null,
+      reason: newText(b.req.reason), note: newText(b.req.note),
     };
   }
 
@@ -252,7 +253,7 @@ export class PurchaseReturnsService {
         where: { id },
         data: {
           returnDate: body.returnDate ? new Date(body.returnDate) : undefined,
-          reason: body.reason ?? undefined, notes: body.notes ?? undefined,
+          reason: patchText(body.reason), notes: patchText(body.notes),
           settlementMode: body.settlementMode ?? undefined,
           subtotal: t.subtotal.toFixed(2), taxTotal: t.taxTotal.toFixed(2),
           grandTotal: t.grandTotal.toFixed(2), inventoryValueOut: t.inventoryValueOut.toFixed(2),
