@@ -4,6 +4,9 @@ const QtyStr  = z.string().regex(/^\d+(\.\d{1,4})?$/); // metres / boards, up to
 const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 // ── settlement + disposition vocab ─────────────────────────────────────────
+// Full vocab (persisted). Cash/bank refunds are NOT accepted for confirmation in
+// this phase — there is no customer-refund / supplier-refund voucher module, and
+// direct-posting to treasury would bypass the financial engines (returns spec §9).
 export const SalesReturnSettlementEnum = z.enum([
   "KEEP_AS_CUSTOMER_CREDIT",
   "OFFSET_OUTSTANDING_BALANCE",
@@ -19,6 +22,10 @@ export const PurchaseReturnSettlementEnum = z.enum([
   "BANK_REFUND",
 ]);
 export type PurchaseReturnSettlement = z.infer<typeof PurchaseReturnSettlementEnum>;
+
+// Only credit settlements are currently SUPPORTED for create/confirm.
+export const SalesReturnSettlementSupported = z.enum(["KEEP_AS_CUSTOMER_CREDIT", "OFFSET_OUTSTANDING_BALANCE"]);
+export const PurchaseReturnSettlementSupported = z.enum(["KEEP_AS_SUPPLIER_CREDIT", "OFFSET_OUTSTANDING_BALANCE"]);
 
 // Only stock-back-to-available is implemented in this phase (see returns spec §9).
 export const InventoryDispositionEnum = z.enum(["RETURN_TO_AVAILABLE_STOCK"]);
@@ -41,25 +48,35 @@ export const SalesReturnLineInputSchema = z.object({
 });
 export type SalesReturnLineInput = z.infer<typeof SalesReturnLineInputSchema>;
 
+// Reject the SAME original invoice line appearing twice — otherwise two items
+// could each validate independently against the same remaining quantity (§4).
+const uniqueSalesLines = (lines: { originalSalesInvoiceLineId: string }[], ctx: z.RefinementCtx) => {
+  const seen = new Set<string>();
+  lines.forEach((l, i) => {
+    if (seen.has(l.originalSalesInvoiceLineId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "duplicate_original_line", path: ["lines", i, "originalSalesInvoiceLineId"] });
+    }
+    seen.add(l.originalSalesInvoiceLineId);
+  });
+};
+
 export const CreateSalesReturnSchema = z.object({
   originalSalesInvoiceId: z.string().uuid(),
   returnDate: DateStr,
   reason: z.string().max(300).optional(),
   notes: z.string().max(1000).optional(),
-  settlementMode: SalesReturnSettlementEnum.optional().default("KEEP_AS_CUSTOMER_CREDIT"),
-  refundTreasuryAccountId: z.string().uuid().optional(),
+  settlementMode: SalesReturnSettlementSupported.optional().default("KEEP_AS_CUSTOMER_CREDIT"),
   lines: z.array(SalesReturnLineInputSchema).min(1),
-});
+}).superRefine((v, ctx) => uniqueSalesLines(v.lines, ctx));
 export type CreateSalesReturn = z.infer<typeof CreateSalesReturnSchema>;
 
 export const UpdateSalesReturnSchema = z.object({
   returnDate: DateStr.optional(),
   reason: z.string().max(300).optional(),
   notes: z.string().max(1000).optional(),
-  settlementMode: SalesReturnSettlementEnum.optional(),
-  refundTreasuryAccountId: z.string().uuid().optional().nullable(),
+  settlementMode: SalesReturnSettlementSupported.optional(),
   lines: z.array(SalesReturnLineInputSchema).min(1).optional(),
-});
+}).superRefine((v, ctx) => { if (v.lines) uniqueSalesLines(v.lines, ctx); });
 export type UpdateSalesReturn = z.infer<typeof UpdateSalesReturnSchema>;
 
 export const PurchaseReturnLineInputSchema = z.object({
@@ -71,25 +88,33 @@ export const PurchaseReturnLineInputSchema = z.object({
 });
 export type PurchaseReturnLineInput = z.infer<typeof PurchaseReturnLineInputSchema>;
 
+const uniquePurchaseLines = (lines: { originalPurchaseInvoiceLineId: string }[], ctx: z.RefinementCtx) => {
+  const seen = new Set<string>();
+  lines.forEach((l, i) => {
+    if (seen.has(l.originalPurchaseInvoiceLineId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "duplicate_original_line", path: ["lines", i, "originalPurchaseInvoiceLineId"] });
+    }
+    seen.add(l.originalPurchaseInvoiceLineId);
+  });
+};
+
 export const CreatePurchaseReturnSchema = z.object({
   originalPurchaseInvoiceId: z.string().uuid(),
   returnDate: DateStr,
   reason: z.string().max(300).optional(),
   notes: z.string().max(1000).optional(),
-  settlementMode: PurchaseReturnSettlementEnum.optional().default("KEEP_AS_SUPPLIER_CREDIT"),
-  refundTreasuryAccountId: z.string().uuid().optional(),
+  settlementMode: PurchaseReturnSettlementSupported.optional().default("KEEP_AS_SUPPLIER_CREDIT"),
   lines: z.array(PurchaseReturnLineInputSchema).min(1),
-});
+}).superRefine((v, ctx) => uniquePurchaseLines(v.lines, ctx));
 export type CreatePurchaseReturn = z.infer<typeof CreatePurchaseReturnSchema>;
 
 export const UpdatePurchaseReturnSchema = z.object({
   returnDate: DateStr.optional(),
   reason: z.string().max(300).optional(),
   notes: z.string().max(1000).optional(),
-  settlementMode: PurchaseReturnSettlementEnum.optional(),
-  refundTreasuryAccountId: z.string().uuid().optional().nullable(),
+  settlementMode: PurchaseReturnSettlementSupported.optional(),
   lines: z.array(PurchaseReturnLineInputSchema).min(1).optional(),
-});
+}).superRefine((v, ctx) => { if (v.lines) uniquePurchaseLines(v.lines, ctx); });
 export type UpdatePurchaseReturn = z.infer<typeof UpdatePurchaseReturnSchema>;
 
 export const ReturnCancelSchema = z.object({
@@ -100,6 +125,7 @@ export type ReturnCancel = z.infer<typeof ReturnCancelSchema>;
 export const ReturnQuerySchema = z.object({
   status: ReturnStatusEnum.optional(),
   branchId: z.string().uuid().optional(),
+  originalInvoiceId: z.string().uuid().optional(), // related-documents filter
   from: DateStr.optional(),
   to: DateStr.optional(),
   cursor: z.string().uuid().optional().nullable(),

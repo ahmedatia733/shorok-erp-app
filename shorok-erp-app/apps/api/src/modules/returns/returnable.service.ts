@@ -9,6 +9,12 @@ type Tx = Prisma.TransactionClient;
 export interface ReturnableLine {
   originalLineId: string;
   productVariantId: string;
+  productCode: string | null;
+  productName: string | null;
+  sizeLabel: string | null;
+  unitLabel: string;
+  lengthM: string | null;
+  widthM: string | null;
   originalMeters: string;
   originalBoards: string;
   returnedMeters: string;   // Σ CONFIRMED returns only (draft/cancelled excluded)
@@ -24,6 +30,20 @@ export interface ReturnableLine {
   originalTaxRate: string;          // snapshot at posting (fallback: header rate)
   originalLineCogs: string;         // historical COGS for the WHOLE original line
   originalCostPerMeter: string | null; // unit_cost_per_meter_at_posting (null on legacy)
+  // TRUE when the line predates persisted metres AND no reliable historical
+  // source (dimensions / gross÷price) could reconstruct them → a return for this
+  // line must be blocked rather than guessed (never treat boards as metres).
+  legacyAmbiguous: boolean;
+}
+
+export interface PurchaseReturnableLine {
+  originalLineId: string; productVariantId: string;
+  productCode: string | null; productName: string | null; sizeLabel: string | null;
+  unitLabel: string; lengthM: string | null; widthM: string | null;
+  originalMeters: string; originalBoards: string;
+  returnedMeters: string; returnedBoards: string;
+  remainingMeters: string; remainingBoards: string;
+  originalUnitPrice: string; originalTaxRate: string; originalNetExTax: string;
 }
 
 /**
@@ -44,6 +64,41 @@ export class ReturnableService {
     return tx ?? this.prisma;
   }
 
+  /**
+   * Reliable historical metres for a sales line, in strict precedence (§7):
+   *   1. persisted meters_quantity (> 0)
+   *   2. lengthM × (widthM || 1) × boards  (persisted chosen dimensions)
+   *   3. line_total ÷ ((1 − discount%/100) × unit_price)  (gross ÷ per-metre price)
+   * `quantity` is a BOARD count and is NEVER used as metres. Returns null when
+   * no source is valid → the line is legacy-ambiguous and cannot be returned.
+   */
+  private deriveSalesMeters(l: {
+    metersQuantity: Prisma.Decimal | null; quantity: Prisma.Decimal;
+    lengthM: Prisma.Decimal | null; widthM: Prisma.Decimal | null;
+    lineTotal: Prisma.Decimal; unitPrice: Prisma.Decimal; discountPct: Prisma.Decimal;
+  }): Decimal | null {
+    if (l.metersQuantity != null) {
+      const m = new Decimal(l.metersQuantity.toString());
+      if (m.gt(0)) return m;
+    }
+    const boards = new Decimal(l.quantity.toString());
+    if (l.lengthM != null) {
+      const len = new Decimal(l.lengthM.toString());
+      const wid = l.widthM != null ? new Decimal(l.widthM.toString()) : new Decimal(1);
+      const m = boards.mul(len).mul(wid);
+      if (m.gt(0)) return m;
+    }
+    const unit = new Decimal(l.unitPrice.toString());
+    const disc = new Decimal(l.discountPct.toString());
+    const factor = new Decimal(1).minus(disc.div(100));
+    if (unit.gt(0) && factor.gt(0)) {
+      const gross = new Decimal(l.lineTotal.toString()).div(factor);
+      const m = gross.div(unit);
+      if (m.gt(0)) return m;
+    }
+    return null;
+  }
+
   // ── SALES ────────────────────────────────────────────────────────────────
   async salesInvoiceReturnable(invoiceId: string, tx?: Tx): Promise<{
     invoice: { id: string; status: string; branchId: string; customerId: string; salesRepresentativeId: string | null; taxRate: string; returnStatus: "NONE" | "PARTIAL" | "FULL" };
@@ -52,7 +107,7 @@ export class ReturnableService {
     const db = this.db(tx);
     const inv = await db.salesInvoice.findUnique({
       where: { id: invoiceId },
-      include: { lines: true },
+      include: { lines: { include: { productVariant: { include: { sku: { select: { code: true, colorNameAr: true } } } } } } },
     });
     if (!inv) throw new NotFoundError({ salesInvoiceId: invoiceId });
 
@@ -66,9 +121,9 @@ export class ReturnableService {
 
     const headerRate = new Decimal(inv.taxRate.toString());
     const lines: ReturnableLine[] = inv.lines.map((l) => {
-      const originalMeters = l.metersQuantity != null
-        ? new Decimal(l.metersQuantity.toString())
-        : new Decimal(l.quantity.toString()); // legacy fallback only
+      const derived = this.deriveSalesMeters(l);
+      const legacyAmbiguous = derived == null;
+      const originalMeters = derived ?? new Decimal(0);
       const originalBoards = new Decimal(l.quantity.toString());
       const sum = byLine.get(l.id);
       const returnedMeters = new Decimal(sum?.returnedMetersQuantity?.toString() ?? "0");
@@ -82,6 +137,12 @@ export class ReturnableService {
       return {
         originalLineId: l.id,
         productVariantId: l.productVariantId,
+        productCode: l.productVariant?.sku?.code ?? null,
+        productName: l.productVariant?.sku?.colorNameAr ?? null,
+        sizeLabel: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(2) : null,
+        unitLabel: l.unitLabel,
+        lengthM: l.lengthM != null ? new Decimal(l.lengthM.toString()).toFixed(4) : null,
+        widthM: l.widthM != null ? new Decimal(l.widthM.toString()).toFixed(4) : null,
         originalMeters: originalMeters.toFixed(4),
         originalBoards: originalBoards.toFixed(4),
         returnedMeters: returnedMeters.toFixed(4),
@@ -96,6 +157,7 @@ export class ReturnableService {
         originalTaxRate: (l.taxRateAtPosting != null ? new Decimal(l.taxRateAtPosting.toString()) : headerRate).toFixed(2),
         originalLineCogs: lineCogs.toFixed(2),
         originalCostPerMeter: l.unitCostPerMeterAtPosting != null ? new Decimal(l.unitCostPerMeterAtPosting.toString()).toFixed(4) : null,
+        legacyAmbiguous,
       };
     });
     return {
@@ -120,18 +182,12 @@ export class ReturnableService {
   // ── PURCHASE ─────────────────────────────────────────────────────────────
   async purchaseInvoiceReturnable(invoiceId: string, tx?: Tx): Promise<{
     invoice: { id: string; status: string; branchId: string; supplierId: string; returnStatus: "NONE" | "PARTIAL" | "FULL" };
-    lines: Array<{
-      originalLineId: string; productVariantId: string;
-      originalMeters: string; originalBoards: string;
-      returnedMeters: string; returnedBoards: string;
-      remainingMeters: string; remainingBoards: string;
-      originalUnitPrice: string; originalTaxRate: string; originalNetExTax: string;
-    }>;
+    lines: PurchaseReturnableLine[];
   }> {
     const db = this.db(tx);
     const inv = await db.purchaseInvoice.findUnique({
       where: { id: invoiceId },
-      include: { lines: true },
+      include: { lines: { include: { productVariant: { include: { sku: { select: { code: true, colorNameAr: true } } } } } } },
     });
     if (!inv) throw new NotFoundError({ purchaseInvoiceId: invoiceId });
 
@@ -142,7 +198,7 @@ export class ReturnableService {
     });
     const byLine = new Map(agg.map((a) => [a.originalPurchaseInvoiceLineId, a._sum]));
 
-    const lines = inv.lines.map((l) => {
+    const lines: PurchaseReturnableLine[] = inv.lines.map((l) => {
       const originalMeters = new Decimal(l.metersQuantity.toString());
       const originalBoards = new Decimal(l.boardsQuantity.toString());
       const sum = byLine.get(l.id);
@@ -151,6 +207,12 @@ export class ReturnableService {
       return {
         originalLineId: l.id,
         productVariantId: l.productVariantId,
+        productCode: l.productVariant?.sku?.code ?? null,
+        productName: l.productVariant?.sku?.colorNameAr ?? null,
+        sizeLabel: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(2) : null,
+        unitLabel: l.unitLabel ?? "متر",
+        lengthM: l.lengthM != null ? new Decimal(l.lengthM.toString()).toFixed(4) : null,
+        widthM: l.widthM != null ? new Decimal(l.widthM.toString()).toFixed(4) : null,
         originalMeters: originalMeters.toFixed(4),
         originalBoards: originalBoards.toFixed(4),
         returnedMeters: returnedMeters.toFixed(4),

@@ -252,7 +252,11 @@ model User {
   paymentVouchersPosted   PaymentVoucher[]      @relation("PaymentVoucherPostedBy")
   paymentVouchersReversed PaymentVoucher[]      @relation("PaymentVoucherReversedBy")
   salesReturnsCreated     SalesReturn[]         @relation("SalesReturnCreatedBy")
+  salesReturnsConfirmed   SalesReturn[]         @relation("SalesReturnConfirmedBy")
+  salesReturnsCancelled   SalesReturn[]         @relation("SalesReturnCancelledBy")
   purchaseReturnsCreated  PurchaseReturn[]      @relation("PurchaseReturnCreatedBy")
+  purchaseReturnsConfirmed PurchaseReturn[]     @relation("PurchaseReturnConfirmedBy")
+  purchaseReturnsCancelled PurchaseReturn[]     @relation("PurchaseReturnCancelledBy")
 
   @@map("users")
 }
@@ -1098,11 +1102,17 @@ model SalesReturn {
   createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  // journalEntryId / cogsJournalEntryId / customerTransactionId / salesReturnsAccountId
+  // are intentionally unconstrained UUIDs — the SAME convention SalesInvoice uses
+  // for its journal/tx/account references. Only the actor references are FK'd
+  // (matching the PaymentVoucher poster/reverser convention).
   originalInvoice     SalesInvoice         @relation("SalesReturnOriginalInvoice", fields: [originalSalesInvoiceId], references: [id], onDelete: Restrict)
   customer            Customer             @relation("SalesReturnCustomer", fields: [customerId], references: [id])
   branch              Branch               @relation("SalesReturnBranch", fields: [branchId], references: [id], onDelete: Restrict)
   salesRepresentative SalesRepresentative? @relation("SalesReturnRep", fields: [salesRepresentativeId], references: [id], onDelete: Restrict)
   creator             User                 @relation("SalesReturnCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  confirmer           User?                @relation("SalesReturnConfirmedBy", fields: [confirmedBy], references: [id], onDelete: Restrict)
+  canceller           User?                @relation("SalesReturnCancelledBy", fields: [cancelledBy], references: [id], onDelete: Restrict)
   lines               SalesReturnLine[]
 
   @@index([originalSalesInvoiceId])
@@ -1173,10 +1183,13 @@ model PurchaseReturn {
   createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  // journalEntryId is an unconstrained UUID (same convention as PurchaseInvoice).
   originalInvoice PurchaseInvoice     @relation("PurchaseReturnOriginalInvoice", fields: [originalPurchaseInvoiceId], references: [id], onDelete: Restrict)
   supplier        Supplier            @relation("PurchaseReturnSupplier", fields: [supplierId], references: [id], onDelete: Restrict)
   branch          Branch              @relation("PurchaseReturnBranch", fields: [branchId], references: [id], onDelete: Restrict)
   creator         User                @relation("PurchaseReturnCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  confirmer       User?               @relation("PurchaseReturnConfirmedBy", fields: [confirmedBy], references: [id], onDelete: Restrict)
+  canceller       User?               @relation("PurchaseReturnCancelledBy", fields: [cancelledBy], references: [id], onDelete: Restrict)
   lines           PurchaseReturnLine[]
 
   @@index([originalPurchaseInvoiceId])

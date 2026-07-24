@@ -50,6 +50,13 @@ export class PurchaseReturnsService {
       throw new ValidationError({ reason: "original_invoice_not_confirmed", status: invoice.status });
     }
     const byId = new Map(lines.map((l) => [l.originalLineId, l]));
+    const dupCheck = new Set<string>();
+    for (const r of reqLines) {
+      if (dupCheck.has(r.originalPurchaseInvoiceLineId)) {
+        throw new ValidationError({ reason: "duplicate_original_line", lineId: r.originalPurchaseInvoiceLineId });
+      }
+      dupCheck.add(r.originalPurchaseInvoiceLineId);
+    }
     const db = tx ?? this.prisma;
     const originalIds = reqLines.map((r) => r.originalPurchaseInvoiceLineId);
     const agg = await db.purchaseReturnLine.groupBy({
@@ -73,7 +80,16 @@ export class PurchaseReturnsService {
       if (requestedMeters.gt(remaining)) {
         throw new ValidationError({ reason: "over_return", lineId: r.originalPurchaseInvoiceLineId, requestedMeters: requestedMeters.toFixed(4), remainingMeters: remaining.toFixed(4) });
       }
+      const remainingBoards = new Decimal(orig.remainingBoards);
       const requestedBoards = r.returnedBoards != null ? new Decimal(r.returnedBoards) : null;
+      if (requestedBoards != null) {
+        if (!requestedBoards.isFinite() || requestedBoards.lte(0)) {
+          throw new ValidationError({ reason: "return_boards_must_be_positive", lineId: r.originalPurchaseInvoiceLineId });
+        }
+        if (requestedBoards.gt(remainingBoards.plus(new Decimal("0.0001")))) {
+          throw new ValidationError({ reason: "over_return_boards", lineId: r.originalPurchaseInvoiceLineId, requestedBoards: requestedBoards.toFixed(4), remainingBoards: remainingBoards.toFixed(4) });
+        }
+      }
 
       const sum = alreadyById.get(r.originalPurchaseInvoiceLineId);
       const net = new Decimal(orig.originalNetExTax);
@@ -120,7 +136,7 @@ export class PurchaseReturnsService {
           originalPurchaseInvoiceId: inv.id, supplierId: inv.supplierId, branchId: inv.branchId,
           returnDate: new Date(body.returnDate), status: "DRAFT",
           reason: body.reason ?? null, notes: body.notes ?? null,
-          settlementMode: body.settlementMode, refundTreasuryAccountId: body.refundTreasuryAccountId ?? null,
+          settlementMode: body.settlementMode,
           subtotal: t.subtotal.toFixed(2), taxTotal: t.taxTotal.toFixed(2),
           grandTotal: t.grandTotal.toFixed(2), inventoryValueOut: t.inventoryValueOut.toFixed(2),
           createdBy: user.id,
@@ -138,9 +154,10 @@ export class PurchaseReturnsService {
     });
   }
 
-  private lineData(b: { orig: { originalLineId: string; productVariantId: string; originalUnitPrice: string; originalTaxRate: string }; alloc: { meters: Decimal; boards: Decimal; net: Decimal; tax: Decimal; total: Decimal }; req: { originalPurchaseInvoiceLineId: string; reason?: string; note?: string } }) {
+  private lineData(b: Awaited<ReturnType<PurchaseReturnsService["buildLines"]>>["built"][number]) {
     return {
       originalPurchaseInvoiceLineId: b.orig.originalLineId, productVariantId: b.orig.productVariantId,
+      lengthM: b.orig.lengthM, widthM: b.orig.widthM,
       returnedBoards: b.alloc.boards.toFixed(4), returnedMetersQuantity: b.alloc.meters.toFixed(4),
       originalPurchasePricePerMeter: new Decimal(b.orig.originalUnitPrice).toFixed(2),
       originalTaxRate: new Decimal(b.orig.originalTaxRate).toFixed(2),
@@ -149,6 +166,68 @@ export class PurchaseReturnsService {
       inventoryValueOut: b.alloc.net.toFixed(2),
       reason: b.req.reason ?? null, note: b.req.note ?? null,
     };
+  }
+
+  /**
+   * §3 — remove (sign −1, confirm) or restore (sign +1, cancel) purchase-return
+   * stock AND recompute the per-metre WAC company-wide, at the ORIGINAL purchase
+   * value. Variants are locked FOR UPDATE in sorted id order. On removal, refuses
+   * (no PPV mechanism) when the historical value exceeds the carrying value, and
+   * blocks any negative metres/boards/value.
+   */
+  private async applyPurchaseReturnToStock(
+    tx: Tx,
+    lines: Array<{ variantId: string; meters: Decimal; boards: Decimal; value: Decimal }>,
+    branchId: string,
+    user: AuthenticatedUser,
+    returnNumber: string,
+    sign: 1 | -1,
+    refId: string,
+  ) {
+    const groups = new Map<string, { meters: Decimal; boards: Decimal; value: Decimal; items: typeof lines }>();
+    for (const l of lines) {
+      const g = groups.get(l.variantId) ?? { meters: new Decimal(0), boards: new Decimal(0), value: new Decimal(0), items: [] };
+      g.meters = g.meters.plus(l.meters); g.boards = g.boards.plus(l.boards); g.value = g.value.plus(l.value); g.items.push(l);
+      groups.set(l.variantId, g);
+    }
+    const variantIds = [...groups.keys()].sort();
+    for (const vid of variantIds) {
+      await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${vid}::uuid FOR UPDATE`;
+    }
+    for (const vid of variantIds) {
+      const g = groups.get(vid)!;
+      const agg = await tx.branchInventoryBalance.aggregate({ _sum: { metersOnHand: true, boardsOnHand: true }, where: { productVariantId: vid } });
+      const curMeters = D(agg._sum.metersOnHand), curBoards = D(agg._sum.boardsOnHand);
+      const variant = await tx.productVariant.findUnique({ where: { id: vid }, select: { avgCostPerMeter: true } });
+      const curValue = curMeters.mul(D(variant?.avgCostPerMeter));
+      if (sign < 0 && g.value.gt(curValue.plus(new Decimal("0.005")))) {
+        throw new ValidationError({ reason: "purchase_return_exceeds_inventory_value", returnedValue: g.value.toFixed(2), currentInventoryValue: curValue.toFixed(2) });
+      }
+      const newMeters = curMeters.plus(g.meters.mul(sign));
+      const newBoards = curBoards.plus(g.boards.mul(sign));
+      const newValue = curValue.plus(g.value.mul(sign));
+      if (newMeters.isNegative() || newBoards.isNegative() || newValue.isNegative()) {
+        throw new ValidationError({ reason: "insufficient_inventory_for_return", productVariantId: vid });
+      }
+      await tx.productVariant.update({
+        where: { id: vid },
+        data: {
+          avgCostPerMeter: newMeters.gt(0) ? newValue.div(newMeters).toFixed(4) : "0",
+          avgCost: newBoards.gt(0) ? newValue.div(newBoards).toFixed(4) : "0",
+          costUpdatedAt: new Date(),
+        },
+      });
+      for (const it of g.items) {
+        await this.inventoryEngine.apply({
+          branchId, productVariantId: vid, movementType: "PURCHASE_RETURN",
+          boardsDelta: it.boards.mul(sign).toFixed(4), metersDelta: it.meters.mul(sign).toFixed(4),
+          reference: { type: sign < 0 ? "purchase_return" : "purchase_return_cancel", id: refId }, actor: user,
+          summaryAr: sign < 0 ? `مردود مشتريات — خصم من المخزون ${returnNumber}` : `إلغاء مردود مشتريات — إعادة للمخزون ${returnNumber}`,
+          summaryEn: sign < 0 ? `Purchase return — stock out ${returnNumber}` : `Cancel purchase return restock ${returnNumber}`,
+          humanReadableNote: `مردود مشتريات ${returnNumber}`, tx,
+        });
+      }
+    }
   }
 
   async update(id: string, body: UpdatePurchaseReturn, user: AuthenticatedUser) {
@@ -173,7 +252,6 @@ export class PurchaseReturnsService {
           returnDate: body.returnDate ? new Date(body.returnDate) : undefined,
           reason: body.reason ?? undefined, notes: body.notes ?? undefined,
           settlementMode: body.settlementMode ?? undefined,
-          refundTreasuryAccountId: body.refundTreasuryAccountId === undefined ? undefined : body.refundTreasuryAccountId,
           subtotal: t.subtotal.toFixed(2), taxTotal: t.taxTotal.toFixed(2),
           grandTotal: t.grandTotal.toFixed(2), inventoryValueOut: t.inventoryValueOut.toFixed(2),
           lines: { create: built.map((b) => this.lineData(b)) },
@@ -190,10 +268,11 @@ export class PurchaseReturnsService {
     this.assertBranch(user, pre.branchId);
     if (pre.status !== "DRAFT") throw new ValidationError({ reason: "return_not_draft", status: pre.status });
 
-    const refundMode = pre.settlementMode === "CASH_REFUND" || pre.settlementMode === "BANK_REFUND";
-    if (refundMode) {
-      if (user.role !== "OWNER") throw new BranchForbiddenError({ reason: "refund_requires_owner" });
-      if (!pre.refundTreasuryAccountId) throw new ValidationError({ reason: "refund_treasury_account_required" });
+    // §9 — supplier cash/bank refunds are NOT supported (no supplier-refund
+    // receipt module; direct-posting to treasury would bypass the payment
+    // engines). Only supplier-credit settlements confirm in this phase.
+    if (pre.settlementMode === "CASH_REFUND" || pre.settlementMode === "BANK_REFUND") {
+      throw new ValidationError({ reason: "unsupported_settlement_mode", settlementMode: pre.settlementMode });
     }
 
     const returnDateStr = pre.returnDate.toISOString().slice(0, 10);
@@ -214,61 +293,26 @@ export class PurchaseReturnsService {
       const t = this.totals(built);
 
       if (!inventoryAccountId) throw new ValidationError({ reason: "inventory_account_required" });
-      if (!refundMode && !apAccountId) throw new ValidationError({ reason: "ap_account_required" });
+      if (!apAccountId) throw new ValidationError({ reason: "ap_account_required" });
       if (t.taxTotal.gt(0) && !vatInputAccountId) throw new ValidationError({ reason: "vat_input_account_required" });
 
       const returnNumber = pre.returnNumber.toString();
+      const branchId = pre.branchId;
 
-      // Inventory removal + per-metre WAC recompute (company-wide scope), line by
-      // line so the aggregate reflects each prior removal within this tx.
-      for (const { orig, alloc } of built) {
-        // Company-wide on-hand BEFORE this removal (same scope as purchase WAC).
-        const agg = await tx.branchInventoryBalance.aggregate({
-          _sum: { metersOnHand: true, boardsOnHand: true }, where: { productVariantId: orig.productVariantId },
-        });
-        const curMeters = D(agg._sum.metersOnHand);
-        const curBoards = D(agg._sum.boardsOnHand);
-        const variant = await tx.productVariant.findUnique({ where: { id: orig.productVariantId }, select: { avgCostPerMeter: true } });
-        const curAvgPerMeter = D(variant?.avgCostPerMeter);
-        const curValue = curMeters.mul(curAvgPerMeter);
-        const returnedValue = alloc.net; // inventoryValueOut at original purchase price
+      // Inventory removal + per-metre WAC recompute, variant-locked (§3). Group
+      // by variant, lock variants FOR UPDATE in sorted id order, then recompute.
+      await this.applyPurchaseReturnToStock(
+        tx, built.map((b) => ({ variantId: b.orig.productVariantId, meters: b.alloc.meters, boards: b.alloc.boards, value: b.alloc.net })),
+        branchId, user, returnNumber, -1, pre.id,
+      );
 
-        // No purchase-price-variance mechanism: refuse rather than distort WAC.
-        if (returnedValue.gt(curValue.plus(new Decimal("0.005")))) {
-          throw new ValidationError({ reason: "purchase_return_exceeds_inventory_value", returnedValue: returnedValue.toFixed(2), currentInventoryValue: curValue.toFixed(2) });
-        }
-        const newMeters = curMeters.minus(alloc.meters);
-        const newBoards = curBoards.minus(alloc.boards);
-        const newValue = curValue.minus(returnedValue);
-        if (newMeters.isNegative() || newValue.isNegative()) {
-          throw new ValidationError({ reason: "insufficient_inventory_for_return", productVariantId: orig.productVariantId });
-        }
-        const newAvgPerMeter = newMeters.gt(0) ? newValue.div(newMeters) : new Decimal(0);
-        const newAvgPerBoard = newBoards.gt(0) ? newValue.div(newBoards) : new Decimal(0);
-        await tx.productVariant.update({
-          where: { id: orig.productVariantId },
-          data: { avgCostPerMeter: newAvgPerMeter.toFixed(4), avgCost: newAvgPerBoard.toFixed(4), costUpdatedAt: new Date() },
-        });
-        // Physical removal from the return's branch (engine hard-blocks negative).
-        await this.inventoryEngine.apply({
-          branchId: pre.branchId, productVariantId: orig.productVariantId, movementType: "PURCHASE_RETURN",
-          boardsDelta: alloc.boards.negated().toFixed(4), metersDelta: alloc.meters.negated().toFixed(4),
-          reference: { type: "purchase_return", id: pre.id }, actor: user,
-          summaryAr: `مردود مشتريات — خصم من المخزون ${returnNumber}`, summaryEn: `Purchase return — stock out ${returnNumber}`,
-          humanReadableNote: `مردود مشتريات ${returnNumber}`, tx,
-        });
-      }
-
-      // Journal: Dr AP[supplier] OR Dr Treasury (refund); Cr Inventory + Cr VAT-input.
-      const debitAccountId = refundMode ? pre.refundTreasuryAccountId! : apAccountId!;
+      // Journal: Dr AP[supplier]; Cr Inventory + Cr VAT-input. All lines branched.
       const lines: PostingLine[] = [
-        refundMode
-          ? { accountId: debitAccountId, debit: t.grandTotal.toFixed(2), credit: "0", note: `استرداد نقدي من المورد - PR-${returnNumber}` }
-          : { accountId: debitAccountId, debit: t.grandTotal.toFixed(2), credit: "0", note: `خصم من المورد - PR-${returnNumber}`, partyType: "SUPPLIER", partyId: pre.supplierId },
-        { accountId: inventoryAccountId, debit: "0", credit: t.inventoryValueOut.toFixed(2), note: `إخراج من المخزون - PR-${returnNumber}` },
+        { accountId: apAccountId!, debit: t.grandTotal.toFixed(2), credit: "0", note: `خصم من المورد - PR-${returnNumber}`, partyType: "SUPPLIER", partyId: pre.supplierId, branchId },
+        { accountId: inventoryAccountId, debit: "0", credit: t.inventoryValueOut.toFixed(2), note: `إخراج من المخزون - PR-${returnNumber}`, branchId },
       ];
       if (t.taxTotal.gt(0) && vatInputAccountId) {
-        lines.push({ accountId: vatInputAccountId, debit: "0", credit: t.taxTotal.toFixed(2), note: `عكس ض.ق.م مشتريات - PR-${returnNumber}` });
+        lines.push({ accountId: vatInputAccountId, debit: "0", credit: t.taxTotal.toFixed(2), note: `عكس ض.ق.م مشتريات - PR-${returnNumber}`, branchId });
       }
       const posted = await this.postingEngine.post({
         tx, actor: user, sourceType: "PURCHASE_RETURN", sourceId: pre.id, entryType: "JOURNAL",
@@ -276,20 +320,10 @@ export class PurchaseReturnsService {
         description: `مردود مشتريات رقم ${returnNumber}`, idempotencyKey: `PURCHASE_RETURN:${pre.id}`, lines,
       });
 
-      // Rewrite authoritative lines (with correct tax rate snapshot).
+      // Rewrite authoritative lines (with dimensions + correct tax snapshot).
       await tx.purchaseReturnLine.deleteMany({ where: { purchaseReturnId: id } });
-      for (const { req, orig, alloc } of built) {
-        await tx.purchaseReturnLine.create({
-          data: {
-            purchaseReturnId: id, originalPurchaseInvoiceLineId: orig.originalLineId, productVariantId: orig.productVariantId,
-            returnedBoards: alloc.boards.toFixed(4), returnedMetersQuantity: alloc.meters.toFixed(4),
-            originalPurchasePricePerMeter: new Decimal(orig.originalUnitPrice).toFixed(2),
-            originalTaxRate: new Decimal(orig.originalTaxRate).toFixed(2),
-            returnNetExTax: alloc.net.toFixed(2), returnTax: alloc.tax.toFixed(2), returnTotal: alloc.total.toFixed(2),
-            historicalInventoryCostPerMeter: new Decimal(orig.originalUnitPrice).toFixed(4), inventoryValueOut: alloc.net.toFixed(2),
-            reason: req.reason ?? null, note: req.note ?? null,
-          },
-        });
+      for (const b of built) {
+        await tx.purchaseReturnLine.create({ data: { purchaseReturnId: id, ...this.lineData(b) } });
       }
 
       const ret = await tx.purchaseReturn.update({
@@ -323,36 +357,11 @@ export class PurchaseReturnsService {
       if (existing.journalEntryId) {
         await this.reversal.reverse({ entryId: existing.journalEntryId, reason: `إلغاء مردود مشتريات ${returnNumber}`, actor: user, tx });
       }
-      // Add the removed stock back + reverse the WAC effect deterministically:
-      // put the exact returned value + metres back (company-wide scope).
-      for (const l of existing.lines) {
-        const agg = await tx.branchInventoryBalance.aggregate({ _sum: { metersOnHand: true, boardsOnHand: true }, where: { productVariantId: l.productVariantId } });
-        const curMeters = D(agg._sum.metersOnHand);
-        const curBoards = D(agg._sum.boardsOnHand);
-        const variant = await tx.productVariant.findUnique({ where: { id: l.productVariantId }, select: { avgCostPerMeter: true } });
-        const curValue = curMeters.mul(D(variant?.avgCostPerMeter));
-        const backMeters = D(l.returnedMetersQuantity);
-        const backBoards = D(l.returnedBoards);
-        const backValue = D(l.inventoryValueOut);
-        const newMeters = curMeters.plus(backMeters);
-        const newBoards = curBoards.plus(backBoards);
-        const newValue = curValue.plus(backValue);
-        await tx.productVariant.update({
-          where: { id: l.productVariantId },
-          data: {
-            avgCostPerMeter: newMeters.gt(0) ? newValue.div(newMeters).toFixed(4) : "0",
-            avgCost: newBoards.gt(0) ? newValue.div(newBoards).toFixed(4) : "0",
-            costUpdatedAt: new Date(),
-          },
-        });
-        await this.inventoryEngine.apply({
-          branchId: existing.branchId, productVariantId: l.productVariantId, movementType: "PURCHASE_RETURN",
-          boardsDelta: backBoards.toFixed(4), metersDelta: backMeters.toFixed(4),
-          reference: { type: "purchase_return_cancel", id: existing.id }, actor: user,
-          summaryAr: `إلغاء مردود مشتريات — إعادة للمخزون ${returnNumber}`, summaryEn: `Cancel purchase return restock ${returnNumber}`,
-          humanReadableNote: `إلغاء مردود مشتريات ${returnNumber}`, tx,
-        });
-      }
+      // Restore the removed stock + reverse the WAC effect (variant-locked, §3).
+      await this.applyPurchaseReturnToStock(
+        tx, existing.lines.map((l) => ({ variantId: l.productVariantId, meters: D(l.returnedMetersQuantity), boards: D(l.returnedBoards), value: D(l.inventoryValueOut) })),
+        existing.branchId, user, returnNumber, 1, existing.id,
+      );
       const ret = await tx.purchaseReturn.update({
         where: { id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancelledBy: user.id, cancellationReason: reason ?? null },
         include: { lines: true },
@@ -371,11 +380,18 @@ export class PurchaseReturnsService {
     const where: Prisma.PurchaseReturnWhereInput = {
       ...(query.status ? { status: query.status } : {}),
       ...(query.branchId ? { branchId: query.branchId } : {}),
+      ...(query.originalInvoiceId ? { originalPurchaseInvoiceId: query.originalInvoiceId } : {}),
       ...(user.role !== "OWNER" ? { branchId: { in: user.allowedBranches } } : {}),
       ...(query.from || query.to ? { returnDate: { ...(query.from ? { gte: new Date(query.from) } : {}), ...(query.to ? { lte: new Date(query.to) } : {}) } } : {}),
     };
     const rows = await this.prisma.purchaseReturn.findMany({
-      where, include: { lines: true, supplier: { select: { id: true, nameAr: true } } },
+      where,
+      include: {
+        lines: { select: { returnedMetersQuantity: true, returnedBoards: true } },
+        supplier: { select: { id: true, nameAr: true } },
+        branch: { select: { id: true, nameAr: true } },
+        originalInvoice: { select: { id: true, invoiceNumber: true } },
+      },
       orderBy: [{ returnDate: "desc" }, { returnNumber: "desc" }],
       take: query.limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
@@ -408,6 +424,15 @@ export class PurchaseReturnsService {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private format(r: any) {
-    return { ...r, returnNumber: r.returnNumber?.toString() };
+    const lines: any[] = r.lines ?? [];
+    const totalMeters = lines.reduce((a, l) => a.plus(D(l.returnedMetersQuantity)), new Decimal(0));
+    const totalBoards = lines.reduce((a, l) => a.plus(D(l.returnedBoards)), new Decimal(0));
+    return {
+      ...r,
+      returnNumber: r.returnNumber?.toString(),
+      totalMeters: totalMeters.toFixed(4),
+      totalBoards: totalBoards.toFixed(4),
+      originalInvoice: r.originalInvoice ? { ...r.originalInvoice, invoiceNumber: r.originalInvoice.invoiceNumber } : undefined,
+    };
   }
 }

@@ -38,11 +38,38 @@ export const ACCOUNTING_PERMISSIONS: Record<AccountingAction, Role[]> = {
   "journal.reverse": ["ACCOUNTANT"],
 };
 
+/**
+ * Returns (مردودات) capabilities — the documented source of truth for the
+ * differentiated server-side access enforced by the return controllers'
+ * `@Roles(...)`. VIEW is broad; CREATE/CONFIRM are accountant-level; CANCEL and
+ * refunds are OWNER-only (destructive / money-out). Enforcement is server-side
+ * in the RolesGuard + the per-request branch check — never UI-only.
+ */
+export type ReturnCapability =
+  | "VIEW_SALES_RETURNS" | "CREATE_SALES_RETURNS" | "CONFIRM_SALES_RETURNS" | "CANCEL_SALES_RETURNS"
+  | "VIEW_PURCHASE_RETURNS" | "CREATE_PURCHASE_RETURNS" | "CONFIRM_PURCHASE_RETURNS" | "CANCEL_PURCHASE_RETURNS"
+  | "REFUND_CUSTOMER_CREDIT" | "RECEIVE_SUPPLIER_REFUND";
+
+export const RETURN_PERMISSIONS: Record<ReturnCapability, Role[]> = {
+  VIEW_SALES_RETURNS: ["ACCOUNTANT", "BRANCH_MANAGER"],
+  CREATE_SALES_RETURNS: ["ACCOUNTANT"],
+  CONFIRM_SALES_RETURNS: ["ACCOUNTANT"],
+  CANCEL_SALES_RETURNS: [], // OWNER only
+  VIEW_PURCHASE_RETURNS: ["ACCOUNTANT", "BRANCH_MANAGER"],
+  CREATE_PURCHASE_RETURNS: ["ACCOUNTANT"],
+  CONFIRM_PURCHASE_RETURNS: ["ACCOUNTANT"],
+  CANCEL_PURCHASE_RETURNS: [], // OWNER only
+  REFUND_CUSTOMER_CREDIT: [], // OWNER only (unsupported this phase)
+  RECEIVE_SUPPLIER_REFUND: [], // OWNER only (unsupported this phase)
+};
+
 /** Human-readable matrix for GET /settings/permissions (OWNER shown as ✓ always). */
-export function permissionMatrix(): Array<{ action: AccountingAction; owner: true; roles: Role[] }> {
-  return (Object.keys(ACCOUNTING_PERMISSIONS) as AccountingAction[]).map((action) => ({
-    action,
-    owner: true,
-    roles: ACCOUNTING_PERMISSIONS[action],
+export function permissionMatrix(): Array<{ action: string; owner: true; roles: Role[] }> {
+  const accounting = (Object.keys(ACCOUNTING_PERMISSIONS) as AccountingAction[]).map((action) => ({
+    action, owner: true as const, roles: ACCOUNTING_PERMISSIONS[action],
   }));
+  const returns = (Object.keys(RETURN_PERMISSIONS) as ReturnCapability[]).map((action) => ({
+    action, owner: true as const, roles: RETURN_PERMISSIONS[action],
+  }));
+  return [...accounting, ...returns];
 }

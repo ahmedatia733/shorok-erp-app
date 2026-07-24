@@ -15,19 +15,20 @@ export class SalesReturnsController {
 
   // Returnable snapshot for an original invoice (original / returned / remaining).
   @Get("returnable/:invoiceId")
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
   returnable(@Param("invoiceId") invoiceId: string, @CurrentUser() user: AuthenticatedUser) {
     return this.service.returnableForInvoice(invoiceId, user);
   }
 
+  // VIEW_SALES_RETURNS — broad read (incl. BRANCH_MANAGER, branch-scoped).
   @Get()
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
   list(@Query(new ZodValidationPipe(ReturnQuerySchema)) query: ReturnQuery, @CurrentUser() user: AuthenticatedUser) {
     return this.service.list(query, user);
   }
 
   @Get(":id")
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
   get(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.service.get(id, user);
   }
@@ -50,8 +51,9 @@ export class SalesReturnsController {
     return this.service.confirm(id, user);
   }
 
+  // CANCEL_SALES_RETURNS — destructive, OWNER only.
   @Post(":id/cancel")
-  @Roles("OWNER", "ACCOUNTANT")
+  @Roles("OWNER")
   cancel(@Param("id") id: string, @Body(new ZodValidationPipe(ReturnCancelSchema)) body: ReturnCancel, @CurrentUser() user: AuthenticatedUser) {
     return this.service.cancel(id, body.reason, user);
   }
