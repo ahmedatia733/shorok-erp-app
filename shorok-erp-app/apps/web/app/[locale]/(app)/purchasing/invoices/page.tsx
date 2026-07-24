@@ -333,14 +333,18 @@ export default function PurchaseInvoicesPage() {
   const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
   useEffect(() => {
     const openId = new URLSearchParams(window.location.search).get("open");
-    if (!openId || expandedIds.has(openId)) return;
-    const inList = invoices.find((i) => i.id === openId);
-    if (inList) { toggleExpand(inList); return; }
+    if (!openId) return;
+    if (invoices.some((i) => i.id === openId)) {
+      if (!expandedIds.has(openId)) setExpandedIds((prev) => new Set(prev).add(openId));
+      return;
+    }
+    const cached = expandedDetails[openId];
+    if (cached) { setInvoices((prev) => [cached, ...prev]); return; }
     void getPurchaseInvoice(openId)
       .then((detail) => {
-        setInvoices((prev) => (prev.some((i) => i.id === openId) ? prev : [detail, ...prev]));
         setExpandedDetails((prev) => ({ ...prev, [openId]: detail }));
         setExpandedIds((prev) => new Set(prev).add(openId));
+        setInvoices((prev) => (prev.some((i) => i.id === openId) ? prev : [detail, ...prev]));
       })
       .catch(() => setDeepLinkNotFound(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps

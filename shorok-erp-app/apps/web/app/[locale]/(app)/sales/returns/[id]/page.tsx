@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useLocale } from "next-intl";
 import { useParams } from "next/navigation";
 import type { AppLocale } from "../../../../../../i18n";
@@ -17,20 +17,25 @@ import { getSalesReturn, getSalesReturnable, confirmSalesReturn, cancelSalesRetu
 const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", CANCELLED: "ملغي" };
 const D = (v: string | number) => Number(v || "0");
 
+type LineEntry = { meters: string; boards: string; note: string };
+
 export default function SalesReturnDetailPage() {
   const locale = useLocale() as AppLocale;
   const { id } = useParams<{ id: string }>();
   const canFinancials = useHasRole("OWNER", "ACCOUNTANT");
-  const isOwner = useHasRole("OWNER");
+  // §2 — role-based action visibility (the API is still the final authority).
+  const canCreateOrConfirm = useHasRole("OWNER", "ACCOUNTANT");
+  const canCancel = useHasRole("OWNER");
   const [row, setRow] = useState<SalesReturnRow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // edit state
   const [editing, setEditing] = useState(false);
   const [ret, setRet] = useState<SalesReturnable | null>(null);
-  const [qty, setQty] = useState<Record<string, { meters: string; boards: string }>>({});
+  const [qty, setQty] = useState<Record<string, LineEntry>>({});
   const [editDate, setEditDate] = useState("");
   const [editReason, setEditReason] = useState("");
+  const [editNotes, setEditNotes] = useState("");
 
   const load = useCallback(async () => {
     try { setRow(await getSalesReturn(id)); }
@@ -45,42 +50,63 @@ export default function SalesReturnDetailPage() {
     finally { setBusy(false); }
   };
 
-  // Start editing: reload the CURRENT returnable quantities and pre-fill from the
-  // draft's lines (historical prices/costs are never editable — only quantities).
+  // Reload CURRENT returnable quantities and pre-fill from the draft (historical
+  // prices/costs stay read-only — only quantities + notes are editable).
   const startEdit = async () => {
     if (!row) return;
     setError(null);
     try {
       const r = await getSalesReturnable(row.originalSalesInvoiceId);
       setRet(r);
-      const pre: Record<string, { meters: string; boards: string }> = {};
-      for (const l of row.lines ?? []) pre[l.originalSalesInvoiceLineId] = { meters: String(D(l.returnedMetersQuantity)), boards: String(D(l.returnedBoards)) };
+      const pre: Record<string, LineEntry> = {};
+      for (const l of row.lines ?? []) pre[l.originalSalesInvoiceLineId] = { meters: String(D(l.returnedMetersQuantity)), boards: String(D(l.returnedBoards)), note: l.note ?? "" };
       setQty(pre);
       setEditDate(row.returnDate.slice(0, 10));
       setEditReason(row.reason ?? "");
+      setEditNotes(row.notes ?? "");
       setEditing(true);
     } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); }
   };
 
+  // Immediate (client) Arabic validation per line. Server stays authoritative.
+  const lineError = (rl: SalesReturnable["lines"][number]): string | null => {
+    const e = qty[rl.originalLineId];
+    if (!e) return null;
+    const m = Number(e.meters || "0");
+    const b = Number(e.boards || "0");
+    if (e.meters !== "" && (isNaN(m) || m < 0)) return "قيمة غير صالحة";
+    if (m > D(rl.remainingMeters) + 1e-9) return `الكمية تتجاوز المتبقي (${D(rl.remainingMeters).toFixed(2)} م²)`;
+    if (e.boards !== "" && (isNaN(b) || b < 0)) return "عدد ألواح غير صالح";
+    if (b > D(rl.remainingBoards) + 1e-9) return `عدد الألواح يتجاوز المتبقي (${D(rl.remainingBoards).toFixed(2)})`;
+    return null;
+  };
+
+  const enteredLines = useMemo(() => (ret?.lines ?? []).filter((l) => Number(qty[l.originalLineId]?.meters || "0") > 0), [ret, qty]);
+  const anyLineError = useMemo(() => (ret?.lines ?? []).some((l) => lineError(l) != null), [ret, qty]); // eslint-disable-line react-hooks/exhaustive-deps
+  const canSave = editing && enteredLines.length > 0 && !anyLineError;
+
   const saveEdit = async () => {
-    if (!row || !ret) return;
-    const lines = ret.lines
-      .filter((l) => D(qty[l.originalLineId]?.meters ?? "0") > 0)
-      .map((l) => ({ originalSalesInvoiceLineId: l.originalLineId, returnedMeters: qty[l.originalLineId]?.meters ?? "0", returnedBoards: qty[l.originalLineId]?.boards || undefined }));
-    if (lines.length === 0) { setError("أدخل كمية مرتجعة على سطر واحد على الأقل"); return; }
-    await act(async () => { await updateSalesReturn(row.id, { returnDate: editDate, reason: editReason || undefined, lines }); setEditing(false); });
+    if (!row || !ret || !canSave) return;
+    const lines = enteredLines.map((l) => ({
+      originalSalesInvoiceLineId: l.originalLineId,
+      returnedMeters: qty[l.originalLineId]?.meters ?? "0",
+      returnedBoards: qty[l.originalLineId]?.boards || undefined,
+      note: qty[l.originalLineId]?.note || undefined,
+    }));
+    await act(async () => { await updateSalesReturn(row.id, { returnDate: editDate, reason: editReason || undefined, notes: editNotes || undefined, lines }); setEditing(false); });
   };
 
   if (!row) return <div dir="rtl" className="p-4">{error ? <Alert variant="error">{error}</Alert> : "جارٍ التحميل…"}</div>;
+  const isDraft = row.status === "DRAFT";
 
   return (
     <div className="space-y-4" dir="rtl">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">مردود مبيعات #{row.returnNumber}</h1>
         <div className="flex gap-2">
-          {row.status === "DRAFT" && !editing && <Button variant="ghost" disabled={busy} onClick={() => void startEdit()}>تعديل</Button>}
-          {row.status === "DRAFT" && !editing && <Button disabled={busy} onClick={() => { if (confirm("تأكيد المردود؟ سيتم ترحيل القيود وإرجاع المخزون.")) void act(() => confirmSalesReturn(row.id)); }}>تأكيد المردود</Button>}
-          {row.status === "CONFIRMED" && isOwner && <Button variant="danger" disabled={busy} onClick={() => { if (confirm("هل تريد إلغاء هذا المردود؟ سيتم عكس كل القيود والمخزون.")) void act(() => cancelSalesReturn(row.id, "إلغاء من المستخدم")); }}>إلغاء المردود</Button>}
+          {isDraft && !editing && canCreateOrConfirm && <Button variant="ghost" disabled={busy} onClick={() => void startEdit()}>تعديل</Button>}
+          {isDraft && !editing && canCreateOrConfirm && <Button disabled={busy} onClick={() => { if (confirm("تأكيد المردود؟ سيتم ترحيل القيود وإرجاع المخزون.")) void act(() => confirmSalesReturn(row.id)); }}>تأكيد المردود</Button>}
+          {row.status === "CONFIRMED" && canCancel && <Button variant="danger" disabled={busy} onClick={() => { if (confirm("هل تريد إلغاء هذا المردود؟ سيتم عكس كل القيود والمخزون.")) void act(() => cancelSalesReturn(row.id, "إلغاء من المستخدم")); }}>إلغاء المردود</Button>}
         </div>
       </div>
       {error && <Alert variant="error">{error}</Alert>}
@@ -89,34 +115,48 @@ export default function SalesReturnDetailPage() {
         <Card>
           <CardHeader><CardTitle>تعديل المسودة</CardTitle></CardHeader>
           <CardBody className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 text-sm">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-sm">
               <label>تاريخ المردود<Input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} /></label>
-              <label className="md:col-span-3">السبب<Input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="اختياري" /></label>
+              <label>السبب<Input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="اختياري" /></label>
+              <label>ملاحظات<Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} placeholder="اختياري" /></label>
             </div>
-            <Table>
-              <THead><TR><TH>الكود</TH><TH>اللون</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR></THead>
-              <TBody>
-                {ret.lines.map((l) => (
-                  <TR key={l.originalLineId}>
-                    <TD>{l.productCode ?? "—"}</TD>
-                    <TD>{l.colorName ?? "—"}</TD>
-                    <TD>{l.legacyAmbiguous ? "—" : D(l.remainingMeters).toFixed(2)}</TD>
-                    <TD>{formatCurrency(l.originalUnitPrice, locale)}</TD>
-                    <TD style={{ maxWidth: 140 }}>
-                      {l.legacyAmbiguous
-                        ? <span className="text-xs text-amber-600">غير قابل للإرجاع</span>
-                        : <Input inputMode="decimal" value={qty[l.originalLineId]?.meters ?? ""} onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { meters: e.target.value, boards: s[l.originalLineId]?.boards ?? "" } }))} />}
-                    </TD>
-                    <TD style={{ maxWidth: 100 }}>
-                      <Input inputMode="decimal" value={qty[l.originalLineId]?.boards ?? ""} placeholder="تلقائي" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { meters: s[l.originalLineId]?.meters ?? "", boards: e.target.value } }))} />
-                    </TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table>
+                <THead><TR><TH>الكود</TH><TH>اللون</TH><TH>الأصلي (م²)</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH><TH>ملاحظة السطر</TH></TR></THead>
+                <TBody>
+                  {ret.lines.map((l) => {
+                    const err = lineError(l);
+                    return (
+                      <TR key={l.originalLineId}>
+                        <TD>{l.productCode ?? "—"}</TD>
+                        <TD>{l.colorName ?? "—"}</TD>
+                        <TD>{l.legacyAmbiguous ? "—" : D(l.originalMeters).toFixed(2)}</TD>
+                        <TD>{l.legacyAmbiguous ? "—" : D(l.remainingMeters).toFixed(2)}</TD>
+                        <TD>{formatCurrency(l.originalUnitPrice, locale)}</TD>
+                        <TD style={{ maxWidth: 150 }}>
+                          {l.legacyAmbiguous
+                            ? <span className="text-xs text-amber-600">غير قابل للإرجاع</span>
+                            : <>
+                                <Input inputMode="decimal" max={l.remainingMeters} value={qty[l.originalLineId]?.meters ?? ""} onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { boards: "", note: "" }), meters: e.target.value } }))} />
+                                {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
+                              </>}
+                        </TD>
+                        <TD style={{ maxWidth: 100 }}>
+                          <Input inputMode="decimal" max={l.remainingBoards} value={qty[l.originalLineId]?.boards ?? ""} placeholder="تلقائي" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", note: "" }), boards: e.target.value } }))} />
+                        </TD>
+                        <TD style={{ maxWidth: 160 }}>
+                          <Input value={qty[l.originalLineId]?.note ?? ""} placeholder="اختياري" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", boards: "" }), note: e.target.value } }))} />
+                        </TD>
+                      </TR>
+                    );
+                  })}
+                </TBody>
+              </Table>
+            </div>
+            {enteredLines.length === 0 && <p className="text-xs text-amber-600">أدخل كمية مرتجعة على سطر واحد على الأقل.</p>}
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setEditing(false)}>إلغاء التعديل</Button>
-              <Button disabled={busy} onClick={() => void saveEdit()}>{busy ? "جارٍ الحفظ…" : "حفظ التعديلات"}</Button>
+              <Button disabled={busy || !canSave} onClick={() => void saveEdit()}>{busy ? "جارٍ الحفظ…" : "حفظ التعديلات"}</Button>
             </div>
           </CardBody>
         </Card>
@@ -133,14 +173,16 @@ export default function SalesReturnDetailPage() {
               <div><div className="text-xs text-muted">الضريبة</div><div>{formatCurrency(row.taxTotal, locale)}</div></div>
               <div><div className="text-xs text-muted">الإجمالي</div><div className="font-semibold">{formatCurrency(row.grandTotal, locale)}</div></div>
               {canFinancials && <div><div className="text-xs text-muted">عكس التكلفة</div><div>{formatCurrency(row.cogsReversalTotal, locale)}</div></div>}
+              {row.reason && <div className="md:col-span-2"><div className="text-xs text-muted">السبب</div><div>{row.reason}</div></div>}
+              {row.notes && <div className="md:col-span-2"><div className="text-xs text-muted">ملاحظات</div><div>{row.notes}</div></div>}
             </CardBody>
           </Card>
 
           <Card>
             <CardHeader><CardTitle>الأسطر</CardTitle></CardHeader>
-            <CardBody>
+            <CardBody className="overflow-x-auto">
               <Table>
-                <THead><TR><TH>الألواح</TH><TH>الأمتار (م²)</TH><TH>سعر المتر</TH><TH>الصافي</TH><TH>الضريبة</TH><TH>الإجمالي</TH>{canFinancials && <TH>عكس التكلفة</TH>}</TR></THead>
+                <THead><TR><TH>الألواح</TH><TH>الأمتار (م²)</TH><TH>سعر المتر</TH><TH>الصافي</TH><TH>الضريبة</TH><TH>الإجمالي</TH>{canFinancials && <TH>عكس التكلفة</TH>}<TH>ملاحظة</TH></TR></THead>
                 <TBody>
                   {(row.lines ?? []).map((l) => (
                     <TR key={l.id}>
@@ -151,6 +193,7 @@ export default function SalesReturnDetailPage() {
                       <TD>{formatCurrency(l.returnTax, locale)}</TD>
                       <TD>{formatCurrency(l.returnTotal, locale)}</TD>
                       {canFinancials && <TD>{formatCurrency(l.returnCogs, locale)}</TD>}
+                      <TD>{l.note ?? "—"}</TD>
                     </TR>
                   ))}
                 </TBody>

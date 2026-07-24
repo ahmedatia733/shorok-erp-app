@@ -1139,15 +1139,22 @@ export default function SalesInvoicesPage() {
   const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
   useEffect(() => {
     const openId = new URLSearchParams(window.location.search).get("open");
-    if (!openId || expandedIds.has(openId) || expandedDetails[openId]) return;
-    const inList = invoices.find((i) => i.id === openId);
-    if (inList) { void toggleExpand(inList); return; }
+    if (!openId) return;
+    // Already in the list → just make sure it is expanded.
+    if (invoices.some((i) => i.id === openId)) {
+      if (!expandedIds.has(openId)) setExpandedIds((prev) => new Set(prev).add(openId));
+      return;
+    }
+    // Fetched earlier but a later loadInvoices() overwrote the list → re-prepend
+    // it from cache (guards against the clobber race after refresh).
+    const cached = expandedDetails[openId];
+    if (cached) { setInvoices((prev) => [cached, ...prev]); return; }
+    // Not loaded yet → fetch it and render it even though it is off the page.
     void getSalesInvoice(openId)
       .then((detail) => {
-        // SalesInvoiceDetail extends SalesInvoiceRow → safe to render as a row.
-        setInvoices((prev) => (prev.some((i) => i.id === openId) ? prev : [detail, ...prev]));
         setExpandedDetails((prev) => ({ ...prev, [openId]: detail }));
         setExpandedIds((prev) => new Set(prev).add(openId));
+        setInvoices((prev) => (prev.some((i) => i.id === openId) ? prev : [detail, ...prev]));
       })
       .catch(() => setDeepLinkNotFound(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps

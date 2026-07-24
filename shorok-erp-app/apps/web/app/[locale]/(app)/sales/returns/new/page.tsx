@@ -11,6 +11,7 @@ import { Input } from "../../../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
 import { formatCurrency } from "../../../../../../lib/format";
 import { ApiClientError } from "../../../../../../lib/api-client";
+import { useHasRole } from "../../../../../../lib/auth";
 import { listSalesInvoices, type SalesInvoiceRow } from "../../../../../../lib/sales-invoices-client";
 import { getSalesReturnable, createSalesReturn, type SalesReturnable } from "../../../../../../lib/returns-client";
 
@@ -19,6 +20,7 @@ const D = (v: string) => Number(v || "0");
 export default function NewSalesReturnPage() {
   const locale = useLocale() as AppLocale;
   const router = useRouter();
+  const canCreate = useHasRole("OWNER", "ACCOUNTANT"); // §2 — creating requires accountant/owner
   const [invoices, setInvoices] = useState<SalesInvoiceRow[]>([]);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<SalesInvoiceRow | null>(null);
@@ -79,6 +81,15 @@ export default function NewSalesReturnPage() {
     } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); setBusy(false); }
   };
 
+  if (!canCreate) {
+    return (
+      <div className="space-y-4" dir="rtl">
+        <h1 className="text-xl font-semibold">مردود مبيعات جديد</h1>
+        <Alert variant="error">غير مصرح لك بإنشاء مردود مبيعات. هذه الصفحة متاحة للعرض فقط لمدير الفرع.</Alert>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4" dir="rtl">
       <h1 className="text-xl font-semibold">مردود مبيعات جديد</h1>
@@ -117,14 +128,14 @@ export default function NewSalesReturnPage() {
               <p className="text-sm text-muted">حالة الارتجاع: {ret.invoice.returnStatus === "NONE" ? "لا يوجد" : ret.invoice.returnStatus === "PARTIAL" ? "جزئي" : "كامل"}</p>
               <Table>
                 <THead>
-                  <TR><TH>الكود</TH><TH>اللون</TH><TH>مقاس اللوح (تاريخي)</TH><TH>الأبعاد الأصلية</TH><TH>ألواح أصلية</TH><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR>
+                  <TR><TH>الكود</TH><TH>اللون</TH><TH>متوسط مساحة اللوح بالفاتورة</TH><TH>الأبعاد الأصلية</TH><TH>ألواح أصلية</TH><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR>
                 </THead>
                 <TBody>
                   {ret.lines.map((l) => (
                     <TR key={l.originalLineId}>
                       <TD>{l.productCode ?? "—"}</TD>
                       <TD>{l.colorName ?? "—"}</TD>
-                      <TD>{l.historicalBoardSize ? D(l.historicalBoardSize).toFixed(2) : "—"}</TD>
+                      <TD>{l.effectiveOriginalMetersPerBoard ? D(l.effectiveOriginalMetersPerBoard).toFixed(2) : "—"}</TD>
                       <TD>{l.lengthM ? `${D(l.lengthM).toFixed(2)}${l.widthM ? " × " + D(l.widthM).toFixed(2) : ""}` : "—"}</TD>
                       <TD>{D(l.originalBoards).toFixed(2)}</TD>
                       <TD>{l.legacyAmbiguous ? "—" : D(l.originalMeters).toFixed(2)}</TD>

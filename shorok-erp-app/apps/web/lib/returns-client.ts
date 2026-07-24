@@ -11,7 +11,7 @@ export interface ReturnableLine {
   productCode: string | null;
   colorName: string | null;            // color, not a product name
   currentVariantSize: string | null;   // CURRENT master data (hint only)
-  historicalBoardSize: string | null;  // HISTORICAL effective board area
+  effectiveOriginalMetersPerBoard: string | null; // derived from the original line
   unitLabel: string;
   lengthM: string | null;              // HISTORICAL original dimensions
   widthM: string | null;
@@ -36,7 +36,7 @@ export interface SalesReturnable {
 export interface PurchaseReturnableLine {
   originalLineId: string; productVariantId: string;
   productCode: string | null; colorName: string | null;
-  currentVariantSize: string | null; historicalBoardSize: string | null; unitLabel: string;
+  currentVariantSize: string | null; effectiveOriginalMetersPerBoard: string | null; unitLabel: string;
   lengthM: string | null; widthM: string | null;
   originalMeters: string; originalBoards: string; returnedMeters: string; returnedBoards: string;
   remainingMeters: string; remainingBoards: string;
@@ -57,6 +57,8 @@ export interface SalesReturnLineDetail {
   returnTax: string;
   returnTotal: string;
   returnCogs: string;
+  reason?: string | null;
+  note?: string | null;
 }
 export interface PurchaseReturnLineDetail {
   id: string;
@@ -67,6 +69,8 @@ export interface PurchaseReturnLineDetail {
   returnNetExTax: string;
   returnTax: string;
   returnTotal: string;
+  reason?: string | null;
+  note?: string | null;
 }
 export interface SalesReturnRow {
   id: string;
@@ -76,6 +80,7 @@ export interface SalesReturnRow {
   status: ReturnStatus;
   settlementMode: string;
   reason?: string | null;
+  notes?: string | null;
   subtotal: string;
   taxTotal: string;
   grandTotal: string;
@@ -94,6 +99,7 @@ export interface PurchaseReturnRow {
   status: ReturnStatus;
   settlementMode: string;
   reason?: string | null;
+  notes?: string | null;
   subtotal: string;
   taxTotal: string;
   grandTotal: string;

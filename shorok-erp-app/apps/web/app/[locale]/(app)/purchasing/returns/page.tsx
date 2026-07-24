@@ -8,12 +8,14 @@ import { Button } from "../../../../../components/ui/button";
 import { Card, CardBody, CardHeader, CardTitle } from "../../../../../components/ui/card";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { formatCurrency, formatDate } from "../../../../../lib/format";
+import { useHasRole } from "../../../../../lib/auth";
 import { listPurchaseReturns, type PurchaseReturnRow } from "../../../../../lib/returns-client";
 
 const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", CANCELLED: "ملغي" };
 
 export default function PurchaseReturnsPage() {
   const locale = useLocale() as AppLocale;
+  const canCreate = useHasRole("OWNER", "ACCOUNTANT"); // §2 — BRANCH_MANAGER is view-only
   const [rows, setRows] = useState<PurchaseReturnRow[]>([]);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +33,7 @@ export default function PurchaseReturnsPage() {
     <div className="space-y-4" dir="rtl">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">مردودات المشتريات</h1>
-        <a href={`/${locale}/purchasing/returns/new`}><Button>مردود جديد</Button></a>
+        {canCreate && <a href={`/${locale}/purchasing/returns/new`}><Button>مردود جديد</Button></a>}
       </div>
       <Card>
         <CardHeader className="flex items-center justify-between">
