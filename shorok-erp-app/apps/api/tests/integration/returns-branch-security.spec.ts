@@ -18,8 +18,9 @@ describe("returns branch security (§3)", () => {
   const srv = () => h.app.getHttpServer();
   const login = async (phone: string) => (await request(srv()).post("/api/v1/auth/login").send({ phone, password: "Pwd@2026!" })).body.accessToken as string;
 
-  // A confirmed sale + confirmed return, both in branch A.
-  let invA: string, retA: string;
+  // A confirmed sale + confirmed return, and a confirmed purchase + purchase
+  // return, all in branch A.
+  let invA: string, retA: string, pInvA: string, pRetA: string;
 
   beforeAll(async () => {
     h = await buildTestApp();
@@ -52,6 +53,7 @@ describe("returns branch security (§3)", () => {
     const v = (await h.prisma.productVariant.create({ data: { skuId: sku.id, sizeMetersPerBoard: "4.0000", defaultSalePricePerMeter: "0", defaultPurchasePricePerMeter: "0", avgCost: "0", avgCostPerMeter: "0" } })).id;
     const p = await request(srv()).post("/api/v1/purchase-invoices").set(A(owner)).send({ invoiceDate: "2026-02-01", supplierId, branchId: branchA, lines: [{ productVariantId: v, boardsQuantity: "10", unitPrice: "300", taxRate: "0" }] });
     await request(srv()).post(`/api/v1/purchase-invoices/${p.body.id}/confirm`).set(A(owner)).send({});
+    pInvA = p.body.id;
     const s = await request(srv()).post("/api/v1/sales-invoices").set(A(owner)).send({ invoiceDate: "2026-03-01", customerId, branchId: branchA, taxRate: "0", salesRepresentativeId: repId, lines: [{ productVariantId: v, quantity: "5", unitPrice: "500", costPrice: "0" }] });
     await request(srv()).post(`/api/v1/sales-invoices/${s.body.id}/confirm`).set(A(owner)).send({});
     invA = s.body.id;
@@ -59,6 +61,11 @@ describe("returns branch security (§3)", () => {
     const r = await request(srv()).post("/api/v1/sales-returns").set(A(owner)).send({ originalSalesInvoiceId: invA, returnDate: "2026-03-15", lines: [{ originalSalesInvoiceLineId: lineId, returnedMeters: "4", returnedBoards: "1" }] });
     await request(srv()).post(`/api/v1/sales-returns/${r.body.id}/confirm`).set(A(owner)).send({});
     retA = r.body.id;
+    // A confirmed PURCHASE return in branch A (20 m² left in stock after the sale).
+    const pl = (await h.prisma.purchaseInvoiceLine.findFirst({ where: { invoiceId: pInvA } }))!.id;
+    const pr = await request(srv()).post("/api/v1/purchase-returns").set(A(owner)).send({ originalPurchaseInvoiceId: pInvA, returnDate: "2026-03-20", lines: [{ originalPurchaseInvoiceLineId: pl, returnedMeters: "4", returnedBoards: "1" }] });
+    await request(srv()).post(`/api/v1/purchase-returns/${pr.body.id}/confirm`).set(A(owner)).send({});
+    pRetA = pr.body.id;
   });
   afterAll(async () => teardownTestApp(h));
 
@@ -105,5 +112,63 @@ describe("returns branch security (§3)", () => {
     expect(oTot.netSales).toBe(aTot.netSales); // owner sees the same (only branch A has data)
     // Explicit foreign branchId → 403 (global guard).
     expect((await request(srv()).get(`/api/v1/reports/sales-representatives/summary?${q}&branchId=${branchA}`).set(A(userB))).status).toBe(403);
+  });
+
+  // ── §7 — parameterized branch visibility across EVERY report/list/search
+  //         endpoint. Focus: visibility only (not business maths). ────────────
+  describe("§7 branch visibility across all endpoints", () => {
+    const q = "preset=custom&from=2026-01-01&to=2026-12-31";
+    // Each: path + a predicate that is TRUE when the response contains branch-A data.
+    const cases = () => [
+      { name: "summary", path: `/reports/sales-representatives/summary?${q}`, hasA: (b: any) => Number(b.totals?.netSales ?? 0) !== 0 },
+      { name: "net-sales", path: `/reports/sales-representatives/net-sales?${q}`, hasA: (b: any) => Number(b.totals?.netSales ?? 0) !== 0 },
+      { name: "gross-profit", path: `/reports/sales-representatives/gross-profit?${q}`, hasA: (b: any) => Number(b.totals?.netSales ?? 0) !== 0 },
+      { name: "products", path: `/reports/sales-representatives/products?${q}`, hasA: (b: any) => (b.rows ?? []).length > 0 },
+      { name: "products/drill-down", path: `/reports/sales-representatives/products/drill-down?${q}`, hasA: (b: any) => (b.lines ?? []).length > 0 },
+      { name: "time-series", path: `/reports/sales/time-series?${q}&groupDim=month`, hasA: (b: any) => (b.series ?? []).length > 0 },
+      { name: "profitability", path: `/reports/sales/profitability?${q}&groupDim=representative`, hasA: (b: any) => (b.groups ?? []).length > 0 },
+      { name: "statement", path: `/reports/sales-representatives/${repId}/statement?${q}`, hasA: (b: any) => (b.invoices ?? []).length > 0 },
+      { name: "statement invoice-lines", path: `/reports/sales-representatives/${repId}/statement/invoices/${invA}/lines?${q}`, hasA: (b: any) => (b.lines ?? []).length > 0 },
+      { name: "sales invoice search", path: `/sales-invoices?status=CONFIRMED`, hasA: (b: any) => (b.data ?? []).some((i: any) => i.id === invA) },
+      { name: "purchase invoice search", path: `/purchase-invoices?status=CONFIRMED`, hasA: (b: any) => (b.data ?? []).some((i: any) => i.id === pInvA) },
+      { name: "sales return list", path: `/sales-returns`, hasA: (b: any) => (b.items ?? []).some((r: any) => r.id === retA) },
+      { name: "purchase return list", path: `/purchase-returns`, hasA: (b: any) => (b.items ?? []).some((r: any) => r.id === pRetA) },
+    ];
+
+    it("list/report/search endpoints EXCLUDE branch A for userB and INCLUDE it for userA + owner", async () => {
+      for (const c of cases()) {
+        const b = (await request(srv()).get(`/api/v1${c.path}`).set(A(userB))).body;
+        const a = (await request(srv()).get(`/api/v1${c.path}`).set(A(userA))).body;
+        const o = (await request(srv()).get(`/api/v1${c.path}`).set(A(owner))).body;
+        expect({ ep: c.name, userB: c.hasA(b) }).toEqual({ ep: c.name, userB: false });
+        expect({ ep: c.name, userA: c.hasA(a) }).toEqual({ ep: c.name, userA: true });
+        expect({ ep: c.name, owner: c.hasA(o) }).toEqual({ ep: c.name, owner: true });
+      }
+    });
+
+    it("direct foreign RESOURCE by id → 404 (sales+purchase return get/returnable); OWNER 200", async () => {
+      const forbidden = [
+        `/sales-returns/${retA}`, `/sales-returns/returnable/${invA}`,
+        `/purchase-returns/${pRetA}`, `/purchase-returns/returnable/${pInvA}`,
+      ];
+      for (const p of forbidden) {
+        expect((await request(srv()).get(`/api/v1${p}`).set(A(userB))).status).toBe(404);
+        expect((await request(srv()).get(`/api/v1${p}`).set(A(owner))).status).toBe(200);
+      }
+    });
+
+    it("explicit foreign branchId → 403 across reports, search and return lists", async () => {
+      const withBranch = [
+        `/reports/sales-representatives/summary?${q}&branchId=${branchA}`,
+        `/reports/sales/time-series?${q}&groupDim=month&branchId=${branchA}`,
+        `/sales-invoices?status=CONFIRMED&branchId=${branchA}`,
+        `/purchase-invoices?status=CONFIRMED&branchId=${branchA}`,
+        `/sales-returns?branchId=${branchA}`,
+        `/purchase-returns?branchId=${branchA}`,
+      ];
+      for (const p of withBranch) {
+        expect((await request(srv()).get(`/api/v1${p}`).set(A(userB))).status).toBe(403);
+      }
+    });
   });
 });

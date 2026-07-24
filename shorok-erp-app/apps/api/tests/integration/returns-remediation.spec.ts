@@ -355,4 +355,25 @@ describe("returns remediation (§17)", () => {
     expect(D(agg._sum.returnTotal).toFixed(2)).toBe("20520.00");
     expect(D(agg._sum.returnedMetersQuantity).toFixed(4)).toBe("40.0000");
   });
+
+  // ── §4 — derived original size + original dimensions are independent of the
+  //         CURRENT (mutable) product master ──────────────────────────────────
+  it("26) changing the variant's current size does NOT change the derived original size or original dimensions", async () => {
+    const { variantId: v } = await buy("4.0000", "300", "4");
+    // Sell 2 boards, custom 2.0 × 1.5 = 3 m² each → 6 m² over 2 boards ⇒ derived 3 m²/board.
+    const inv = await sell(v, "2", "500", owner, h.branchId, "0", { lengthM: "2", widthM: "1.5" });
+    // Mutate the CURRENT product-master size AFTER the sale.
+    await h.prisma.productVariant.update({ where: { id: v }, data: { sizeMetersPerBoard: "9.9900" } });
+    const ret = (await request(srv()).get(`/api/v1/sales-returns/returnable/${inv}`).set(authT(owner))).body;
+    const line = ret.lines[0];
+    // Derived-from-original value is 6/2 = 3.0000 (NOT the current 9.99).
+    expect(line.effectiveOriginalMetersPerBoard).toBe("3.0000");
+    // Original dimensions preserved independently.
+    expect(D(line.lengthM).toFixed(4)).toBe("2.0000");
+    expect(D(line.widthM).toFixed(4)).toBe("1.5000");
+    // The current master value is surfaced separately, and clearly labelled as current.
+    expect(D(line.currentVariantSize).toFixed(4)).toBe("9.9900");
+    // The old, misleading historical field name is gone.
+    expect(line.historicalBoardSize).toBeUndefined();
+  });
 });
