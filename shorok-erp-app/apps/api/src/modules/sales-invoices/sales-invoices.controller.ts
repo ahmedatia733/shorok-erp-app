@@ -196,9 +196,23 @@ export class SalesInvoicesController {
   async list(
     @Query(new ZodValidationPipe(SalesInvoiceQuerySchema)) query: SalesInvoiceQuery,
   ) {
+    // Server-side free-text search: exact invoice number (when q is numeric) OR
+    // customer name/code contains — so ANY confirmed invoice is findable, not
+    // only the first page.
+    const q = query.q?.trim();
+    const numericQ = q && /^\d+$/.test(q) ? q : null;
+    const searchOr = q
+      ? [
+          ...(numericQ ? [{ invoiceNumber: BigInt(numericQ) }] : []),
+          { customer: { nameAr: { contains: q, mode: "insensitive" as const } } },
+          { customer: { code: { contains: q, mode: "insensitive" as const } } },
+        ]
+      : null;
     const where: any = {
       ...(query.customerId ? { customerId: query.customerId } : {}),
+      ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(query.status ? { status: query.status } : {}),
+      ...(searchOr ? { OR: searchOr } : {}),
       ...(query.from || query.to
         ? {
             invoiceDate: {

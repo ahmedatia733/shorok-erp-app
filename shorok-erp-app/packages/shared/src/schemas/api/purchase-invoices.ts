@@ -37,6 +37,7 @@ export const PurchaseInvoiceQuerySchema = z.object({
   supplierId: UuidSchema.optional(),
   branchId: UuidSchema.optional(),
   status: PurchaseInvoiceStatusEnum.optional(),
+  q: z.string().trim().max(120).optional(), // invoice number OR supplier name contains
   from: IsoDateSchema.optional(),
   to: IsoDateSchema.optional(),
   cursor: z.string().uuid().optional().nullable(),

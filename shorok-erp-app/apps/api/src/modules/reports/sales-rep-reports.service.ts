@@ -192,15 +192,25 @@ export class SalesRepReportsService {
       FROM sales_invoices si JOIN sales_invoice_lines l ON l.invoice_id = si.id
       JOIN product_variants v ON v.id=l.product_variant_id JOIN product_skus sku ON sku.id=v.sku_id
       WHERE ${this.where(f)}`);
+    // Confirmed returns per ORIGINAL invoice (returnDate-scoped) so each invoice
+    // row shows its returns / net-of-returns COGS + gross profit.
+    const retByInvoice = await this.returnsByKey(f, Prisma.raw("sr.original_sales_invoice_id::text"));
     return {
       summary: cards,
-      invoices: invoices.map((r) => ({
-        id: r.id, invoiceNumber: r.invoice_number, invoiceDate: r.invoice_date, status: r.status,
-        customerCode: r.customer_code, customerName: r.customer_name, branchName: r.branch_name,
-        boards: this.num(r.boards, 4), meters: this.num(r.meters, 4), discount: this.num(r.discount),
-        returns: "0.00", netInvoice: this.num(r.net), cogs: this.num(r.cogs),
-        grossProfit: new Decimal(this.num(r.net)).minus(this.num(r.cogs)).toFixed(2),
-      })),
+      salesReturnsSupported: true,
+      invoices: invoices.map((r) => {
+        const ret = retByInvoice.get(String(r.id)) ?? { net: new Decimal(0), cogs: new Decimal(0), meters: new Decimal(0) };
+        const netInvoice = new Decimal(this.num(r.net)).minus(ret.net);
+        const cogs = new Decimal(this.num(r.cogs)).minus(ret.cogs);
+        return {
+          id: r.id, invoiceNumber: r.invoice_number, invoiceDate: r.invoice_date, status: r.status,
+          customerCode: r.customer_code, customerName: r.customer_name, branchName: r.branch_name,
+          boards: this.num(r.boards, 4), meters: this.num(r.meters, 4), discount: this.num(r.discount),
+          returns: ret.net.toFixed(2), metersReturned: ret.meters.toFixed(4),
+          netInvoice: netInvoice.toFixed(2), cogs: cogs.toFixed(2),
+          grossProfit: netInvoice.minus(cogs).toFixed(2),
+        };
+      }),
       page, pageSize, totalInvoices: Number(totalRows[0]?.n ?? 0),
     };
   }
@@ -222,15 +232,20 @@ export class SalesRepReportsService {
       GROUP BY si.sales_representative_id, rep.name_ar, sku.code, sku.color_name_ar
       ORDER BY rep.name_ar NULLS FIRST, net DESC
     `);
+    // Returns keyed by rep|product so each rep×product row nets its own returns.
+    const retMap = await this.returnsByKey(f, Prisma.raw("coalesce(sr.sales_representative_id::text,'') || '|' || sku.code"));
     return {
-      from: f.from, to: f.to,
-      rows: rows.map((r) => ({
-        salesRepresentativeId: r.rep_id, salesRepresentativeName: r.rep_name ?? "— بدون مندوب —",
-        productCode: r.product_code, productName: r.product_name, sizes: r.sizes,
-        invoiceCount: Number(r.invoices), boards: this.num(r.boards, 4), metersSold: this.num(r.meters, 4),
-        metersReturned: "0.0000", netMeters: this.num(r.meters, 4), netSales: this.num(r.net),
-        cogs: this.num(r.cogs), grossProfit: new Decimal(this.num(r.net)).minus(this.num(r.cogs)).toFixed(2),
-      })),
+      from: f.from, to: f.to, salesReturnsSupported: true,
+      rows: rows.map((r) => {
+        const base = {
+          salesRepresentativeId: r.rep_id, salesRepresentativeName: r.rep_name ?? "— بدون مندوب —",
+          productCode: r.product_code, productName: r.product_name, sizes: r.sizes,
+          invoiceCount: Number(r.invoices), boards: this.num(r.boards, 4), metersSold: this.num(r.meters, 4),
+          metersReturned: "0.0000", netMeters: this.num(r.meters, 4), returns: "0.00", netSales: this.num(r.net),
+          cogs: this.num(r.cogs), grossProfit: new Decimal(this.num(r.net)).minus(this.num(r.cogs)).toFixed(2),
+        };
+        return this.applyReturns(base, retMap.get(`${r.rep_id ?? ""}|${r.product_code}`));
+      }),
     };
   }
 
@@ -250,13 +265,19 @@ export class SalesRepReportsService {
       GROUP BY period
       ORDER BY period ASC
     `);
-    const series = rows.map((r) => ({
-      period: r.period, invoiceCount: Number(r.invoices), boards: this.num(r.boards, 4),
-      metersSold: this.num(r.meters, 4), netMeters: this.num(r.meters, 4), netSales: this.num(r.net),
-      discounts: this.num(r.discount), cogs: this.num(r.cogs),
-      grossProfit: new Decimal(this.num(r.net)).minus(this.num(r.cogs)).toFixed(2),
-    }));
-    return { from: f.from, to: f.to, groupBy, series, totals: this.totalizeSeries(series) };
+    // Returns grouped by the SAME period bucket, on the return date.
+    const retMap = await this.returnsByKey(f, Prisma.raw(groupKeyExpr(groupBy, "sr.return_date")));
+    const series = rows.map((r) => {
+      const base = {
+        period: r.period, invoiceCount: Number(r.invoices), boards: this.num(r.boards, 4),
+        metersSold: this.num(r.meters, 4), metersReturned: "0.0000", netMeters: this.num(r.meters, 4),
+        returns: "0.00", netSales: this.num(r.net),
+        discounts: this.num(r.discount), cogs: this.num(r.cogs),
+        grossProfit: new Decimal(this.num(r.net)).minus(this.num(r.cogs)).toFixed(2),
+      };
+      return this.applyReturns(base, retMap.get(String(r.period ?? "")));
+    });
+    return { from: f.from, to: f.to, groupBy, salesReturnsSupported: true, series, totals: this.totalizeSeries(series) };
   }
 
   /** §6 — per-line details for ONE invoice (historical values; never recomputed
@@ -278,9 +299,20 @@ export class SalesRepReportsService {
       WHERE si.id = ${invoiceId}::uuid AND ${this.where(f)}
       ORDER BY l.id
     `);
+    // Confirmed returns booked against this original invoice (all-time), so the
+    // drill-down distinguishes the invoice's returns / net-of-returns figures.
+    const retRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT coalesce(sum(rl.return_net_ex_tax),0) AS ret_net,
+             coalesce(sum(rl.return_cogs),0) AS ret_cogs,
+             coalesce(sum(rl.returned_meters_quantity),0) AS ret_meters
+      FROM sales_returns sr JOIN sales_return_lines rl ON rl.sales_return_id = sr.id
+      WHERE sr.status='CONFIRMED' AND sr.original_sales_invoice_id = ${invoiceId}::uuid`);
+    const ret = retRows[0] ?? {};
     return {
       invoiceId,
       invoiceWebRoute: `/sales/invoices?open=${invoiceId}`, // canonical sales-invoice route
+      salesReturnsSupported: true,
+      returnsTotal: this.num(ret.ret_net), returnsCogs: this.num(ret.ret_cogs), metersReturned: this.num(ret.ret_meters, 4),
       lines: rows.map((r) => {
         const sizeMode = r.width_m != null ? "CUSTOM"
           : r.length_m != null ? (new Decimal(r.length_m).eq("5.25") ? "LARGE" : new Decimal(r.length_m).eq("4") ? "SMALL" : "CUSTOM")

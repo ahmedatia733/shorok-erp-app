@@ -107,10 +107,18 @@ export class PurchaseInvoicesController {
   @Get()
   @Roles("OWNER", "ACCOUNTANT")
   async list(@Query(new ZodValidationPipe(PurchaseInvoiceQuerySchema)) query: PurchaseInvoiceQuery) {
+    const q = query.q?.trim();
+    const searchOr = q
+      ? [
+          { invoiceNumber: { contains: q, mode: "insensitive" as const } },
+          { supplier: { nameAr: { contains: q, mode: "insensitive" as const } } },
+        ]
+      : null;
     const where: any = {
       ...(query.supplierId ? { supplierId: query.supplierId } : {}),
       ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(query.status ? { status: query.status } : {}),
+      ...(searchOr ? { OR: searchOr } : {}),
       ...(query.from || query.to
         ? {
             invoiceDate: {

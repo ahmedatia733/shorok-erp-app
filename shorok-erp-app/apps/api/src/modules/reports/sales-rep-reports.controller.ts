@@ -64,7 +64,7 @@ export class SalesRepReportsController {
       })),
       totals: { invoiceCount: s.totals.invoiceCount, boards: s.totals.boards, metersSold: s.totals.metersSold,
                 grossSales: s.totals.grossSales, discounts: s.totals.discounts, netSales: s.totals.netSales },
-      salesReturnsSupported: false,
+      salesReturnsSupported: true, // net-sales derives from summary(), which nets confirmed returns
     };
   }
 
@@ -81,6 +81,7 @@ export class SalesRepReportsController {
         cogs: r.cogs, grossProfit: r.grossProfit,
       })),
       totals: { invoiceCount: s.totals.invoiceCount, netSales: s.totals.netSales, cogs: s.totals.cogs, grossProfit: s.totals.grossProfit },
+      salesReturnsSupported: true, // derives from summary(), which nets confirmed returns
       note: "مجمل الربح = صافي المبيعات − تكلفة البضاعة المباعة (ليس صافي الربح).",
     };
   }

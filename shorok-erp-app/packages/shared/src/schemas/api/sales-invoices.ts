@@ -48,6 +48,11 @@ export type UpdateSalesInvoice = z.infer<typeof UpdateSalesInvoiceSchema>;
 export const SalesInvoiceQuerySchema = z.object({
   customerId: z.string().uuid().optional(),
   status:     z.enum(["DRAFT","CONFIRMED","CANCELLED","PAID"]).optional(),
+  // Free-text search (server-side): exact invoice number OR customer name/code
+  // contains. Lets a return be created against ANY confirmed invoice, not only
+  // the most recent page.
+  q:          z.string().trim().max(120).optional(),
+  branchId:   z.string().uuid().optional(),
   from:       DateStr.optional(),
   to:         DateStr.optional(),
   cursor:     z.string().uuid().optional().nullable(),
