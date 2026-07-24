@@ -1132,21 +1132,24 @@ export default function SalesInvoicesPage() {
     setExpandedIds((prev) => new Set(prev).add(inv.id));
   }
 
-  // Deep-link support: /sales/invoices?open=<id> auto-expands that invoice
-  // (used by return documents' "back to original invoice" links, §12).
+  // Deep-link support: /sales/invoices?open=<id> auto-expands that invoice AND
+  // its Related Documents — even when the invoice is NOT on the currently loaded
+  // page. We fetch it, prepend it to the rendered list so its row exists, then
+  // expand it (§8). A forbidden/missing id (API returns 404) surfaces a notice.
+  const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
   useEffect(() => {
     const openId = new URLSearchParams(window.location.search).get("open");
     if (!openId || expandedIds.has(openId) || expandedDetails[openId]) return;
-    const inv = invoices.find((i) => i.id === openId);
-    if (inv) void toggleExpand(inv);
-    else {
-      void getSalesInvoice(openId)
-        .then((detail) => {
-          setExpandedDetails((prev) => ({ ...prev, [openId]: detail }));
-          setExpandedIds((prev) => new Set(prev).add(openId));
-        })
-        .catch(() => {});
-    }
+    const inList = invoices.find((i) => i.id === openId);
+    if (inList) { void toggleExpand(inList); return; }
+    void getSalesInvoice(openId)
+      .then((detail) => {
+        // SalesInvoiceDetail extends SalesInvoiceRow → safe to render as a row.
+        setInvoices((prev) => (prev.some((i) => i.id === openId) ? prev : [detail, ...prev]));
+        setExpandedDetails((prev) => ({ ...prev, [openId]: detail }));
+        setExpandedIds((prev) => new Set(prev).add(openId));
+      })
+      .catch(() => setDeepLinkNotFound(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoices]);
 
@@ -1237,6 +1240,7 @@ export default function SalesInvoicesPage() {
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
+      {deepLinkNotFound && <Alert variant="error">الفاتورة المطلوبة غير موجودة أو خارج صلاحيتك.</Alert>}
 
       {/* Filters */}
       <Card className="no-print">

@@ -49,6 +49,7 @@ export interface PurchaseReturnable {
 
 export interface SalesReturnLineDetail {
   id: string;
+  originalSalesInvoiceLineId: string;
   returnedBoards: string;
   returnedMetersQuantity: string;
   originalSalePricePerMeter: string;
@@ -59,6 +60,7 @@ export interface SalesReturnLineDetail {
 }
 export interface PurchaseReturnLineDetail {
   id: string;
+  originalPurchaseInvoiceLineId: string;
   returnedBoards: string;
   returnedMetersQuantity: string;
   originalPurchasePricePerMeter: string;
@@ -73,6 +75,7 @@ export interface SalesReturnRow {
   returnDate: string;
   status: ReturnStatus;
   settlementMode: string;
+  reason?: string | null;
   subtotal: string;
   taxTotal: string;
   grandTotal: string;
@@ -90,6 +93,7 @@ export interface PurchaseReturnRow {
   returnDate: string;
   status: ReturnStatus;
   settlementMode: string;
+  reason?: string | null;
   subtotal: string;
   taxTotal: string;
   grandTotal: string;
@@ -110,8 +114,10 @@ export const listSalesReturns = (q: { status?: string; limit?: number; originalI
     `/sales-returns?limit=${q.limit ?? 50}${q.status ? `&status=${q.status}` : ""}${q.originalInvoiceId ? `&originalInvoiceId=${q.originalInvoiceId}` : ""}`);
 export const getSalesReturn = (id: string) => apiCall<SalesReturnRow>(`/sales-returns/${id}`);
 export const getSalesReturnable = (invoiceId: string) => apiCall<SalesReturnable>(`/sales-returns/returnable/${invoiceId}`);
-export const createSalesReturn = (body: { originalSalesInvoiceId: string; returnDate: string; reason?: string; notes?: string; settlementMode?: string; refundTreasuryAccountId?: string; lines: SalesReturnLineInput[] }) =>
+export const createSalesReturn = (body: { originalSalesInvoiceId: string; returnDate: string; reason?: string; notes?: string; settlementMode?: string; lines: SalesReturnLineInput[] }) =>
   apiCall<SalesReturnRow>(`/sales-returns`, { method: "POST", body });
+export const updateSalesReturn = (id: string, body: { returnDate?: string; reason?: string; notes?: string; settlementMode?: string; lines?: SalesReturnLineInput[] }) =>
+  apiCall<SalesReturnRow>(`/sales-returns/${id}`, { method: "PUT", body });
 export const confirmSalesReturn = (id: string) => apiCall<SalesReturnRow>(`/sales-returns/${id}/confirm`, { method: "POST", body: {} });
 export const cancelSalesReturn = (id: string, reason?: string) => apiCall<SalesReturnRow>(`/sales-returns/${id}/cancel`, { method: "POST", body: { reason } });
 
@@ -121,7 +127,9 @@ export const listPurchaseReturns = (q: { status?: string; limit?: number; origin
     `/purchase-returns?limit=${q.limit ?? 50}${q.status ? `&status=${q.status}` : ""}${q.originalInvoiceId ? `&originalInvoiceId=${q.originalInvoiceId}` : ""}`);
 export const getPurchaseReturn = (id: string) => apiCall<PurchaseReturnRow>(`/purchase-returns/${id}`);
 export const getPurchaseReturnable = (invoiceId: string) => apiCall<PurchaseReturnable>(`/purchase-returns/returnable/${invoiceId}`);
-export const createPurchaseReturn = (body: { originalPurchaseInvoiceId: string; returnDate: string; reason?: string; notes?: string; settlementMode?: string; refundTreasuryAccountId?: string; lines: PurchaseReturnLineInput[] }) =>
+export const createPurchaseReturn = (body: { originalPurchaseInvoiceId: string; returnDate: string; reason?: string; notes?: string; settlementMode?: string; lines: PurchaseReturnLineInput[] }) =>
   apiCall<PurchaseReturnRow>(`/purchase-returns`, { method: "POST", body });
+export const updatePurchaseReturn = (id: string, body: { returnDate?: string; reason?: string; notes?: string; settlementMode?: string; lines?: PurchaseReturnLineInput[] }) =>
+  apiCall<PurchaseReturnRow>(`/purchase-returns/${id}`, { method: "PUT", body });
 export const confirmPurchaseReturn = (id: string) => apiCall<PurchaseReturnRow>(`/purchase-returns/${id}/confirm`, { method: "POST", body: {} });
 export const cancelPurchaseReturn = (id: string, reason?: string) => apiCall<PurchaseReturnRow>(`/purchase-returns/${id}/cancel`, { method: "POST", body: { reason } });

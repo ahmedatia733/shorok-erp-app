@@ -14,11 +14,13 @@ import { isPostingConfigError } from "../../../../../lib/posting-config";
 import { useHasRole } from "../../../../../lib/auth";
 import {
   listPurchaseInvoices,
+  getPurchaseInvoice,
   confirmPurchaseInvoice,
   cancelPurchaseInvoice,
   deletePurchaseInvoice,
   type PurchaseInvoiceRow,
 } from "../../../../../lib/purchase-invoices-client";
+import { RelatedReturns } from "../../../../../components/returns/related-returns";
 import { listAccounts, getLeafAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 import { confirmErrorMessageAr } from "../../../../../lib/purchase-confirm-error";
 import { AP_COLORS, apColorMap } from "../../../../../lib/ap-colors";
@@ -326,6 +328,24 @@ export default function PurchaseInvoicesPage() {
     setExpandedIds((prev) => new Set(prev).add(inv.id));
   }
 
+  // Deep-link: /purchasing/invoices?open=<id> expands the invoice + its Related
+  // Documents, fetching + prepending it when not on the loaded page (§8).
+  const [deepLinkNotFound, setDeepLinkNotFound] = useState(false);
+  useEffect(() => {
+    const openId = new URLSearchParams(window.location.search).get("open");
+    if (!openId || expandedIds.has(openId)) return;
+    const inList = invoices.find((i) => i.id === openId);
+    if (inList) { toggleExpand(inList); return; }
+    void getPurchaseInvoice(openId)
+      .then((detail) => {
+        setInvoices((prev) => (prev.some((i) => i.id === openId) ? prev : [detail, ...prev]));
+        setExpandedDetails((prev) => ({ ...prev, [openId]: detail }));
+        setExpandedIds((prev) => new Set(prev).add(openId));
+      })
+      .catch(() => setDeepLinkNotFound(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices]);
+
   async function handleDelete(id: string) {
     try {
       await deletePurchaseInvoice(id);
@@ -377,6 +397,7 @@ export default function PurchaseInvoicesPage() {
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
+      {deepLinkNotFound && <Alert variant="error">فاتورة الشراء المطلوبة غير موجودة أو خارج صلاحيتك.</Alert>}
 
       <div className="flex items-center gap-3">
         <Input
@@ -506,6 +527,11 @@ export default function PurchaseInvoicesPage() {
                       <tr>
                         <td colSpan={8} className="p-0">
                           <ExpandedRow invoice={detail} locale={locale} />
+                          {inv.status === "CONFIRMED" && (
+                            <div className="px-3 pb-2" dir="rtl">
+                              <RelatedReturns invoiceId={inv.id} kind="purchase" />
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}
