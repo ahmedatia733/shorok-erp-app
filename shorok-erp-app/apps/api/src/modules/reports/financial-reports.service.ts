@@ -5,6 +5,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 export interface PnlLine { accountId: string; code: string; nameAr: string; nameEn: string; amount: string }
 export interface Pnl {
   from: string; to: string;
+  branchAttributionComplete: boolean; // false → all-branches only, not branch-filterable
   revenue: string; revenueLines: PnlLine[];
   costOfSales: string; cogsLines: PnlLine[];
   grossProfit: string; grossMarginPct: string;
@@ -59,6 +60,13 @@ export class FinancialReportsService {
     const netProfit = grossProfit.minus(totalExpenses);
     return {
       from: fromStr, to: toStr,
+      // This is an ALL-BRANCHES statement: it takes no branchId and is NOT
+      // branch-filterable, because not every posted journal source yet carries a
+      // canonical branch dimension on its lines (sales/purchase invoice postings
+      // don't). Sales returns DO carry branch dims, so their revenue/COGS effect
+      // is reflected here automatically via the contra-revenue debit + COGS
+      // credit. The flag is surfaced so no consumer mistakes this for branch P&L.
+      branchAttributionComplete: false,
       revenue: revenue.toFixed(2), revenueLines,
       costOfSales: costOfSales.toFixed(2), cogsLines,
       grossProfit: grossProfit.toFixed(2),

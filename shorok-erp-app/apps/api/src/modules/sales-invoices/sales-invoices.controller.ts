@@ -195,6 +195,7 @@ export class SalesInvoicesController {
   @Roles("OWNER", "ACCOUNTANT")
   async list(
     @Query(new ZodValidationPipe(SalesInvoiceQuerySchema)) query: SalesInvoiceQuery,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
     // Server-side free-text search: exact invoice number (when q is numeric) OR
     // customer name/code contains — so ANY confirmed invoice is findable, not
@@ -208,9 +209,15 @@ export class SalesInvoicesController {
           { customer: { code: { contains: q, mode: "insensitive" as const } } },
         ]
       : null;
+    // Branch scope (SQL, not JS): a non-OWNER only ever sees invoices in their
+    // allowedBranches. An explicitly-supplied foreign branchId is still 403'd by
+    // the global BranchScopeGuard; this closes the "no branchId → all branches"
+    // leak on the list/search itself.
+    const branchScope =
+      user.role !== "OWNER" ? { branchId: { in: user.allowedBranches } } : query.branchId ? { branchId: query.branchId } : {};
     const where: any = {
       ...(query.customerId ? { customerId: query.customerId } : {}),
-      ...(query.branchId ? { branchId: query.branchId } : {}),
+      ...branchScope,
       ...(query.status ? { status: query.status } : {}),
       ...(searchOr ? { OR: searchOr } : {}),
       ...(query.from || query.to

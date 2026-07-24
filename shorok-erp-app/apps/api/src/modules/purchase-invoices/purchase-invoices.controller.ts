@@ -106,7 +106,7 @@ export class PurchaseInvoicesController {
 
   @Get()
   @Roles("OWNER", "ACCOUNTANT")
-  async list(@Query(new ZodValidationPipe(PurchaseInvoiceQuerySchema)) query: PurchaseInvoiceQuery) {
+  async list(@Query(new ZodValidationPipe(PurchaseInvoiceQuerySchema)) query: PurchaseInvoiceQuery, @CurrentUser() user: AuthenticatedUser) {
     const q = query.q?.trim();
     const searchOr = q
       ? [
@@ -114,9 +114,12 @@ export class PurchaseInvoicesController {
           { supplier: { nameAr: { contains: q, mode: "insensitive" as const } } },
         ]
       : null;
+    // Branch scope (SQL): non-OWNER sees only allowedBranches.
+    const branchScope =
+      user.role !== "OWNER" ? { branchId: { in: user.allowedBranches } } : query.branchId ? { branchId: query.branchId } : {};
     const where: any = {
       ...(query.supplierId ? { supplierId: query.supplierId } : {}),
-      ...(query.branchId ? { branchId: query.branchId } : {}),
+      ...branchScope,
       ...(query.status ? { status: query.status } : {}),
       ...(searchOr ? { OR: searchOr } : {}),
       ...(query.from || query.to
@@ -434,6 +437,15 @@ export class PurchaseInvoicesController {
       });
 
       // ── 2. Inventory RECEIPT per line + forward WAC update (same tx) ──────
+      // Single costing lock (matches the returns services): lock every affected
+      // ProductVariant row FOR UPDATE, in sorted id order, BEFORE the
+      // read-compute-write WAC cycle. Without this, a concurrent purchase
+      // confirmation and a return could each read the same avg and clobber the
+      // other's WAC update (lost update). Sorted order avoids deadlocks.
+      const wacVariantIds = [...new Set(existing.lines.map((l) => l.productVariantId))].sort();
+      for (const vid of wacVariantIds) {
+        await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${vid}::uuid FOR UPDATE`;
+      }
       for (const line of existing.lines) {
         const boards = new Decimal(line.boardsQuantity.toString());
         if (boards.isZero()) continue;

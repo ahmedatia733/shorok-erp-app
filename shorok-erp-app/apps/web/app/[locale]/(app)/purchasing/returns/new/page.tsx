@@ -109,13 +109,13 @@ export default function NewPurchaseReturnPage() {
             <CardBody>
               <p className="mb-2 text-sm text-muted">تأكد من توفر المخزون قبل التأكيد.</p>
               <Table>
-                <THead><TR><TH>الكود</TH><TH>الصنف/اللون</TH><TH>المقاس</TH><TH>الأبعاد</TH><TH>ألواح أصلية</TH><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR></THead>
+                <THead><TR><TH>الكود</TH><TH>اللون</TH><TH>مقاس اللوح (تاريخي)</TH><TH>الأبعاد الأصلية</TH><TH>ألواح أصلية</TH><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR></THead>
                 <TBody>
                   {ret.lines.map((l) => (
                     <TR key={l.originalLineId}>
                       <TD>{l.productCode ?? "—"}</TD>
-                      <TD>{l.productName ?? "—"}</TD>
-                      <TD>{l.sizeLabel ?? "—"}</TD>
+                      <TD>{l.colorName ?? "—"}</TD>
+                      <TD>{l.historicalBoardSize ? D(l.historicalBoardSize).toFixed(2) : "—"}</TD>
                       <TD>{l.lengthM ? `${D(l.lengthM).toFixed(2)}${l.widthM ? " × " + D(l.widthM).toFixed(2) : ""}` : "—"}</TD>
                       <TD>{D(l.originalBoards).toFixed(2)}</TD>
                       <TD>{D(l.originalMeters).toFixed(2)}</TD>

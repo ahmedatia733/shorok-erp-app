@@ -10,10 +10,14 @@ export interface ReturnableLine {
   originalLineId: string;
   productVariantId: string;
   productCode: string | null;
-  productName: string | null;
-  sizeLabel: string | null;
+  colorName: string | null;            // sku.color_name_ar — a COLOR, not a product name
+  // CURRENT product-master size (mutable); shown only as a hint, never as the
+  // historical value. Historical facts come from the ORIGINAL line below.
+  currentVariantSize: string | null;
+  // HISTORICAL effective board area at posting = originalMeters / originalBoards.
+  historicalBoardSize: string | null;
   unitLabel: string;
-  lengthM: string | null;
+  lengthM: string | null;              // HISTORICAL chosen dimensions (original line)
   widthM: string | null;
   originalMeters: string;
   originalBoards: string;
@@ -38,7 +42,8 @@ export interface ReturnableLine {
 
 export interface PurchaseReturnableLine {
   originalLineId: string; productVariantId: string;
-  productCode: string | null; productName: string | null; sizeLabel: string | null;
+  productCode: string | null; colorName: string | null;
+  currentVariantSize: string | null; historicalBoardSize: string | null;
   unitLabel: string; lengthM: string | null; widthM: string | null;
   originalMeters: string; originalBoards: string;
   returnedMeters: string; returnedBoards: string;
@@ -138,8 +143,9 @@ export class ReturnableService {
         originalLineId: l.id,
         productVariantId: l.productVariantId,
         productCode: l.productVariant?.sku?.code ?? null,
-        productName: l.productVariant?.sku?.colorNameAr ?? null,
-        sizeLabel: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(2) : null,
+        colorName: l.productVariant?.sku?.colorNameAr ?? null,
+        currentVariantSize: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(4) : null,
+        historicalBoardSize: !legacyAmbiguous && originalBoards.gt(0) ? originalMeters.div(originalBoards).toFixed(4) : null,
         unitLabel: l.unitLabel,
         lengthM: l.lengthM != null ? new Decimal(l.lengthM.toString()).toFixed(4) : null,
         widthM: l.widthM != null ? new Decimal(l.widthM.toString()).toFixed(4) : null,
@@ -208,8 +214,10 @@ export class ReturnableService {
         originalLineId: l.id,
         productVariantId: l.productVariantId,
         productCode: l.productVariant?.sku?.code ?? null,
-        productName: l.productVariant?.sku?.colorNameAr ?? null,
-        sizeLabel: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(2) : null,
+        colorName: l.productVariant?.sku?.colorNameAr ?? null,
+        currentVariantSize: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(4) : null,
+        // Purchase lines persist metersQuantity + boardsQuantity → historical board area is exact.
+        historicalBoardSize: originalBoards.gt(0) ? originalMeters.div(originalBoards).toFixed(4) : null,
         unitLabel: l.unitLabel ?? "متر",
         lengthM: l.lengthM != null ? new Decimal(l.lengthM.toString()).toFixed(4) : null,
         widthM: l.widthM != null ? new Decimal(l.widthM.toString()).toFixed(4) : null,

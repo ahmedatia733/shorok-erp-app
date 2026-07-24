@@ -9,10 +9,11 @@ export interface ReturnableLine {
   originalLineId: string;
   productVariantId: string;
   productCode: string | null;
-  productName: string | null;
-  sizeLabel: string | null;
+  colorName: string | null;            // color, not a product name
+  currentVariantSize: string | null;   // CURRENT master data (hint only)
+  historicalBoardSize: string | null;  // HISTORICAL effective board area
   unitLabel: string;
-  lengthM: string | null;
+  lengthM: string | null;              // HISTORICAL original dimensions
   widthM: string | null;
   originalMeters: string;
   originalBoards: string;
@@ -34,7 +35,8 @@ export interface SalesReturnable {
 }
 export interface PurchaseReturnableLine {
   originalLineId: string; productVariantId: string;
-  productCode: string | null; productName: string | null; sizeLabel: string | null; unitLabel: string;
+  productCode: string | null; colorName: string | null;
+  currentVariantSize: string | null; historicalBoardSize: string | null; unitLabel: string;
   lengthM: string | null; widthM: string | null;
   originalMeters: string; originalBoards: string; returnedMeters: string; returnedBoards: string;
   remainingMeters: string; remainingBoards: string;

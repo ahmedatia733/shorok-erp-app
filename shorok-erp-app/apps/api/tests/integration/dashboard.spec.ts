@@ -277,9 +277,17 @@ describe("dashboard", () => {
     expect(
       Number(aRes.body.stockSummary.boardsOnHand) + Number(bRes.body.stockSummary.boardsOnHand),
     ).toBeCloseTo(Number(res.body.stockSummary.boardsOnHand), 4);
-    // Supplier balance reflects the single purchase row
-    expect(res.body.supplierBalances).toHaveLength(1);
-    expect(res.body.supplierBalances[0].balance).toBe("1000.00");
+    // Supplier balance reflects the single purchase row. The dashboard lists
+    // EVERY active supplier with its latest running balance, and a seed
+    // migration (20260630060000_seed_supplier_mega_bond) adds "ميجا بوند" with a
+    // zero balance to every schema — so assert the meaningful invariant: exactly
+    // one NON-ZERO supplier balance, equal to 1000, rather than a stale
+    // "only one supplier exists" assumption that predates that seed.
+    const nonZeroSupplierBalances = res.body.supplierBalances.filter(
+      (s: { balance: string }) => Number(s.balance) !== 0,
+    );
+    expect(nonZeroSupplierBalances).toHaveLength(1);
+    expect(nonZeroSupplierBalances[0].balance).toBe("1000.00");
     // Low stock: branch B's 2 boards is below the 5-board threshold
     expect(res.body.lowStock.length).toBeGreaterThanOrEqual(1);
     expect(res.body.lowStock.some((r: { branchId: string }) => r.branchId === branchBId)).toBe(

@@ -39,11 +39,16 @@ export const ACCOUNTING_PERMISSIONS: Record<AccountingAction, Role[]> = {
 };
 
 /**
- * Returns (مردودات) capabilities — the documented source of truth for the
- * differentiated server-side access enforced by the return controllers'
- * `@Roles(...)`. VIEW is broad; CREATE/CONFIRM are accountant-level; CANCEL and
- * refunds are OWNER-only (destructive / money-out). Enforcement is server-side
- * in the RolesGuard + the per-request branch check — never UI-only.
+ * Returns (مردودات) — ROLE-BASED permission mapping (Option B). This is NOT a
+ * separate capability-enforcement layer: each named return action maps to the
+ * roles that may perform it, and enforcement happens through the SAME
+ * mechanism as the rest of the app — the `@Roles(...)` decorator + RolesGuard on
+ * the return controllers (OWNER always bypasses), plus the per-request branch
+ * check in the services. This map is the documented source of truth and backs
+ * GET /settings/permissions; it does not itself gate requests.
+ *
+ * Role mapping: VIEW is broad (incl. BRANCH_MANAGER); CREATE/CONFIRM are
+ * accountant-level; CANCEL and refunds are OWNER-only (destructive / money-out).
  */
 export type ReturnCapability =
   | "VIEW_SALES_RETURNS" | "CREATE_SALES_RETURNS" | "CONFIRM_SALES_RETURNS" | "CANCEL_SALES_RETURNS"

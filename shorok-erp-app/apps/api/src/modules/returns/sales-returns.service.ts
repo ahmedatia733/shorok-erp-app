@@ -4,7 +4,7 @@ import type {
   CreateSalesReturn, UpdateSalesReturn, ReturnQuery, PostingLine,
 } from "@shorok/shared";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
-import { BranchForbiddenError, NotFoundError, ValidationError } from "../../common/errors/api-errors";
+import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { AuditService } from "../audit/audit.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
@@ -37,9 +37,13 @@ export class SalesReturnsService {
     private readonly returnable: ReturnableService,
   ) {}
 
-  private assertBranch(user: AuthenticatedUser, branchId: string) {
+  // Every returns endpoint loads a resource by UUID first, so a branch the user
+  // cannot access is reported as NOT FOUND (404) — never leaking whether the
+  // invoice/return exists (§3). Explicit foreign branchId params are 403'd
+  // elsewhere by the global BranchScopeGuard.
+  private assertBranch(user: AuthenticatedUser, branchId: string, notFound: Record<string, unknown> = {}) {
     if (user.role !== "OWNER" && !user.allowedBranches.includes(branchId)) {
-      throw new BranchForbiddenError({ branchId });
+      throw new NotFoundError(notFound);
     }
   }
 

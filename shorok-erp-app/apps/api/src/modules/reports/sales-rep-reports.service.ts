@@ -29,6 +29,9 @@ export interface ReportFilters {
   productVariantId?: string;
   productCode?: string;
   productNameAr?: string;
+  // Server-side branch scope: when set (a non-OWNER), EVERY report query is
+  // restricted to these branch ids in SQL. undefined = OWNER (all branches).
+  allowedBranchIds?: string[];
 }
 
 // Shared metric expressions (all summed from sales_invoice_lines l joined to
@@ -59,6 +62,7 @@ export class SalesRepReportsService {
     ];
     if (f.salesRepresentativeId) parts.push(Prisma.sql`si.sales_representative_id = ${f.salesRepresentativeId}::uuid`);
     if (f.branchId)    parts.push(Prisma.sql`si.branch_id = ${f.branchId}::uuid`);
+    if (f.allowedBranchIds) parts.push(f.allowedBranchIds.length ? Prisma.sql`si.branch_id IN (${Prisma.join(f.allowedBranchIds.map((b) => Prisma.sql`${b}::uuid`))})` : Prisma.sql`false`);
     if (f.customerId)  parts.push(Prisma.sql`si.customer_id = ${f.customerId}::uuid`);
     if (f.productVariantId) parts.push(Prisma.sql`l.product_variant_id = ${f.productVariantId}::uuid`);
     if (f.productCode) parts.push(Prisma.sql`sku.code = ${f.productCode}`);
@@ -77,6 +81,7 @@ export class SalesRepReportsService {
     ];
     if (f.salesRepresentativeId) parts.push(Prisma.sql`sr.sales_representative_id = ${f.salesRepresentativeId}::uuid`);
     if (f.branchId)    parts.push(Prisma.sql`sr.branch_id = ${f.branchId}::uuid`);
+    if (f.allowedBranchIds) parts.push(f.allowedBranchIds.length ? Prisma.sql`sr.branch_id IN (${Prisma.join(f.allowedBranchIds.map((b) => Prisma.sql`${b}::uuid`))})` : Prisma.sql`false`);
     if (f.customerId)  parts.push(Prisma.sql`sr.customer_id = ${f.customerId}::uuid`);
     if (f.productVariantId) parts.push(Prisma.sql`rl.product_variant_id = ${f.productVariantId}::uuid`);
     if (f.productCode) parts.push(Prisma.sql`sku.code = ${f.productCode}`);
@@ -162,6 +167,22 @@ export class SalesRepReportsService {
     // Net confirmed sales returns (attributed to the ORIGINAL invoice's rep).
     const retMap = await this.returnsByKey(f, Prisma.raw("sr.sales_representative_id::text"));
     const reps = rows.map((r) => this.applyReturns(this.repRow(r), retMap.get(String(r.rep_id ?? ""))));
+    // Period-boundary correctness (§5): a rep with RETURNS but no SALES in the
+    // window (e.g. a March sale returned in April) must still appear — as a
+    // returns-only row (negative net). Include every returns rep missing above.
+    const salesRepKeys = new Set(rows.map((r) => String(r.rep_id ?? "")));
+    const missing = [...retMap.keys()].filter((k) => !salesRepKeys.has(k));
+    const missingRepIds = missing.filter((k) => k); // exclude the "no rep" bucket
+    const nameById = new Map<string, string>();
+    if (missingRepIds.length) {
+      const names = await this.prisma.$queryRaw<Array<{ id: string; name_ar: string }>>(Prisma.sql`
+        SELECT id::text AS id, name_ar FROM sales_representatives
+        WHERE id IN (${Prisma.join(missingRepIds.map((k) => Prisma.sql`${k}::uuid`))})`);
+      for (const n of names) nameById.set(n.id, n.name_ar);
+    }
+    for (const key of missing) {
+      reps.push(this.applyReturns(this.repRow({ rep_id: key || null, rep_name: nameById.get(key) ?? null }), retMap.get(key)));
+    }
     return { from: f.from, to: f.to, salesReturnsSupported: true, representatives: reps, totals: this.totalize(reps) };
   }
 
@@ -350,17 +371,52 @@ export class SalesRepReportsService {
       WHERE ${this.where(f)}
       ORDER BY si.invoice_date DESC, si.invoice_number DESC
     `);
+    // Design A (§5): CONFIRMED sales-return detail rows for the same filter, so
+    // the drill-down no longer shows raw sale lines without their returns. Each
+    // return row carries NEGATIVE net/COGS and reconciles to the netted
+    // aggregate (Σ SALE − Σ SALES_RETURN).
+    const retRows = await this.prisma.$queryRaw<any[]>(Prisma.sql`
+      SELECT sr.id AS return_id, sr.return_number::text AS return_number, sr.return_date::text AS return_date,
+             c.name_ar AS customer_name, b.name_ar AS branch_name, sku.code AS product_code,
+             rl.returned_boards AS boards, rl.returned_meters_quantity AS meters,
+             rl.return_net_ex_tax AS net, rl.return_cogs AS cogs
+      FROM sales_returns sr
+      JOIN sales_return_lines rl ON rl.sales_return_id = sr.id
+      JOIN product_variants v ON v.id = rl.product_variant_id
+      JOIN product_skus sku ON sku.id = v.sku_id
+      JOIN customers c ON c.id = sr.customer_id
+      JOIN branches b ON b.id = sr.branch_id
+      WHERE ${this.returnsWhere(f)}
+      ORDER BY sr.return_date DESC, sr.return_number DESC
+    `);
+    const saleLines = rows.map((r) => {
+      const net = this.num(r.net), cogs = this.num(r.cogs);
+      return {
+        kind: "SALE" as const,
+        invoiceId: r.invoice_id, documentNumber: r.invoice_number, date: r.invoice_date,
+        invoiceWebRoute: `/sales/invoices?open=${r.invoice_id}`,
+        customerName: r.customer_name, branchName: r.branch_name, productCode: r.product_code,
+        boards: this.num(r.boards, 4), meters: this.num(r.meters, 4), lineNet: net,
+        lineCogs: cogs, lineGrossProfit: new Decimal(net).minus(cogs).toFixed(2),
+      };
+    });
+    const returnLines = retRows.map((r) => {
+      const net = new Decimal(this.num(r.net)).negated(), cogs = new Decimal(this.num(r.cogs)).negated();
+      return {
+        kind: "SALES_RETURN" as const,
+        returnId: r.return_id, documentNumber: r.return_number, date: r.return_date,
+        returnWebRoute: `/sales/returns/${r.return_id}`,
+        customerName: r.customer_name, branchName: r.branch_name, productCode: r.product_code,
+        boards: new Decimal(this.num(r.boards, 4)).negated().toFixed(4), meters: new Decimal(this.num(r.meters, 4)).negated().toFixed(4),
+        lineNet: net.toFixed(2), lineCogs: cogs.toFixed(2), lineGrossProfit: net.minus(cogs).toFixed(2),
+      };
+    });
+    const netNet = saleLines.reduce((a, r) => a.plus(r.lineNet), new Decimal(0)).plus(returnLines.reduce((a, r) => a.plus(r.lineNet), new Decimal(0)));
+    const netCogs = saleLines.reduce((a, r) => a.plus(r.lineCogs), new Decimal(0)).plus(returnLines.reduce((a, r) => a.plus(r.lineCogs), new Decimal(0)));
     return {
-      lines: rows.map((r) => {
-        const net = this.num(r.net), cogs = this.num(r.cogs);
-        return {
-          invoiceId: r.invoice_id, invoiceNumber: r.invoice_number, invoiceDate: r.invoice_date,
-          invoiceWebRoute: `/sales/invoices?open=${r.invoice_id}`,
-          customerName: r.customer_name, branchName: r.branch_name, productCode: r.product_code,
-          boards: this.num(r.boards, 4), meters: this.num(r.meters, 4), lineNet: net,
-          lineCogs: cogs, lineGrossProfit: new Decimal(net).minus(cogs).toFixed(2),
-        };
-      }),
+      salesReturnsSupported: true,
+      lines: [...saleLines, ...returnLines],
+      totals: { netSales: netNet.toFixed(2), netCogs: netCogs.toFixed(2), netGrossProfit: netNet.minus(netCogs).toFixed(2) },
     };
   }
 

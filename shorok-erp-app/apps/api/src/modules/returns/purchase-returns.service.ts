@@ -4,7 +4,7 @@ import type {
   CreatePurchaseReturn, UpdatePurchaseReturn, ReturnQuery, PostingLine,
 } from "@shorok/shared";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
-import { BranchForbiddenError, NotFoundError, ValidationError } from "../../common/errors/api-errors";
+import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { AuditService } from "../audit/audit.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
@@ -38,9 +38,11 @@ export class PurchaseReturnsService {
     private readonly returnable: ReturnableService,
   ) {}
 
-  private assertBranch(user: AuthenticatedUser, branchId: string) {
+  // Non-owner access to a branch outside allowedBranches → 404 (no existence
+  // leak); explicit foreign branchId params are 403'd by the global guard (§3).
+  private assertBranch(user: AuthenticatedUser, branchId: string, notFound: Record<string, unknown> = {}) {
     if (user.role !== "OWNER" && !user.allowedBranches.includes(branchId)) {
-      throw new BranchForbiddenError({ branchId });
+      throw new NotFoundError(notFound);
     }
   }
 
