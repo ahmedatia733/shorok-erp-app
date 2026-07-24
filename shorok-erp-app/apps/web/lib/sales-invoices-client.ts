@@ -61,6 +61,7 @@ export interface SalesInvoicePage {
 export const listSalesInvoices = (params: {
   customerId?: string;
   status?: string;
+  q?: string;
   from?: string;
   to?: string;
   cursor?: string | null;
@@ -70,6 +71,7 @@ export const listSalesInvoices = (params: {
   if (params.limit) p.set("limit", String(params.limit));
   if (params.customerId) p.set("customerId", params.customerId);
   if (params.status) p.set("status", params.status);
+  if (params.q) p.set("q", params.q);
   if (params.from) p.set("from", params.from);
   if (params.to) p.set("to", params.to);
   if (params.cursor) p.set("cursor", params.cursor);

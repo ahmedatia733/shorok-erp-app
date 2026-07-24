@@ -67,6 +67,7 @@ export const listPurchaseInvoices = (params: {
   supplierId?: string;
   branchId?: string;
   status?: string;
+  q?: string;
   from?: string;
   to?: string;
   cursor?: string | null;
@@ -74,6 +75,7 @@ export const listPurchaseInvoices = (params: {
 }) => {
   const p = new URLSearchParams();
   if (params.limit) p.set("limit", String(params.limit));
+  if (params.q) p.set("q", params.q);
   if (params.supplierId) p.set("supplierId", params.supplierId);
   if (params.branchId) p.set("branchId", params.branchId);
   if (params.status) p.set("status", params.status);

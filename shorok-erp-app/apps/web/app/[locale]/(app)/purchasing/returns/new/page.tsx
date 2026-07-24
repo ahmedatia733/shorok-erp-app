@@ -30,17 +30,17 @@ export default function NewPurchaseReturnPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Server-side search (§14) — re-query as the user types.
   useEffect(() => {
-    void listPurchaseInvoices({ status: "CONFIRMED", limit: 100 })
-      .then((r) => setInvoices(r.data))
-      .catch((e) => setError((e as Error).message));
-  }, []);
+    const handle = setTimeout(() => {
+      void listPurchaseInvoices({ status: "CONFIRMED", q: q.trim() || undefined, limit: 25 })
+        .then((r) => setInvoices(r.data))
+        .catch((e) => setError((e as Error).message));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [q]);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return invoices.slice(0, 20);
-    return invoices.filter((i) => i.invoiceNumber.toLowerCase().includes(s) || (i.supplierNameAr ?? "").toLowerCase().includes(s)).slice(0, 20);
-  }, [q, invoices]);
+  const filtered = invoices;
 
   const pick = async (inv: PurchaseInvoiceRow) => {
     setError(null); setSelected(inv); setRet(null); setQty({});
@@ -109,10 +109,15 @@ export default function NewPurchaseReturnPage() {
             <CardBody>
               <p className="mb-2 text-sm text-muted">تأكد من توفر المخزون قبل التأكيد.</p>
               <Table>
-                <THead><TR><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR></THead>
+                <THead><TR><TH>الكود</TH><TH>الصنف/اللون</TH><TH>المقاس</TH><TH>الأبعاد</TH><TH>ألواح أصلية</TH><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR></THead>
                 <TBody>
                   {ret.lines.map((l) => (
                     <TR key={l.originalLineId}>
+                      <TD>{l.productCode ?? "—"}</TD>
+                      <TD>{l.productName ?? "—"}</TD>
+                      <TD>{l.sizeLabel ?? "—"}</TD>
+                      <TD>{l.lengthM ? `${D(l.lengthM).toFixed(2)}${l.widthM ? " × " + D(l.widthM).toFixed(2) : ""}` : "—"}</TD>
+                      <TD>{D(l.originalBoards).toFixed(2)}</TD>
                       <TD>{D(l.originalMeters).toFixed(2)}</TD>
                       <TD>{D(l.returnedMeters).toFixed(2)}</TD>
                       <TD>{D(l.remainingMeters).toFixed(2)}</TD>
@@ -140,11 +145,10 @@ export default function NewPurchaseReturnPage() {
               <div><div className="text-xs text-muted">الإجمالي / رصيد المورد</div><div className="font-semibold">{formatCurrency(preview.grand.toFixed(2), locale)}</div></div>
               <div><div className="text-xs text-muted">قيمة المخزون الخارج</div><div className="font-semibold">{formatCurrency(preview.net.toFixed(2), locale)}</div></div>
               <label className="col-span-2 text-sm">التسوية
+                {/* Cash/bank supplier refunds are not supported yet — only credit modes. */}
                 <select className="mt-1 w-full rounded-md border px-2 py-1" value={settlementMode} onChange={(e) => setSettlementMode(e.target.value)}>
                   <option value="KEEP_AS_SUPPLIER_CREDIT">رصيد دائن لدى المورد</option>
                   <option value="OFFSET_OUTSTANDING_BALANCE">تسوية رصيد مستحق</option>
-                  <option value="CASH_REFUND">استرداد نقدي</option>
-                  <option value="BANK_REFUND">استرداد بنكي</option>
                 </select>
               </label>
               <label className="text-sm">تاريخ المردود<Input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} /></label>

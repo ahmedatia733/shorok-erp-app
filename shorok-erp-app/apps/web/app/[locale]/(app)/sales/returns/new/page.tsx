@@ -30,17 +30,18 @@ export default function NewSalesReturnPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // SERVER-SIDE search (§14): re-query the API as the user types (debounced),
+  // so any confirmed invoice is findable — not just a first client-side page.
   useEffect(() => {
-    void listSalesInvoices({ status: "CONFIRMED", limit: 100 })
-      .then((r) => setInvoices(r.data))
-      .catch((e) => setError((e as Error).message));
-  }, []);
+    const handle = setTimeout(() => {
+      void listSalesInvoices({ status: "CONFIRMED", q: q.trim() || undefined, limit: 25 })
+        .then((r) => setInvoices(r.data))
+        .catch((e) => setError((e as Error).message));
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [q]);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return invoices.slice(0, 20);
-    return invoices.filter((i) => i.invoiceNumber.includes(s) || (i.customer?.nameAr ?? "").toLowerCase().includes(s)).slice(0, 20);
-  }, [q, invoices]);
+  const filtered = invoices;
 
   const pickInvoice = async (inv: SalesInvoiceRow) => {
     setError(null); setSelected(inv); setRet(null); setQty({});
@@ -116,23 +117,32 @@ export default function NewSalesReturnPage() {
               <p className="text-sm text-muted">حالة الارتجاع: {ret.invoice.returnStatus === "NONE" ? "لا يوجد" : ret.invoice.returnStatus === "PARTIAL" ? "جزئي" : "كامل"}</p>
               <Table>
                 <THead>
-                  <TR><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR>
+                  <TR><TH>الكود</TH><TH>الصنف/اللون</TH><TH>المقاس</TH><TH>الأبعاد</TH><TH>ألواح أصلية</TH><TH>الأصلي (م²)</TH><TH>مرتجع سابقاً</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH></TR>
                 </THead>
                 <TBody>
                   {ret.lines.map((l) => (
                     <TR key={l.originalLineId}>
-                      <TD>{D(l.originalMeters).toFixed(2)}</TD>
+                      <TD>{l.productCode ?? "—"}</TD>
+                      <TD>{l.productName ?? "—"}</TD>
+                      <TD>{l.sizeLabel ?? "—"}</TD>
+                      <TD>{l.lengthM ? `${D(l.lengthM).toFixed(2)}${l.widthM ? " × " + D(l.widthM).toFixed(2) : ""}` : "—"}</TD>
+                      <TD>{D(l.originalBoards).toFixed(2)}</TD>
+                      <TD>{l.legacyAmbiguous ? "—" : D(l.originalMeters).toFixed(2)}</TD>
                       <TD>{D(l.returnedMeters).toFixed(2)}</TD>
-                      <TD>{D(l.remainingMeters).toFixed(2)}</TD>
+                      <TD>{l.legacyAmbiguous ? "—" : D(l.remainingMeters).toFixed(2)}</TD>
                       <TD>{formatCurrency(l.originalUnitPrice, locale)}</TD>
-                      <TD style={{ maxWidth: 120 }}>
-                        <Input inputMode="decimal" value={qty[l.originalLineId]?.meters ?? ""} placeholder="0"
-                          onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { meters: e.target.value, boards: s[l.originalLineId]?.boards ?? "" } }))} />
+                      <TD colSpan={l.legacyAmbiguous ? 2 : 1} style={{ maxWidth: 160 }}>
+                        {l.legacyAmbiguous
+                          ? <span className="text-xs text-amber-600">كمية أمتار غير قابلة للتحديد لهذا السطر (فاتورة قديمة) — لا يمكن إرجاعه</span>
+                          : <Input inputMode="decimal" value={qty[l.originalLineId]?.meters ?? ""} placeholder="0"
+                              onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { meters: e.target.value, boards: s[l.originalLineId]?.boards ?? "" } }))} />}
                       </TD>
-                      <TD style={{ maxWidth: 100 }}>
-                        <Input inputMode="decimal" value={qty[l.originalLineId]?.boards ?? ""} placeholder="تلقائي"
-                          onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { meters: s[l.originalLineId]?.meters ?? "", boards: e.target.value } }))} />
-                      </TD>
+                      {!l.legacyAmbiguous && (
+                        <TD style={{ maxWidth: 100 }}>
+                          <Input inputMode="decimal" value={qty[l.originalLineId]?.boards ?? ""} placeholder="تلقائي"
+                            onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { meters: s[l.originalLineId]?.meters ?? "", boards: e.target.value } }))} />
+                        </TD>
+                      )}
                     </TR>
                   ))}
                 </TBody>
@@ -148,11 +158,10 @@ export default function NewSalesReturnPage() {
               <div><div className="text-xs text-muted">الإجمالي / رصيد العميل</div><div className="font-semibold">{formatCurrency(preview.grand.toFixed(2), locale)}</div></div>
               <div><div className="text-xs text-muted">عكس التكلفة (COGS)</div><div className="font-semibold">{formatCurrency(preview.cogs.toFixed(2), locale)}</div></div>
               <label className="col-span-2 text-sm">التسوية
+                {/* Cash/bank refunds are not supported yet (no customer-refund voucher) — only credit modes. */}
                 <select className="mt-1 w-full rounded-md border px-2 py-1" value={settlementMode} onChange={(e) => setSettlementMode(e.target.value)}>
                   <option value="KEEP_AS_CUSTOMER_CREDIT">رصيد دائن للعميل</option>
                   <option value="OFFSET_OUTSTANDING_BALANCE">تسوية رصيد مستحق</option>
-                  <option value="CASH_REFUND">رد نقدي</option>
-                  <option value="BANK_REFUND">رد بنكي</option>
                 </select>
               </label>
               <label className="text-sm">تاريخ المردود

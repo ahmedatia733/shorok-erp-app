@@ -36,6 +36,7 @@ import {
   type SalesInvoiceDetail,
 } from "../../../../../lib/sales-invoices-client";
 import { downloadInvoicePdf } from "../../../../../lib/invoice-pdf-client";
+import { RelatedReturns } from "../../../../../components/returns/related-returns";
 import { listCustomers, createCustomer, type CustomerRow } from "../../../../../lib/customers-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
 import { listRepresentatives, type SalesRepresentative } from "../../../../../lib/sales-representatives-client";
@@ -1131,6 +1132,24 @@ export default function SalesInvoicesPage() {
     setExpandedIds((prev) => new Set(prev).add(inv.id));
   }
 
+  // Deep-link support: /sales/invoices?open=<id> auto-expands that invoice
+  // (used by return documents' "back to original invoice" links, §12).
+  useEffect(() => {
+    const openId = new URLSearchParams(window.location.search).get("open");
+    if (!openId || expandedIds.has(openId) || expandedDetails[openId]) return;
+    const inv = invoices.find((i) => i.id === openId);
+    if (inv) void toggleExpand(inv);
+    else {
+      void getSalesInvoice(openId)
+        .then((detail) => {
+          setExpandedDetails((prev) => ({ ...prev, [openId]: detail }));
+          setExpandedIds((prev) => new Set(prev).add(openId));
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices]);
+
   async function handleCancel(id: string) {
     try {
       await cancelSalesInvoice(id);
@@ -1390,6 +1409,11 @@ export default function SalesInvoicesPage() {
                             <TD colSpan={9} className="p-0">
                               <div className="border-t">
                                 <ExpandedRow invoice={detail} locale={locale} />
+                                {inv.status === "CONFIRMED" && (
+                                  <div className="px-3 pb-2 no-print" dir="rtl">
+                                    <RelatedReturns invoiceId={inv.id} kind="sales" />
+                                  </div>
+                                )}
                                 <div className="p-3 no-print flex flex-wrap items-center gap-2" dir="rtl">
                                   <button
                                     type="button"
