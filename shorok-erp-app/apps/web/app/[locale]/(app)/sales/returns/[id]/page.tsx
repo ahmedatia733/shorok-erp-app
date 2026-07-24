@@ -17,7 +17,7 @@ import { getSalesReturn, getSalesReturnable, confirmSalesReturn, cancelSalesRetu
 const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", CANCELLED: "ملغي" };
 const D = (v: string | number) => Number(v || "0");
 
-type LineEntry = { meters: string; boards: string; note: string };
+type LineEntry = { meters: string; boards: string; reason: string; note: string };
 
 export default function SalesReturnDetailPage() {
   const locale = useLocale() as AppLocale;
@@ -59,7 +59,7 @@ export default function SalesReturnDetailPage() {
       const r = await getSalesReturnable(row.originalSalesInvoiceId);
       setRet(r);
       const pre: Record<string, LineEntry> = {};
-      for (const l of row.lines ?? []) pre[l.originalSalesInvoiceLineId] = { meters: String(D(l.returnedMetersQuantity)), boards: String(D(l.returnedBoards)), note: l.note ?? "" };
+      for (const l of row.lines ?? []) pre[l.originalSalesInvoiceLineId] = { meters: String(D(l.returnedMetersQuantity)), boards: String(D(l.returnedBoards)), reason: l.reason ?? "", note: l.note ?? "" };
       setQty(pre);
       setEditDate(row.returnDate.slice(0, 10));
       setEditReason(row.reason ?? "");
@@ -91,9 +91,11 @@ export default function SalesReturnDetailPage() {
       originalSalesInvoiceLineId: l.originalLineId,
       returnedMeters: qty[l.originalLineId]?.meters ?? "0",
       returnedBoards: qty[l.originalLineId]?.boards || undefined,
-      note: qty[l.originalLineId]?.note || undefined,
+      // Text fields are sent VERBATIM (empty string = deliberate clear, §3).
+      reason: qty[l.originalLineId]?.reason ?? "",
+      note: qty[l.originalLineId]?.note ?? "",
     }));
-    await act(async () => { await updateSalesReturn(row.id, { returnDate: editDate, reason: editReason || undefined, notes: editNotes || undefined, lines }); setEditing(false); });
+    await act(async () => { await updateSalesReturn(row.id, { returnDate: editDate, reason: editReason, notes: editNotes, lines }); setEditing(false); });
   };
 
   if (!row) return <div dir="rtl" className="p-4">{error ? <Alert variant="error">{error}</Alert> : "جارٍ التحميل…"}</div>;
@@ -122,7 +124,7 @@ export default function SalesReturnDetailPage() {
             </div>
             <div className="overflow-x-auto">
               <Table>
-                <THead><TR><TH>الكود</TH><TH>اللون</TH><TH>الأصلي (م²)</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH><TH>ملاحظة السطر</TH></TR></THead>
+                <THead><TR><TH>الكود</TH><TH>اللون</TH><TH>الأصلي (م²)</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH><TH>سبب السطر</TH><TH>ملاحظة السطر</TH></TR></THead>
                 <TBody>
                   {ret.lines.map((l) => {
                     const err = lineError(l);
@@ -137,15 +139,18 @@ export default function SalesReturnDetailPage() {
                           {l.legacyAmbiguous
                             ? <span className="text-xs text-amber-600">غير قابل للإرجاع</span>
                             : <>
-                                <Input inputMode="decimal" max={l.remainingMeters} value={qty[l.originalLineId]?.meters ?? ""} onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { boards: "", note: "" }), meters: e.target.value } }))} />
+                                <Input inputMode="decimal" max={l.remainingMeters} value={qty[l.originalLineId]?.meters ?? ""} onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { boards: "", reason: "", note: "" }), meters: e.target.value } }))} />
                                 {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
                               </>}
                         </TD>
                         <TD style={{ maxWidth: 100 }}>
-                          <Input inputMode="decimal" max={l.remainingBoards} value={qty[l.originalLineId]?.boards ?? ""} placeholder="تلقائي" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", note: "" }), boards: e.target.value } }))} />
+                          <Input inputMode="decimal" max={l.remainingBoards} value={qty[l.originalLineId]?.boards ?? ""} placeholder="تلقائي" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", reason: "", note: "" }), boards: e.target.value } }))} />
                         </TD>
                         <TD style={{ maxWidth: 160 }}>
-                          <Input value={qty[l.originalLineId]?.note ?? ""} placeholder="اختياري" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", boards: "" }), note: e.target.value } }))} />
+                          <Input value={qty[l.originalLineId]?.reason ?? ""} placeholder="سبب اختياري" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", boards: "", note: "" }), reason: e.target.value } }))} />
+                        </TD>
+                        <TD style={{ maxWidth: 160 }}>
+                          <Input value={qty[l.originalLineId]?.note ?? ""} placeholder="ملاحظة اختيارية" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", boards: "", reason: "" }), note: e.target.value } }))} />
                         </TD>
                       </TR>
                     );
@@ -182,7 +187,7 @@ export default function SalesReturnDetailPage() {
             <CardHeader><CardTitle>الأسطر</CardTitle></CardHeader>
             <CardBody className="overflow-x-auto">
               <Table>
-                <THead><TR><TH>الألواح</TH><TH>الأمتار (م²)</TH><TH>سعر المتر</TH><TH>الصافي</TH><TH>الضريبة</TH><TH>الإجمالي</TH>{canFinancials && <TH>عكس التكلفة</TH>}<TH>ملاحظة</TH></TR></THead>
+                <THead><TR><TH>الألواح</TH><TH>الأمتار (م²)</TH><TH>سعر المتر</TH><TH>الصافي</TH><TH>الضريبة</TH><TH>الإجمالي</TH>{canFinancials && <TH>عكس التكلفة</TH>}<TH>السبب</TH><TH>ملاحظة</TH></TR></THead>
                 <TBody>
                   {(row.lines ?? []).map((l) => (
                     <TR key={l.id}>
@@ -193,6 +198,7 @@ export default function SalesReturnDetailPage() {
                       <TD>{formatCurrency(l.returnTax, locale)}</TD>
                       <TD>{formatCurrency(l.returnTotal, locale)}</TD>
                       {canFinancials && <TD>{formatCurrency(l.returnCogs, locale)}</TD>}
+                      <TD>{l.reason ?? "—"}</TD>
                       <TD>{l.note ?? "—"}</TD>
                     </TR>
                   ))}
