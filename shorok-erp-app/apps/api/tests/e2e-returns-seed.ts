@@ -25,6 +25,7 @@ export const PASSWORD = "E2eOwner@2026";
 export const OWNER_PHONE = "+201555000099";
 export const ACCOUNTANT_PHONE = "+201555000098";
 export const MANAGER_PHONE = "+201555000097";
+export const BRANCH_B_PHONE = "+201555000096";
 
 async function main() {
   await prisma.$executeRawUnsafe(`DO $$ DECLARE r RECORD; BEGIN
@@ -38,6 +39,11 @@ async function main() {
   const accountant = await prisma.user.create({ data: { name: "محاسب الاختبار", phone: ACCOUNTANT_PHONE, passwordHash: hash, role: "ACCOUNTANT", status: "ACTIVE" } });
   const manager = await prisma.user.create({ data: { name: "مدير الفرع", phone: MANAGER_PHONE, passwordHash: hash, role: "BRANCH_MANAGER", status: "ACTIVE" } });
   for (const uid of [accountant.id, manager.id]) await prisma.userBranchAccess.create({ data: { userId: uid, branchId: branch.id } });
+  // A SECOND branch and a user scoped ONLY to it — used to prove that a deep
+  // link to a REAL branch-A invoice leaks nothing to a branch-B user (§4).
+  const branchB = await prisma.branch.create({ data: { nameAr: "فرع ب", nameEn: "Branch B", active: true } });
+  const branchBUser = await prisma.user.create({ data: { name: "محاسب فرع ب", phone: BRANCH_B_PHONE, passwordHash: hash, role: "ACCOUNTANT", status: "ACTIVE" } });
+  await prisma.userBranchAccess.create({ data: { userId: branchBUser.id, branchId: branchB.id } });
 
   const customer = await prisma.customer.create({ data: { code: "E2E-CUST", nameAr: "عميل الاختبار" } });
   const supplier = await prisma.supplier.create({ data: { nameAr: "مورد الاختبار", nameEn: "Test Supplier" } });
@@ -124,6 +130,17 @@ async function main() {
     } });
     purchaseIds.push(p.id);
   }
+  // A SECOND stocked purchase (own variant + stock) so the ACCOUNTANT purchase
+  // flow never contends with the OWNER flow's fixture (§5).
+  const skuP2 = await prisma.productSku.create({ data: { code: "E2E-GRN", category: "NORMAL", colorNameAr: "أخضر", colorNameEn: "Green" } });
+  const vP2 = await prisma.productVariant.create({ data: { skuId: skuP2.id, sizeMetersPerBoard: "4.0000", defaultSalePricePerMeter: "500", defaultPurchasePricePerMeter: "400", avgCost: "1600", avgCostPerMeter: "400" } });
+  await prisma.branchInventoryBalance.create({ data: { branchId: branch.id, productVariantId: vP2.id, boardsOnHand: "10.0000", metersOnHand: "40.0000" } });
+  const stockedPurchase2 = await prisma.purchaseInvoice.create({ data: {
+    invoiceNumber: "PINV-E2E-ACCT", invoiceDate: new Date("2026-02-16"), supplierId: supplier.id, branchId: branch.id, status: "CONFIRMED",
+    subtotal: "16000.00", taxAmount: "0", grandTotal: "16000.00", createdBy: owner.id,
+    lines: { create: [{ productVariantId: vP2.id, boardsQuantity: "10", metersQuantity: "40.0000", unitPrice: "400.00", lineTotal: "16000.00", taxRate: "0", taxAmount: "0", unitCostAtPosting: "1600.00", taxRateAtPosting: "0" }] },
+  } });
+
   const oldPurchaseId = purchaseIds[0]; // 2026-01-01 — OFF page 1
   // Pre-made CONFIRMED purchase return on the OLDEST purchase (deep-link display).
   const oldPurchaseLine = (await prisma.purchaseInvoiceLine.findFirst({ where: { invoiceId: oldPurchaseId } }))!;
@@ -132,6 +149,16 @@ async function main() {
     returnDate: new Date("2026-01-03"), status: "CONFIRMED", settlementMode: "KEEP_AS_SUPPLIER_CREDIT",
     subtotal: "1600.00", taxTotal: "0", grandTotal: "1600.00", inventoryValueOut: "1600.00", confirmedAt: new Date(), confirmedBy: owner.id, createdBy: owner.id,
     lines: { create: [{ originalPurchaseInvoiceLineId: oldPurchaseLine.id, productVariantId: vP.id, returnedBoards: "1.0000", returnedMetersQuantity: "4.0000", originalPurchasePricePerMeter: "400.00", originalTaxRate: "0", returnNetExTax: "1600.00", returnTax: "0", returnTotal: "1600.00", historicalInventoryCostPerMeter: "400.0000", inventoryValueOut: "1600.00" }] },
+  } });
+
+  // A DRAFT PURCHASE return so the BRANCH_MANAGER can VIEW one and we can assert
+  // it exposes NO edit/confirm/cancel buttons on the purchase side (§5).
+  const pMgrLine = (await prisma.purchaseInvoiceLine.findFirst({ where: { invoiceId: purchaseIds[5] } }))!;
+  const purchaseManagerDraft = await prisma.purchaseReturn.create({ data: {
+    originalPurchaseInvoiceId: purchaseIds[5], supplierId: supplier.id, branchId: branch.id,
+    returnDate: new Date("2026-01-06"), status: "DRAFT", settlementMode: "KEEP_AS_SUPPLIER_CREDIT",
+    subtotal: "1600.00", taxTotal: "0", grandTotal: "1600.00", inventoryValueOut: "1600.00", createdBy: owner.id,
+    lines: { create: [{ originalPurchaseInvoiceLineId: pMgrLine.id, productVariantId: vP.id, returnedBoards: "1.0000", returnedMetersQuantity: "4.0000", originalPurchasePricePerMeter: "400.00", originalTaxRate: "0", returnNetExTax: "1600.00", returnTax: "0", returnTotal: "1600.00", historicalInventoryCostPerMeter: "400.0000", inventoryValueOut: "1600.00" }] },
   } });
 
   const num = async (id: string) => (await prisma.salesInvoice.findUnique({ where: { id }, select: { invoiceNumber: true } }))!.invoiceNumber.toString();
@@ -145,6 +172,9 @@ async function main() {
     legacySaleId: legacy.id, legacySaleNumber: await num(legacy.id),
     managerDraftReturnId: managerDraft.id,
     oldPurchaseId, stockedPurchaseId: stockedPurchase.id, stockedPurchaseNumber: "PINV-E2E-STOCK",
+    stockedPurchase2Id: stockedPurchase2.id, stockedPurchase2Number: "PINV-E2E-ACCT",
+    purchaseManagerDraftReturnId: purchaseManagerDraft.id,
+    branchBPhone: BRANCH_B_PHONE, branchBId: branchB.id,
   };
   writeFileSync("/tmp/shorok-e2e-fixture.json", JSON.stringify(fixture, null, 2));
   // eslint-disable-next-line no-console

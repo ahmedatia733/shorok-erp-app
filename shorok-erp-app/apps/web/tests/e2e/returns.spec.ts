@@ -146,6 +146,63 @@ test.describe("returns — permissions (§11/§12)", () => {
   });
 });
 
+test.describe("returns — REAL foreign-branch deep links (§4)", () => {
+  // A branch-B user deep-linking to an EXISTING branch-A invoice must see the
+  // Arabic not-found/outside-permission notice and NO invoice data at all.
+  test("4a: branch-B user cannot open an EXISTING branch-A SALES invoice", async ({ page }) => {
+    await login(page, F.branchBPhone);
+    await page.goto(`/ar/sales/invoices?open=${F.oldSaleId}`);
+    await expect(page.getByText("الفاتورة المطلوبة غير موجودة أو خارج صلاحيتك.")).toBeVisible({ timeout: 15000 });
+    // No leaked INVOICE identity, totals or related documents. (Customers are
+    // global master data and legitimately appear in the page's filter dropdown,
+    // so the invoice's own identity is what must be absent.)
+    await expect(page.getByText(`SI-${F.oldSaleNumber}`, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("row", { name: new RegExp(`SI-${F.oldSaleNumber}\\b`) })).toHaveCount(0);
+    await expect(page.getByText("المستندات المرتبطة — المردودات")).toHaveCount(0);
+  });
+
+  test("4b: branch-B user cannot open an EXISTING branch-A PURCHASE invoice", async ({ page }) => {
+    await login(page, F.branchBPhone);
+    await page.goto(`/ar/purchasing/invoices?open=${F.oldPurchaseId}`);
+    await expect(page.getByText("فاتورة الشراء المطلوبة غير موجودة أو خارج صلاحيتك.")).toBeVisible({ timeout: 15000 });
+    // The branch-A purchase invoice's own number must not appear anywhere.
+    await expect(page.getByText("PINV-E2E-01", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("المستندات المرتبطة — المردودات")).toHaveCount(0);
+  });
+});
+
+test.describe("returns — purchase UI permissions (§5)", () => {
+  test("5a: BRANCH_MANAGER views a purchase draft with NO edit/confirm/cancel, no create, blocked new page", async ({ page }) => {
+    await login(page, F.managerPhone);
+    await page.goto(`/ar/purchasing/returns/${F.purchaseManagerDraftReturnId}`);
+    await expect(page.getByText("مسودة").first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("button", { name: "تعديل" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "تأكيد المردود" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "إلغاء المردود" })).toHaveCount(0);
+    await page.goto("/ar/purchasing/returns");
+    await expect(page.getByRole("link", { name: "مردود جديد" })).toHaveCount(0);
+    await page.goto("/ar/purchasing/returns/new");
+    await expect(page.getByText("غير مصرح لك بإنشاء مردود")).toBeVisible({ timeout: 10000 });
+  });
+
+  test("5b: ACCOUNTANT can edit+confirm a purchase return but has NO cancel button", async ({ page }) => {
+    await login(page, F.accountantPhone);
+    await page.goto("/ar/purchasing/returns/new");
+    await page.getByPlaceholder("رقم الفاتورة أو اسم المورد").fill(F.stockedPurchase2Number);
+    await page.getByRole("button", { name: "اختيار" }).first().click();
+    await page.getByPlaceholder("0").first().fill("4");
+    await page.getByPlaceholder("تلقائي").first().fill("1");
+    await page.getByRole("button", { name: "حفظ كمسودة" }).click();
+    await expect(page).toHaveURL(/\/purchasing\/returns\/[0-9a-f-]{36}/);
+    await page.getByRole("button", { name: "تعديل" }).click();
+    await page.getByRole("button", { name: "إلغاء التعديل" }).click();
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "تأكيد المردود" }).click();
+    await expect(page.getByText("مؤكد").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: "إلغاء المردود" })).toHaveCount(0);
+  });
+});
+
 test.describe("returns — purchase flow (§13/§14/§15)", () => {
   test.beforeEach(async ({ page }) => login(page, F.ownerPhone));
 
