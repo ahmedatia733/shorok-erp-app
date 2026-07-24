@@ -257,7 +257,7 @@ export class SalesInvoicesController {
 
   @Get(":id")
   @Roles("OWNER", "ACCOUNTANT")
-  async getOne(@Param("id") id: string) {
+  async getOne(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
     const inv = await this.prisma.salesInvoice.findUnique({
       where: { id },
       include: {
@@ -274,6 +274,9 @@ export class SalesInvoicesController {
       },
     });
     if (!inv) throw new NotFoundError({ id });
+    // Branch scope: a non-OWNER may only read invoices in their allowedBranches.
+    // Reported as NOT FOUND so a foreign id cannot be probed for existence.
+    if (user.role !== "OWNER" && !user.allowedBranches.includes(inv.branchId)) throw new NotFoundError({ id });
     return this.formatInvoice(inv, true);
   }
 
