@@ -42,7 +42,13 @@ export async function buildTestApp(
   app.useLogger(app.get(Logger));
   app.use(cookieParser());
   app.setGlobalPrefix("api/v1");
-  await app.init();
+  // Bind a real listening server ONCE (ephemeral port), instead of the bare
+  // app.init(). supertest reuses an already-listening server; without this it
+  // opens+closes a fresh ephemeral port for EVERY request, and across a full
+  // --runInBand run (thousands of listen/close cycles) that churn intermittently
+  // surfaces as `socket hang up` / spurious 4xx on unrelated suites. Pre-listening
+  // makes every request reuse one server. teardownTestApp's app.close() closes it.
+  await app.listen(0);
 
   const prisma = app.get(PrismaService);
 
