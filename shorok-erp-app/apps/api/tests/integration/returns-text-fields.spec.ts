@@ -126,16 +126,17 @@ describe("return text fields (§2/§3)", () => {
     expect(row.lines[0].reason).toBe("سبب سطر محدث");
     expect(row.lines[0].note).toBe("ملاحظة سطر محدثة");
 
-    // Omit header text → preserved.
+    // Omit header AND line text → BOTH preserved (the delete/recreate must not
+    // erase stored per-line text — §2).
     await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
       lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "4", returnedBoards: "1" }],
     });
     row = await getPurchase(created.body.id);
     expect(row.reason).toBe("سبب شراء محدث");
     expect(row.notes).toBe("ملاحظات شراء محدثة");
-    // A line whose text was omitted on recreation is stored as null.
-    expect(row.lines[0].reason).toBeNull();
-    expect(row.lines[0].note).toBeNull();
+    // Omitted line text is PRESERVED, not nulled.
+    expect(row.lines[0].reason).toBe("سبب سطر محدث");
+    expect(row.lines[0].note).toBe("ملاحظة سطر محدثة");
   });
 
   it("PURCHASE: empty/whitespace CLEARS all four to null", async () => {
@@ -152,6 +153,123 @@ describe("return text fields (§2/§3)", () => {
     const row = await getPurchase(created.body.id);
     expect(row.reason).toBeNull();
     expect(row.notes).toBeNull();
+    expect(row.lines[0].reason).toBeNull();
+    expect(row.lines[0].note).toBeNull();
+  });
+
+  // §2 — omitted per-line text must PRESERVE the stored value across the
+  // delete-and-recreate that a draft update / confirm performs. Covers A-E for
+  // both return types: (A) create with line reason+note, (B) update omitting
+  // them → preserved, (C) empty/whitespace → NULL, (D) new values →
+  // trimmed+separate, (E) a genuinely new line omitting text → NULL.
+  it("SALES §2: omitted line reason/note preserved; empty clears; new trimmed & separate", async () => {
+    // (A) create with line reason+note.
+    const created = await request(srv()).post("/api/v1/sales-returns").set(auth()).send({
+      originalSalesInvoiceId: saleId, returnDate: "2026-03-15",
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "4", returnedBoards: "1", reason: "  سبب باقٍ  ", note: "  ملاحظة باقية  " }],
+    });
+    expect(created.status).toBeLessThan(300);
+    let row = await getSale(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب باقٍ");
+    expect(row.lines[0].note).toBe("ملاحظة باقية");
+
+    // (B) update the line WITHOUT reason/note keys → both preserved.
+    await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5" }],
+    });
+    row = await getSale(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب باقٍ");
+    expect(row.lines[0].note).toBe("ملاحظة باقية");
+
+    // Mixed: omit reason (preserve), clear note (whitespace → null).
+    await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5", note: "   " }],
+    });
+    row = await getSale(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب باقٍ");
+    expect(row.lines[0].note).toBeNull();
+
+    // (C) empty reason → null (note already null).
+    await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "" }],
+    });
+    row = await getSale(created.body.id);
+    expect(row.lines[0].reason).toBeNull();
+
+    // (D) new values → trimmed + separate.
+    await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "  سبب جديد  ", note: "  ملاحظة جديدة  " }],
+    });
+    row = await getSale(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب جديد");
+    expect(row.lines[0].note).toBe("ملاحظة جديدة");
+    expect(row.lines[0].reason).not.toBe(row.lines[0].note);
+  });
+
+  it("PURCHASE §2: omitted line reason/note preserved; empty clears; new trimmed & separate", async () => {
+    // (A) create with line reason+note.
+    const created = await request(srv()).post("/api/v1/purchase-returns").set(auth()).send({
+      originalPurchaseInvoiceId: purchaseId, returnDate: "2026-03-16",
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "4", returnedBoards: "1", reason: "  سبب باقٍ  ", note: "  ملاحظة باقية  " }],
+    });
+    expect(created.status).toBeLessThan(300);
+    let row = await getPurchase(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب باقٍ");
+    expect(row.lines[0].note).toBe("ملاحظة باقية");
+
+    // (B) update WITHOUT reason/note → preserved.
+    await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5" }],
+    });
+    row = await getPurchase(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب باقٍ");
+    expect(row.lines[0].note).toBe("ملاحظة باقية");
+
+    // Mixed: omit reason (preserve), clear note.
+    await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5", note: "" }],
+    });
+    row = await getPurchase(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب باقٍ");
+    expect(row.lines[0].note).toBeNull();
+
+    // (C) empty reason → null.
+    await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "  " }],
+    });
+    row = await getPurchase(created.body.id);
+    expect(row.lines[0].reason).toBeNull();
+
+    // (D) new values → trimmed + separate.
+    await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "  سبب جديد  ", note: "  ملاحظة جديدة  " }],
+    });
+    row = await getPurchase(created.body.id);
+    expect(row.lines[0].reason).toBe("سبب جديد");
+    expect(row.lines[0].note).toBe("ملاحظة جديدة");
+    expect(row.lines[0].reason).not.toBe(row.lines[0].note);
+  });
+
+  // (E) a genuinely NEW line that omits text stores null (no prior value to
+  // preserve). Confirmed by the create paths above where omitted → null.
+  it("SALES §2(E): a newly created line that omits reason/note stores null", async () => {
+    const created = await request(srv()).post("/api/v1/sales-returns").set(auth()).send({
+      originalSalesInvoiceId: saleId, returnDate: "2026-03-17",
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "4", returnedBoards: "1" }],
+    });
+    expect(created.status).toBeLessThan(300);
+    const row = await getSale(created.body.id);
+    expect(row.lines[0].reason).toBeNull();
+    expect(row.lines[0].note).toBeNull();
+  });
+
+  it("PURCHASE §2(E): a newly created line that omits reason/note stores null", async () => {
+    const created = await request(srv()).post("/api/v1/purchase-returns").set(auth()).send({
+      originalPurchaseInvoiceId: purchaseId, returnDate: "2026-03-18",
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "4", returnedBoards: "1" }],
+    });
+    expect(created.status).toBeLessThan(300);
+    const row = await getPurchase(created.body.id);
     expect(row.lines[0].reason).toBeNull();
     expect(row.lines[0].note).toBeNull();
   });

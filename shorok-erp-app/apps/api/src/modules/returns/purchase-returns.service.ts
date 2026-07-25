@@ -13,7 +13,7 @@ import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 import { ReturnableService } from "./returnable.service";
 import { allocateReturn, type OriginalLineEconomics, type AlreadyReturned } from "./return-allocation";
-import { patchText, newText } from "./text-fields";
+import { patchText, newText, resolveLineText } from "./text-fields";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: unknown) => new Decimal((v as { toString(): string } | null)?.toString() ?? "0");
@@ -157,7 +157,13 @@ export class PurchaseReturnsService {
     });
   }
 
-  private lineData(b: Awaited<ReturnType<PurchaseReturnsService["buildLines"]>>["built"][number]) {
+  // `existing` is the PRIOR stored line (draft update / confirm recreate rows).
+  // Passing it lets an omitted line reason/note PRESERVE the stored value
+  // instead of erasing it. Omit it (create / new line) → omitted text is null.
+  private lineData(
+    b: Awaited<ReturnType<PurchaseReturnsService["buildLines"]>>["built"][number],
+    existing?: { reason: string | null; note: string | null },
+  ) {
     return {
       originalPurchaseInvoiceLineId: b.orig.originalLineId, productVariantId: b.orig.productVariantId,
       lengthM: b.orig.lengthM, widthM: b.orig.widthM,
@@ -167,7 +173,8 @@ export class PurchaseReturnsService {
       returnNetExTax: b.alloc.net.toFixed(2), returnTax: b.alloc.tax.toFixed(2), returnTotal: b.alloc.total.toFixed(2),
       historicalInventoryCostPerMeter: new Decimal(b.orig.originalUnitPrice).toFixed(4),
       inventoryValueOut: b.alloc.net.toFixed(2),
-      reason: newText(b.req.reason), note: newText(b.req.note),
+      reason: resolveLineText(b.req.reason, existing?.reason),
+      note: resolveLineText(b.req.note, existing?.note),
     };
   }
 
@@ -247,6 +254,9 @@ export class PurchaseReturnsService {
     const { built } = await this.buildLines(existing.originalPurchaseInvoiceId, reqLines);
     const t = this.totals(built);
 
+    // Prior stored line text, so omitted line reason/note are PRESERVED across
+    // the delete-and-recreate (§2).
+    const priorText = new Map(existing.lines.map((l) => [l.originalPurchaseInvoiceLineId, { reason: l.reason, note: l.note }]));
     return this.prisma.runInTransaction(async (tx) => {
       await tx.purchaseReturnLine.deleteMany({ where: { purchaseReturnId: id } });
       const ret = await tx.purchaseReturn.update({
@@ -257,7 +267,7 @@ export class PurchaseReturnsService {
           settlementMode: body.settlementMode ?? undefined,
           subtotal: t.subtotal.toFixed(2), taxTotal: t.taxTotal.toFixed(2),
           grandTotal: t.grandTotal.toFixed(2), inventoryValueOut: t.inventoryValueOut.toFixed(2),
-          lines: { create: built.map((b) => this.lineData(b)) },
+          lines: { create: built.map((b) => this.lineData(b, priorText.get(b.orig.originalLineId))) },
         },
         include: { lines: true },
       });
@@ -324,9 +334,11 @@ export class PurchaseReturnsService {
       });
 
       // Rewrite authoritative lines (with dimensions + correct tax snapshot).
+      // Preserve the persisted per-line reason/note (§2).
+      const priorText = new Map(pre.lines.map((l) => [l.originalPurchaseInvoiceLineId, { reason: l.reason, note: l.note }]));
       await tx.purchaseReturnLine.deleteMany({ where: { purchaseReturnId: id } });
       for (const b of built) {
-        await tx.purchaseReturnLine.create({ data: { purchaseReturnId: id, ...this.lineData(b) } });
+        await tx.purchaseReturnLine.create({ data: { purchaseReturnId: id, ...this.lineData(b, priorText.get(b.orig.originalLineId)) } });
       }
 
       const ret = await tx.purchaseReturn.update({

@@ -20,3 +20,16 @@ export const patchText = (v: string | null | undefined): string | null | undefin
 
 export const newText = (v: string | null | undefined): string | null =>
   (v ?? "").trim() || null;
+
+/**
+ * Resolve a per-line text field when a draft is updated by delete-and-recreate.
+ * Lines are physically replaced, so "preserve" must copy the PRIOR stored value:
+ *   req omitted (undefined) → the existing line's stored value (or null if new)
+ *   req empty / whitespace  → null (deliberate clear)
+ *   req non-empty           → trimmed
+ */
+export const resolveLineText = (
+  reqValue: string | null | undefined,
+  existingValue: string | null | undefined,
+): string | null =>
+  reqValue === undefined ? (existingValue ?? null) : newText(reqValue);

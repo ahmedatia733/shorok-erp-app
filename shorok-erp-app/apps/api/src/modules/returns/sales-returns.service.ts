@@ -13,7 +13,7 @@ import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 import { ReturnableService } from "./returnable.service";
 import { allocateReturn, zeroAlready, type OriginalLineEconomics, type AlreadyReturned } from "./return-allocation";
-import { patchText, newText } from "./text-fields";
+import { patchText, newText, resolveLineText } from "./text-fields";
 
 type Tx = Prisma.TransactionClient;
 const D = (v: unknown) => new Decimal((v as { toString(): string } | null)?.toString() ?? "0");
@@ -156,7 +156,14 @@ export class SalesReturnsService {
 
   /** SalesReturnLine create payload from a built item. Dimensions/snapshots come
    *  ONLY from the original invoice line (never the client) — §6. */
-  private lineCreateData(b: Awaited<ReturnType<SalesReturnsService["buildLines"]>>["built"][number]) {
+  // `existing` is the PRIOR stored line for this original invoice line (draft
+  // update recreates rows). Passing it lets an omitted line reason/note PRESERVE
+  // the stored value instead of erasing it. Omit it (create / genuinely new
+  // line) → omitted text becomes null.
+  private lineCreateData(
+    b: Awaited<ReturnType<SalesReturnsService["buildLines"]>>["built"][number],
+    existing?: { reason: string | null; note: string | null },
+  ) {
     const { req, orig, alloc } = b;
     return {
       originalSalesInvoiceLineId: orig.originalLineId,
@@ -175,8 +182,8 @@ export class SalesReturnsService {
       originalCostPerMeterAtPosting: orig.originalCostPerMeter,
       returnCogs: alloc.cogs.toFixed(2),
       inventoryDisposition: req.inventoryDisposition ?? "RETURN_TO_AVAILABLE_STOCK",
-      reason: newText(req.reason),
-      note: newText(req.note),
+      reason: resolveLineText(req.reason, existing?.reason),
+      note: resolveLineText(req.note, existing?.note),
     };
   }
 
@@ -308,6 +315,9 @@ export class SalesReturnsService {
     const { built } = await this.buildLines(existing.originalSalesInvoiceId, reqLines);
     const t = this.totals(built);
 
+    // Prior stored line text, so omitted line reason/note are PRESERVED across
+    // the delete-and-recreate (§2).
+    const priorText = new Map(existing.lines.map((l) => [l.originalSalesInvoiceLineId, { reason: l.reason, note: l.note }]));
     return this.prisma.runInTransaction(async (tx) => {
       await tx.salesReturnLine.deleteMany({ where: { salesReturnId: id } });
       const ret = await tx.salesReturn.update({
@@ -322,7 +332,7 @@ export class SalesReturnsService {
           taxTotal: t.taxTotal.toFixed(2),
           grandTotal: t.grandTotal.toFixed(2),
           cogsReversalTotal: t.cogsReversalTotal.toFixed(2),
-          lines: { create: built.map((b) => this.lineCreateData(b)) },
+          lines: { create: built.map((b) => this.lineCreateData(b, priorText.get(b.orig.originalLineId))) },
         },
         include: { lines: true },
       });
@@ -426,10 +436,13 @@ export class SalesReturnsService {
       //    deadlocks and lost updates.
       await this.applyReturnToStock(tx, built.map((b) => ({ variantId: b.orig.productVariantId, meters: b.alloc.meters, boards: b.alloc.boards, cogs: b.alloc.cogs })), pre.branchId, user, returnNumber, 1, pre.id);
 
-      // 4. Rewrite line snapshots to the authoritative (residual-corrected) values.
+      // 4. Rewrite line snapshots to the authoritative (residual-corrected)
+      //    values. Preserve the persisted per-line reason/note (§2) — confirm
+      //    recreates rows but must not erase text.
+      const priorText = new Map(pre.lines.map((l) => [l.originalSalesInvoiceLineId, { reason: l.reason, note: l.note }]));
       await tx.salesReturnLine.deleteMany({ where: { salesReturnId: id } });
       for (const b of built) {
-        await tx.salesReturnLine.create({ data: { salesReturnId: id, ...this.lineCreateData(b) } });
+        await tx.salesReturnLine.create({ data: { salesReturnId: id, ...this.lineCreateData(b, priorText.get(b.orig.originalLineId)) } });
       }
 
       // 5. Legacy customer statement row (credit) — reduces the customer's
