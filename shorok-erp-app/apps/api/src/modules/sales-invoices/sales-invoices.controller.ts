@@ -286,7 +286,7 @@ export class SalesInvoicesController {
 
   @Get(":id/pdf")
   @Roles("OWNER", "ACCOUNTANT")
-  async getPdf(@Param("id") id: string, @Res() res: Response) {
+  async getPdf(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
     const inv = await this.prisma.salesInvoice.findUnique({
       where: { id },
       include: {
@@ -303,6 +303,9 @@ export class SalesInvoicesController {
       },
     });
     if (!inv) throw new NotFoundError({ id });
+    // Branch scope: a non-OWNER may only render a PDF for invoices in their
+    // allowedBranches. 404 (not 403) = no existence leak, same as GET /:id.
+    if (user.role !== "OWNER" && !user.allowedBranches.includes(inv.branchId)) throw new NotFoundError({ id });
 
     const company = await this.prisma.companyProfile.findFirst({ select: { nameAr: true } });
     const pdf = await this.invoicePdf.renderInvoice(
@@ -455,6 +458,9 @@ export class SalesInvoicesController {
   ) {
     const existing = await this.prisma.salesInvoice.findUnique({ where: { id } });
     if (!existing) throw new NotFoundError({ id });
+    // Branch scope: a non-OWNER may only edit invoices in their allowedBranches
+    // (404 = no existence leak). The global guard doesn't cover :id routes.
+    if (user.role !== "OWNER" && !user.allowedBranches.includes(existing.branchId)) throw new NotFoundError({ id });
     if (existing.status !== "DRAFT") {
       throw new ValidationError({ reason: "only_draft_can_be_updated", status: existing.status });
     }
@@ -593,6 +599,9 @@ export class SalesInvoicesController {
       },
     });
     if (!existing) throw new NotFoundError({ id });
+    // Branch scope: a non-OWNER may only confirm invoices in their
+    // allowedBranches (404 = no existence leak). Guard doesn't cover :id routes.
+    if (user.role !== "OWNER" && !user.allowedBranches.includes(existing.branchId)) throw new NotFoundError({ id });
     if (existing.status !== "DRAFT") {
       throw new ValidationError({ reason: "invoice_not_draft", status: existing.status });
     }

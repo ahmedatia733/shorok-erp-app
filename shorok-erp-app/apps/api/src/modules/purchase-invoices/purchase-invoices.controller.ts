@@ -184,7 +184,7 @@ export class PurchaseInvoicesController {
 
   @Get(":id/pdf")
   @Roles("OWNER", "ACCOUNTANT")
-  async getPdf(@Param("id") id: string, @Res() res: Response) {
+  async getPdf(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
     const inv = await this.prisma.purchaseInvoice.findUnique({
       where: { id },
       include: {
@@ -196,6 +196,9 @@ export class PurchaseInvoicesController {
       },
     });
     if (!inv) throw new NotFoundError({ id });
+    // Branch scope: a non-OWNER may only render a PDF for invoices in their
+    // allowedBranches. 404 (not 403) = no existence leak, same as GET /:id.
+    if (user.role !== "OWNER" && !user.allowedBranches.includes(inv.branchId)) throw new NotFoundError({ id });
 
     const company = await this.prisma.companyProfile.findFirst({ select: { nameAr: true } });
     const pdf = await this.invoicePdf.renderInvoice(
