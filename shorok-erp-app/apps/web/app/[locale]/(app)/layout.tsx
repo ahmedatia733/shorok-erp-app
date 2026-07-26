@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import type { AppLocale } from "../../../i18n";
 import { LanguageSwitcher } from "../../../components/layout/language-switcher";
@@ -46,15 +47,19 @@ function NavSection({
 }
 
 function NavLink({ href, label }: { href: string; label: string }) {
+  // Client-side navigation (Next.js <Link>) — a plain <a> triggers a full page
+  // reload that discards the in-memory access token and forces a session
+  // re-hydration on every click.
   return (
-    <a href={href} className="block rounded-md px-3 py-2 text-sm hover:bg-background">
+    <Link href={href} className="block rounded-md px-3 py-2 text-sm hover:bg-background">
       {label}
-    </a>
+    </Link>
   );
 }
 
 export default function ProtectedAppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const locale = useLocale() as AppLocale;
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
@@ -67,8 +72,13 @@ export default function ProtectedAppLayout({ children }: { children: React.React
   const [reportsOpen, setReportsOpen] = useState(true);
 
   useEffect(() => {
-    if (!isLoading && !user) router.replace(`/${locale}/login`);
-  }, [isLoading, user, locale, router]);
+    if (!isLoading && !user) {
+      // Preserve the requested destination so login can return the user there
+      // instead of always dropping them on the dashboard.
+      const returnTo = pathname && pathname !== `/${locale}/login` ? `?returnTo=${encodeURIComponent(pathname)}` : "";
+      router.replace(`/${locale}/login${returnTo}`);
+    }
+  }, [isLoading, user, locale, router, pathname]);
 
   if (isLoading || !user) {
     return (

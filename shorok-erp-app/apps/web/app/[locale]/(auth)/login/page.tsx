@@ -20,6 +20,16 @@ export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
 
+  // Read ?returnTo from the URL at submit time (client-only, so no
+  // useSearchParams Suspense boundary needed). Only honour a same-app internal
+  // path ("/ar/..."), never an absolute or protocol-relative URL — this
+  // prevents an open-redirect via ?returnTo=.
+  const safeReturnTo = (): string => {
+    const raw = new URLSearchParams(window.location.search).get("returnTo");
+    if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
+    return `/${locale}/dashboard`;
+  };
+
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -31,7 +41,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(phone, password, locale);
-      router.push(`/${locale}/dashboard`);
+      router.replace(safeReturnTo());
     } catch (err) {
       if (err instanceof ApiClientError) {
         const code = err.payload.code;

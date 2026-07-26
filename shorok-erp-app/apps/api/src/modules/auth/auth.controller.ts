@@ -8,7 +8,6 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { LoginRequestSchema, type LoginRequest, type LoginResponse } from "@shorok/shared";
 import type { Request, Response } from "express";
 import { AuthService } from "./auth.service";
@@ -22,10 +21,7 @@ const REFRESH_COOKIE = "shorok_refresh";
 
 @Controller("auth")
 export class AuthController {
-  constructor(
-    private readonly auth: AuthService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private readonly auth: AuthService) {}
 
   @Public()
   @Post("login")
@@ -36,7 +32,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<LoginResponse> {
     const result = await this.auth.login(body, req.header("user-agent"));
-    this.setRefreshCookie(res, result.refreshToken, result.refreshExpiresAt);
+    this.setRefreshCookie(res, req, result.refreshToken, result.refreshExpiresAt);
     return { accessToken: result.accessToken, expiresInSec: result.expiresInSec };
   }
 
@@ -49,7 +45,7 @@ export class AuthController {
   ): Promise<LoginResponse> {
     const raw = (req.cookies?.[REFRESH_COOKIE] as string | undefined) ?? "";
     const result = await this.auth.refresh(raw, req.header("user-agent"));
-    this.setRefreshCookie(res, result.refreshToken, result.refreshExpiresAt);
+    this.setRefreshCookie(res, req, result.refreshToken, result.refreshExpiresAt);
     return { accessToken: result.accessToken, expiresInSec: result.expiresInSec };
   }
 
@@ -72,14 +68,27 @@ export class AuthController {
     return this.auth.me(user.id);
   }
 
-  private setRefreshCookie(res: Response, value: string, expiresAt: Date): void {
+  private setRefreshCookie(res: Response, req: Request, value: string, expiresAt: Date): void {
     res.cookie(REFRESH_COOKIE, value, {
       httpOnly: true,
-      secure: this.config.get<string>("NODE_ENV") === "production",
+      // Mark Secure only when the request actually arrived over HTTPS. Over a
+      // plain-HTTP local server (any NODE_ENV) a Secure cookie is silently
+      // REJECTED by Safari/WebKit and by any non-localhost host, so the refresh
+      // cookie would never be stored and the session could not survive a page
+      // load. Behind the production TLS proxy `x-forwarded-proto: https` is set,
+      // so the cookie stays Secure there.
+      secure: this.isHttps(req),
       sameSite: "lax",
       expires: expiresAt,
       path: "/api/v1/auth",
     });
+  }
+
+  private isHttps(req: Request): boolean {
+    if (req.secure) return true;
+    const proto = req.headers["x-forwarded-proto"];
+    const first = Array.isArray(proto) ? proto[0] : proto;
+    return (first ?? "").split(",")[0]!.trim().toLowerCase() === "https";
   }
 
   private clearRefreshCookie(res: Response): void {

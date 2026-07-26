@@ -51,6 +51,36 @@ describe("auth", () => {
     expect(cookies.some((c) => c.startsWith("shorok_refresh="))).toBe(true);
   });
 
+  // Regression: the refresh cookie must NOT be marked Secure when the request
+  // arrives over plain HTTP (any NODE_ENV). A Secure cookie is silently dropped
+  // by Safari/WebKit and by non-localhost hosts over HTTP, which would make the
+  // session unrecoverable after any page load. See the auth/navigation fix.
+  it("does NOT mark the refresh cookie Secure over plain HTTP", async () => {
+    const res = await api()
+      .post("/api/v1/auth/login")
+      .send({ phone: handle.ownerPhone, password: handle.ownerPassword });
+    const cookie = (res.headers["set-cookie"] as unknown as string[]).find((c) =>
+      c.startsWith("shorok_refresh="),
+    )!;
+    expect(cookie).toBeDefined();
+    expect(/;\s*Secure/i.test(cookie)).toBe(false);
+    expect(/;\s*HttpOnly/i.test(cookie)).toBe(true); // still httpOnly
+  });
+
+  // Regression: behind a TLS-terminating proxy (production) the forwarded
+  // protocol is https, so the cookie MUST stay Secure there.
+  it("marks the refresh cookie Secure when x-forwarded-proto is https", async () => {
+    const res = await api()
+      .post("/api/v1/auth/login")
+      .set("x-forwarded-proto", "https")
+      .send({ phone: handle.ownerPhone, password: handle.ownerPassword });
+    const cookie = (res.headers["set-cookie"] as unknown as string[]).find((c) =>
+      c.startsWith("shorok_refresh="),
+    )!;
+    expect(cookie).toBeDefined();
+    expect(/;\s*Secure/i.test(cookie)).toBe(true);
+  });
+
   it("rejects /auth/me without a bearer token", async () => {
     const res = await api().get("/api/v1/auth/me");
     expect(res.status).toBe(401);
