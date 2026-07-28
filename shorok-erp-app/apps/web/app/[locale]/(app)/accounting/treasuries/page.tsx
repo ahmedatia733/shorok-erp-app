@@ -23,10 +23,7 @@ import {
   deactivateTreasury,
   type TreasuryRow,
 } from "../../../../../lib/treasuries-client";
-
-function money(v: string | number) {
-  return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
+import { money, validateTreasuryForm } from "../../../../../lib/treasury-format";
 
 export default function TreasuriesPage() {
   const locale = useLocale() as AppLocale;
@@ -185,8 +182,8 @@ function CreateTreasuryModal({
 
   const submit = async () => {
     setError(null);
-    if (!nameAr.trim()) return setError("اسم الخزنة بالعربية مطلوب.");
-    if (!branchId) return setError("اختر الفرع.");
+    const invalid = validateTreasuryForm({ nameAr, branchId });
+    if (invalid) return setError(invalid);
     setSaving(true);
     try {
       await createTreasury({

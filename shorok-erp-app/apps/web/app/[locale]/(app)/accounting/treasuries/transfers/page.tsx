@@ -19,15 +19,7 @@ import {
   listTransfers, createTransfer, confirmTransfer, cancelTransfer, treasurySelector,
   type TransferRow, type TreasuryRow,
 } from "../../../../../../lib/treasuries-client";
-
-function money(v: string | number) {
-  return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-function statusBadge(status: string): { label: string; variant: "neutral" | "success" | "warning" } {
-  if (status === "CONFIRMED") return { label: "مؤكد", variant: "success" };
-  if (status === "CANCELLED") return { label: "ملغي", variant: "neutral" };
-  return { label: "مسودة", variant: "warning" };
-}
+import { statusBadge, money, treasuryOptionLabel, validateTransferForm } from "../../../../../../lib/treasury-format";
 
 export default function TreasuryTransfersPage() {
   const locale = useLocale() as AppLocale;
@@ -136,13 +128,12 @@ function CreateTransferModal({ treasuries, onClose, onCreated }: { treasuries: T
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const opt = (t: TreasuryRow) => `${t.nameAr} (${t.code}) — ${money(t.balance)}`;
+  const opt = (t: TreasuryRow) => treasuryOptionLabel(t);
 
   const submit = async () => {
     setError(null);
-    if (!sourceTreasuryId || !destinationTreasuryId) return setError("اختر خزنة المصدر والوجهة.");
-    if (sourceTreasuryId === destinationTreasuryId) return setError("لا يمكن التحويل إلى نفس الخزنة.");
-    if (!amount || Number(amount) <= 0) return setError("أدخل مبلغاً أكبر من صفر.");
+    const invalid = validateTransferForm({ sourceTreasuryId, destinationTreasuryId, amount });
+    if (invalid) return setError(invalid);
     setSaving(true);
     try {
       const created = await createTransfer({ transferDate, sourceTreasuryId, destinationTreasuryId, amount: Number(amount).toFixed(2), notes: notes.trim() || undefined });

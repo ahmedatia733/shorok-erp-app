@@ -59,7 +59,9 @@ async function main() {
   const vatI = await mk("E-VATI", "ASSET", "CURRENT_ASSET");
   const cogs = await mk("E-COGS", "COST_OF_SALES", "COST_OF_SALES");
   const inv = await mk("E-INV", "ASSET", "CURRENT_ASSET");
-  await prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), arAccountId: ar.id, apAccountId: ap.id, revenueAccountId: rev.id, salesReturnsAccountId: sret.id, vatOutputAccountId: vatO.id, vatInputAccountId: vatI.id, cogsAccountId: cogs.id, inventoryAccountId: inv.id, createdBy: owner.id } });
+  // Opening-equity counterpart so treasury opening balances can post (additive).
+  const openingEquity = await mk("E-OEQ", "EQUITY", "EQUITY");
+  await prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), arAccountId: ar.id, apAccountId: ap.id, revenueAccountId: rev.id, salesReturnsAccountId: sret.id, vatOutputAccountId: vatO.id, vatInputAccountId: vatI.id, cogsAccountId: cogs.id, inventoryAccountId: inv.id, openingEquityAccountId: openingEquity.id, createdBy: owner.id } });
   for (let m = 1; m <= 12; m++) await prisma.financialPeriod.create({ data: { year: 2026, month: m, status: "OPEN" } });
 
   const skuS = await prisma.productSku.create({ data: { code: "E2E-RED", category: "NORMAL", colorNameAr: "أحمر", colorNameEn: "Red" } });
