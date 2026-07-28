@@ -23,4 +23,5 @@ export * from "./sales-representatives";
 export * from "./statements";
 export * from "./suppliers";
 export * from "./users";
+export * from "./treasuries";
 export * from "./vouchers";

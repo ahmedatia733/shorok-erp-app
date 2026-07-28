@@ -15,6 +15,8 @@ export const JournalSourceTypeEnum = z.enum([
   "DEPRECIATION",
   "OPENING",
   "MANUAL",
+  "TREASURY_TRANSFER",
+  "TREASURY_OPENING",
 ]);
 export type JournalSourceType = z.infer<typeof JournalSourceTypeEnum>;
 
