@@ -36,6 +36,7 @@ import { SalesInvoicesModule } from "./modules/sales-invoices/sales-invoices.mod
 import { ReturnsModule } from "./modules/returns/returns.module";
 import { SalesRepresentativesModule } from "./modules/sales-representatives/sales-representatives.module";
 import { ReceiptVouchersModule } from "./modules/receipt-vouchers/receipt-vouchers.module";
+import { TreasuriesModule } from "./modules/treasuries/treasuries.module";
 import { PostingModule } from "./modules/posting/posting.module";
 import { PeriodsModule } from "./modules/periods/periods.module";
 import { ConfigurationModule } from "./modules/configuration/configuration.module";
@@ -96,6 +97,7 @@ import { AccountingStatementsModule } from "./modules/accounting-statements/acco
     ReturnsModule,
     SalesRepresentativesModule,
     ReceiptVouchersModule,
+    TreasuriesModule,
     PostingModule,
     PeriodsModule,
     ConfigurationModule,
