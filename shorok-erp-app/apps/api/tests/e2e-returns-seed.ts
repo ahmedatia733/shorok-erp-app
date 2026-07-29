@@ -45,7 +45,10 @@ async function main() {
   const branchBUser = await prisma.user.create({ data: { name: "محاسب فرع ب", phone: BRANCH_B_PHONE, passwordHash: hash, role: "ACCOUNTANT", status: "ACTIVE" } });
   await prisma.userBranchAccess.create({ data: { userId: branchBUser.id, branchId: branchB.id } });
 
-  const customer = await prisma.customer.create({ data: { code: "E2E-CUST", nameAr: "عميل الاختبار" } });
+  const customer = await prisma.customer.create({ data: { code: "E2E-CUST", nameAr: "عميل الاختبار", phone: "01000000001" } });
+  // A second customer with a distinct code/phone so the journal combobox search
+  // (by name, code and phone) has something to filter against.
+  await prisma.customer.create({ data: { code: "E2E-C2", nameAr: "شركة النور", phone: "01555000099" } });
   const supplier = await prisma.supplier.create({ data: { nameAr: "مورد الاختبار", nameEn: "Test Supplier" } });
   const rep = await prisma.salesRepresentative.create({ data: { code: "E2E-REP", nameAr: "مندوب الاختبار" } });
 

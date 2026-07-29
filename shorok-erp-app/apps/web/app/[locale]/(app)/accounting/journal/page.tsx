@@ -11,6 +11,7 @@ import { Modal } from "../../../../../components/ui/modal";
 import { NegativeBalanceModal } from "../../../../../components/features/negative-balance-modal";
 import { parseTreasuryWarning, type TreasuryWarning } from "../../../../../lib/treasury-warning";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
+import { SearchableSelect, type SearchableOption } from "../../../../../components/ui/searchable-select";
 import { useHasRole } from "../../../../../lib/auth";
 import {
   listJournal,
@@ -174,8 +175,6 @@ export default function JournalPage() {
   const [lines,         setLines]         = useState<JournalLine[]>([emptyLine(), emptyLine()]);
   const [createLoading, setCreateLoading] = useState(false);
   const [createError,   setCreateError]   = useState<string | null>(null);
-  const [openComboIdx,  setOpenComboIdx]  = useState<number | null>(null);
-  const [comboSearch,   setComboSearch]   = useState<Record<number, string>>({});
   const [listSearch,    setListSearch]    = useState("");
   const [repsError,       setRepsError]       = useState<string | null>(null);
   // Which line opened a quick-create modal (so the new entity auto-selects there).
@@ -488,6 +487,33 @@ export default function JournalPage() {
   const amountCls =
     "w-full rounded border px-2 py-1.5 text-sm text-end tabular-nums bg-background focus:outline-none focus:ring-1";
 
+  // ─── Searchable-combobox option builders (client-side over already-loaded,
+  //     branch-scoped, deduplicated lists — no per-row fetch) ─────────────────
+  const accName = (a: AccountRow) => (locale === "en" && a.nameEn ? a.nameEn : a.nameAr);
+  const categoryOptions: SearchableOption[] = CATEGORIES.map((c) => ({ value: c.id, label: c.label }));
+  const entryTypeOptions: SearchableOption[] = Object.entries(ENTRY_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }));
+  const customerOptions: SearchableOption[] = customers.map((c) => ({
+    value: c.id,
+    label: `${c.nameAr} — ${c.code}${c.phone ? ` — ${c.phone}` : ""}`,
+    keywords: `${c.code} ${c.phone ?? ""}`,
+  }));
+  const supplierOptions: SearchableOption[] = suppliers.map((s) => ({
+    value: s.id,
+    label: s.nameAr,
+    keywords: `${s.nameEn ?? ""}`,
+  }));
+  const repOptions: SearchableOption[] = reps.map((r) => ({
+    value: r.id,
+    label: `${r.code} — ${r.nameAr}`,
+    keywords: `${r.code}`,
+  }));
+  const accountOptions = (cat: string): SearchableOption[] =>
+    filterAccounts(cat || "all", leafAccounts).map((a) => ({
+      value: a.id,
+      label: `${a.code} — ${accName(a)}`,
+      keywords: `${a.code} ${a.nameAr} ${a.nameEn ?? ""}`,
+    }));
+
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -705,16 +731,16 @@ export default function JournalPage() {
           {/* ── Header fields ───────────────────────────────────────────── */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
             <div>
-              <label className="block text-sm font-medium mb-1">نوع القيد</label>
-              <select
-                className={selectCls}
+              <label className="block text-sm font-medium mb-1">{t("cbEntryType")}</label>
+              <SearchableSelect
+                testId="je-entry-type"
                 value={entryType}
-                onChange={(e) => setEntryType(e.target.value)}
-              >
-                {Object.entries(ENTRY_TYPE_LABELS).map(([val, label]) => (
-                  <option key={val} value={val}>{label}</option>
-                ))}
-              </select>
+                onChange={setEntryType}
+                options={entryTypeOptions}
+                placeholder={t("cbEntryType")}
+                emptyText={t("cbNoResults")}
+                loadingText={t("cbLoading")}
+              />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">{t("entryDate")}</label>
@@ -728,6 +754,7 @@ export default function JournalPage() {
             <div className="sm:col-span-1">
               <label className="block text-sm font-medium mb-1">{t("description")}</label>
               <Input
+                data-testid="je-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="البيان العام للقيد"
@@ -808,12 +835,6 @@ export default function JournalPage() {
                   // Customers/suppliers resolve the account from the party; المناديب
                   // shows only the representative picker (no account search).
                   const isSpecial   = isCustomers || isSuppliers || isReps;
-                  const pool = isSpecial ? [] : filterAccounts(line.category || "all", leafAccounts);
-                  const q = (comboSearch[idx] ?? "").toLowerCase();
-                  const visible = q
-                    ? pool.filter((a) => (a.nameAr + " " + (a.nameEn ?? "") + " " + a.code).toLowerCase().includes(q))
-                    : pool;
-                  const selectedAcc = line.accountId ? leafAccounts.find((a) => a.id === line.accountId) : null;
 
                   return (
                     <tr
@@ -827,16 +848,16 @@ export default function JournalPage() {
 
                       {/* القائمة */}
                       <td className="px-1.5 py-1.5">
-                        <select
-                          className={selectCls}
+                        <SearchableSelect
+                          testId={`je-category-${idx}`}
                           value={line.category}
-                          onChange={(e) => handleCategoryChange(idx, e.target.value)}
-                        >
-                          <option value="">— القائمة —</option>
-                          {CATEGORIES.map((c) => (
-                            <option key={c.id} value={c.id}>{c.label}</option>
-                          ))}
-                        </select>
+                          onChange={(v) => handleCategoryChange(idx, v)}
+                          options={categoryOptions}
+                          placeholder={t("cbChooseCategory")}
+                          emptyText={t("cbNoResults")}
+                          loadingText={t("cbLoading")}
+                          clearable
+                        />
                       </td>
 
                       {/* الحساب */}
@@ -844,16 +865,18 @@ export default function JournalPage() {
                         {isCustomers ? (
                           <div className="space-y-1">
                             <div className="flex gap-1">
-                              <select
-                                className={selectCls}
-                                value=""
-                                onChange={(e) => handleCustomerSelect(idx, e.target.value)}
-                              >
-                                <option value="">— اختر العميل —</option>
-                                {customers.map((c) => (
-                                  <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>
-                                ))}
-                              </select>
+                              <div className="flex-1 min-w-0">
+                                <SearchableSelect
+                                  testId={`je-customer-${idx}`}
+                                  value={line.partyType === "CUSTOMER" ? (line.partyId ?? "") : ""}
+                                  onChange={(v) => handleCustomerSelect(idx, v)}
+                                  options={customerOptions}
+                                  placeholder={t("cbChooseCustomer")}
+                                  emptyText={t("cbNoResults")}
+                                  loadingText={t("cbLoading")}
+                                  clearable
+                                />
+                              </div>
                               <button type="button" onClick={() => openQuickCustomer(idx)} title="عميل جديد"
                                 className="shrink-0 rounded border border-primary px-2 text-xs text-primary hover:bg-primary hover:text-white transition-colors">+</button>
                             </div>
@@ -868,16 +891,16 @@ export default function JournalPage() {
                           </div>
                         ) : isSuppliers ? (
                           <div className="space-y-1">
-                            <select
-                              className={selectCls}
-                              value=""
-                              onChange={(e) => handleSupplierSelect(idx, e.target.value)}
-                            >
-                              <option value="">— اختر المورد —</option>
-                              {suppliers.map((s) => (
-                                <option key={s.id} value={s.id}>{s.nameAr}</option>
-                              ))}
-                            </select>
+                            <SearchableSelect
+                              testId={`je-supplier-${idx}`}
+                              value={line.partyType === "SUPPLIER" ? (line.partyId ?? "") : ""}
+                              onChange={(v) => handleSupplierSelect(idx, v)}
+                              options={supplierOptions}
+                              placeholder={t("cbChooseSupplier")}
+                              emptyText={t("cbNoResults")}
+                              loadingText={t("cbLoading")}
+                              clearable
+                            />
                             {line.entityLabel && (
                               <div className="text-xs text-primary font-medium px-1">✓ {line.entityLabel}</div>
                             )}
@@ -890,16 +913,18 @@ export default function JournalPage() {
                         ) : isReps ? (
                           <div className="space-y-1">
                             <div className="flex gap-1">
-                              <select
-                                className={selectCls}
-                                value={line.salesRepresentativeId ?? ""}
-                                onChange={(e) => handleRepSelect(idx, e.target.value)}
-                              >
-                                <option value="">— اختر المندوب —</option>
-                                {reps.map((r) => (
-                                  <option key={r.id} value={r.id}>{r.code} — {r.nameAr}</option>
-                                ))}
-                              </select>
+                              <div className="flex-1 min-w-0">
+                                <SearchableSelect
+                                  testId={`je-rep-${idx}`}
+                                  value={line.salesRepresentativeId ?? ""}
+                                  onChange={(v) => handleRepSelect(idx, v)}
+                                  options={repOptions}
+                                  placeholder={t("cbChooseRep")}
+                                  emptyText={t("cbNoResults")}
+                                  loadingText={t("cbLoading")}
+                                  clearable
+                                />
+                              </div>
                               <button type="button" onClick={() => setQuickRepIdx(idx)} title="مندوب جديد"
                                 className="shrink-0 rounded border border-primary px-2 text-xs text-primary hover:bg-primary hover:text-white transition-colors">+</button>
                             </div>
@@ -914,83 +939,30 @@ export default function JournalPage() {
                             )}
                           </div>
                         ) : (
-                          <div className="relative">
-                            {line.accountId && openComboIdx !== idx ? (
-                              <div
-                                className="flex items-center gap-1 rounded border border-border bg-background px-2 py-1.5 text-sm cursor-pointer hover:border-primary"
-                                onClick={() => setOpenComboIdx(idx)}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setOpenComboIdx(idx); }}
-                              >
-                                <span className="font-mono text-xs text-textSecondary me-1">{selectedAcc?.code}</span>
-                                <span className="flex-1 truncate min-w-0">{selectedAcc?.nameAr ?? line.accountNameAr}</span>
-                                <button
-                                  type="button"
-                                  className="text-textSecondary hover:text-danger ms-1 shrink-0 text-xs"
-                                  onClick={(e) => { e.stopPropagation(); handleAccountChange(idx, ""); }}
-                                >✕</button>
-                              </div>
-                            ) : (
-                              <input
-                                type="text"
-                                className={selectCls}
-                                placeholder={line.category && line.category !== "all" ? "ابحث في الحسابات..." : "ابحث في جميع الحسابات..."}
-                                value={comboSearch[idx] ?? ""}
-                                onChange={(e) => {
-                                  setOpenComboIdx(idx);
-                                  setComboSearch((p) => ({ ...p, [idx]: e.target.value }));
-                                }}
-                                onFocus={() => setOpenComboIdx(idx)}
-                                onBlur={() => setTimeout(() => {
-                                  setOpenComboIdx((c) => (c === idx ? null : c));
-                                  setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
-                                }, 200)}
-                              />
-                            )}
-                            {openComboIdx === idx && (
-                              <div className="absolute top-full mt-0.5 start-0 z-30 min-w-full w-64 max-h-52 overflow-y-auto rounded border border-border bg-surface shadow-lg">
-                                {visible.length === 0 ? (
-                                  <div className="px-3 py-2 text-xs text-textSecondary">لا توجد نتائج مطابقة</div>
-                                ) : (
-                                  visible.slice(0, 30).map((a) => (
-                                    <button
-                                      key={a.id}
-                                      type="button"
-                                      className="w-full text-start px-2 py-1.5 text-sm hover:bg-background transition-colors"
-                                      onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        handleAccountChange(idx, a.id);
-                                        setOpenComboIdx(null);
-                                        setComboSearch((p) => { const n = { ...p }; delete n[idx]; return n; });
-                                      }}
-                                    >
-                                      <span className="font-mono text-xs text-textSecondary me-1">{a.code}</span>
-                                      {a.nameAr}
-                                    </button>
-                                  ))
-                                )}
-                                {visible.length > 30 && (
-                                  <div className="px-2 py-1 text-xs text-textSecondary border-t border-border">
-                                    {visible.length - 30} نتيجة أخرى — اكتب للتضييق
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          <SearchableSelect
+                            testId={`je-account-${idx}`}
+                            value={line.accountId}
+                            onChange={(v) => handleAccountChange(idx, v)}
+                            options={accountOptions(line.category)}
+                            placeholder={t("cbSearchAccounts")}
+                            emptyText={t("cbNoResults")}
+                            loadingText={t("cbLoading")}
+                            clearable
+                          />
                         )}
                         {/* Party required when a control account (AR/AP) is chosen directly */}
                         {line.partyType && line.category !== "customers" && line.category !== "suppliers" && (
-                          <select
-                            value={line.partyId ?? ""}
-                            onChange={(e) => handleLinePartySelect(idx, e.target.value)}
-                            className="mt-1 w-full rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs focus:outline-none"
-                          >
-                            <option value="">{line.partyType === "CUSTOMER" ? "— العميل (مطلوب) —" : "— المورد (مطلوب) —"}</option>
-                            {line.partyType === "CUSTOMER"
-                              ? customers.map((c) => <option key={c.id} value={c.id}>{c.code} — {c.nameAr}</option>)
-                              : suppliers.map((s) => <option key={s.id} value={s.id}>{s.nameAr}</option>)}
-                          </select>
+                          <div className="mt-1">
+                            <SearchableSelect
+                              testId={`je-party-${idx}`}
+                              value={line.partyId ?? ""}
+                              onChange={(v) => handleLinePartySelect(idx, v)}
+                              options={line.partyType === "CUSTOMER" ? customerOptions : supplierOptions}
+                              placeholder={line.partyType === "CUSTOMER" ? t("cbCustomerRequired") : t("cbSupplierRequired")}
+                              emptyText={t("cbNoResults")}
+                              loadingText={t("cbLoading")}
+                            />
+                          </div>
                         )}
                       </td>
 
@@ -1014,6 +986,7 @@ export default function JournalPage() {
                           placeholder="0.00"
                           min="0"
                           step="0.01"
+                          data-testid={`je-debit-${idx}`}
                           value={line.debit}
                           onChange={(e) => handleDebitChange(idx, e.target.value)}
                         />
@@ -1027,6 +1000,7 @@ export default function JournalPage() {
                           placeholder="0.00"
                           min="0"
                           step="0.01"
+                          data-testid={`je-credit-${idx}`}
                           value={line.credit}
                           onChange={(e) => handleCreditChange(idx, e.target.value)}
                         />
@@ -1091,6 +1065,7 @@ export default function JournalPage() {
 
             <button
               type="button"
+              data-testid="je-add-line"
               onClick={() => setLines((p) => [...p, emptyLine()])}
               className="w-full py-2 text-xs text-primary hover:bg-surface border-t border-border transition-colors"
             >
@@ -1107,7 +1082,7 @@ export default function JournalPage() {
             >
               {tCommon("cancel")}
             </Button>
-            <Button type="submit" disabled={!canSubmit || createLoading}>
+            <Button type="submit" data-testid="je-save" disabled={!canSubmit || createLoading}>
               {createLoading ? tCommon("loading") : tCommon("save")}
             </Button>
           </div>

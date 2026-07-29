@@ -517,7 +517,22 @@
       "nameRequired": "الاسم مطلوب",
       "cancel": "إلغاء",
       "save": "حفظ",
-      "saving": "جارٍ الحفظ..."
+      "saving": "جارٍ الحفظ...",
+      "cbChooseCategory": "— القائمة —",
+      "cbChooseAccount": "اختر الحساب",
+      "cbChooseCustomer": "اختر العميل",
+      "cbChooseSupplier": "اختر المورد",
+      "cbChooseRep": "اختر المندوب",
+      "cbSearchAccounts": "بحث في الحسابات...",
+      "cbSearchCustomer": "بحث عن عميل...",
+      "cbSearchSupplier": "بحث عن مورد...",
+      "cbSearchRep": "بحث عن مندوب...",
+      "cbNoResults": "لا توجد نتائج مطابقة",
+      "cbLoading": "جارٍ التحميل...",
+      "cbClear": "مسح الاختيار",
+      "cbCustomerRequired": "العميل (مطلوب)",
+      "cbSupplierRequired": "المورد (مطلوب)",
+      "cbEntryType": "نوع القيد"
     },
     "incomeStatement": {
       "title": "قائمة الدخل",

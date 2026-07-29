@@ -517,7 +517,22 @@
       "nameRequired": "Name is required",
       "cancel": "Cancel",
       "save": "Save",
-      "saving": "Saving..."
+      "saving": "Saving...",
+      "cbChooseCategory": "— List —",
+      "cbChooseAccount": "Choose account",
+      "cbChooseCustomer": "Choose customer",
+      "cbChooseSupplier": "Choose supplier",
+      "cbChooseRep": "Choose representative",
+      "cbSearchAccounts": "Search accounts...",
+      "cbSearchCustomer": "Search for a customer...",
+      "cbSearchSupplier": "Search for a supplier...",
+      "cbSearchRep": "Search for a representative...",
+      "cbNoResults": "No matching results",
+      "cbLoading": "Loading...",
+      "cbClear": "Clear selection",
+      "cbCustomerRequired": "Customer (required)",
+      "cbSupplierRequired": "Supplier (required)",
+      "cbEntryType": "Entry type"
     },
     "incomeStatement": {
       "title": "Income Statement",
