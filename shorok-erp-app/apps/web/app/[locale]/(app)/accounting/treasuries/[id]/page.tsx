@@ -20,7 +20,7 @@ import {
   getTreasury, getTreasuryStatement, postOpeningBalance, listOpeningBalances, reverseOpeningBalance,
   type TreasuryRow, type TreasuryStatementRow, type OpeningBalanceRow,
 } from "../../../../../../lib/treasuries-client";
-import { money } from "../../../../../../lib/treasury-format";
+import { money, localizedName } from "../../../../../../lib/treasury-format";
 
 const DOC_KEY: Record<string, string> = {
   TREASURY_OPENING: "docOpening", TREASURY_TRANSFER: "docTransfer", RECEIPT_VOUCHER: "docReceipt",
@@ -86,13 +86,13 @@ export default function TreasuryDetailPage() {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{treasury.nameAr}</h1>
+            <h1 className="text-xl font-semibold">{localizedName(treasury.nameAr, treasury.nameEn, locale)}</h1>
             <Badge variant="neutral">{treasury.code}</Badge>
             {treasury.isDefault && <Badge variant="success">{t("badgeDefault")}</Badge>}
             {!treasury.active && <Badge variant="neutral">{t("statusInactive")}</Badge>}
           </div>
           <p className="text-sm text-textSecondary">
-            {t("detailBranch")}: {treasury.branchNameAr} — {t("detailGlAccount")}: <span className="font-mono">{treasury.glAccountCode}</span> {treasury.glAccountNameAr}
+            {t("detailBranch")}: {localizedName(treasury.branchNameAr, treasury.branchNameEn, locale)} — {t("detailGlAccount")}: <span className="font-mono">{treasury.glAccountCode}</span> {localizedName(treasury.glAccountNameAr, treasury.glAccountNameEn, locale)}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -104,7 +104,7 @@ export default function TreasuryDetailPage() {
       {error && <Alert variant="error">{error}</Alert>}
 
       <div className="grid grid-cols-3 gap-3">
-        <Card><CardBody><p className="text-sm text-textSecondary">{t("currentBalance")}</p><p className="text-lg font-semibold tabular-nums" data-testid="treasury-balance">{money(currentBalance)}</p></CardBody></Card>
+        <Card><CardBody><p className="text-sm text-textSecondary">{t("currentBalance")}</p><p className="text-lg font-semibold tabular-nums" data-testid="treasury-balance">{money(currentBalance, locale)}</p></CardBody></Card>
         <Card><CardBody><p className="text-sm text-textSecondary">{t("movementCount")}</p><p className="text-lg font-semibold tabular-nums">{rows.length}</p></CardBody></Card>
         <Card><CardBody><p className="text-sm text-textSecondary">{t("colAllowNegative")}</p><p className="text-lg font-semibold">{treasury.allowNegativeBalance ? t("yes") : t("no")}</p></CardBody></Card>
       </div>
@@ -124,8 +124,8 @@ export default function TreasuryDetailPage() {
                     <TR key={o.journalEntryId}>
                       <TD>{o.entryDate}</TD>
                       <TD className="font-mono text-xs">#{o.entryNumber}</TD>
-                      <TD className="tabular-nums">{money(o.amount)}</TD>
-                      <TD className="font-mono text-xs">{o.counterpartAccountId ? o.counterpartAccountId.slice(0, 8) : "—"}</TD>
+                      <TD className="tabular-nums">{money(o.amount, locale)}</TD>
+                      <TD className="text-xs">{o.counterpartAccountCode ? `${o.counterpartAccountCode} — ${localizedName(o.counterpartAccountNameAr ?? "", o.counterpartAccountNameEn, locale)}` : "—"}</TD>
                       <TD>{o.status === "REVERSED" ? <Badge variant="neutral">{t("reversed")}</Badge> : <Badge variant="success">{t("statusActive")}</Badge>}</TD>
                       <TD>
                         {canManage && o.status !== "REVERSED"
@@ -170,9 +170,9 @@ export default function TreasuryDetailPage() {
                         <TD className="font-mono text-xs">#{r.entryNumber}</TD>
                         <TD>{docLabel(r.documentType)}</TD>
                         <TD className="max-w-[240px] truncate" title={r.description}>{r.description}</TD>
-                        <TD className="tabular-nums">{Number(r.debit) ? money(r.debit) : "—"}</TD>
-                        <TD className="tabular-nums">{Number(r.credit) ? money(r.credit) : "—"}</TD>
-                        <TD className="tabular-nums font-medium">{money(r.runningBalance)}</TD>
+                        <TD className="tabular-nums">{Number(r.debit) ? money(r.debit, locale) : "—"}</TD>
+                        <TD className="tabular-nums">{Number(r.credit) ? money(r.credit, locale) : "—"}</TD>
+                        <TD className="tabular-nums font-medium">{money(r.runningBalance, locale)}</TD>
                         <TD className="text-xs">{r.userName}</TD>
                         <TD><Link href={`/${locale}/accounting/journal?entry=${r.entryNumber}`} className="text-primary hover:underline text-xs">{t("entryLink")}</Link></TD>
                       </TR>

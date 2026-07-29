@@ -7,13 +7,25 @@ export function statusBadge(status: string): { label: string; variant: "neutral"
   return { label: "مسودة", variant: "warning" };
 }
 
-export function money(v: string | number): string {
-  return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** Locale-aware money: en → en-US (Latin digits), otherwise ar-EG (Arabic digits). */
+export function money(v: string | number, locale: "ar" | "en" = "ar"): string {
+  return Number(v).toLocaleString(locale === "en" ? "en-US" : "ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/** Selector option label: name (code) — balance. */
-export function treasuryOptionLabel(t: Pick<TreasuryRow, "nameAr" | "code" | "balance">): string {
-  return `${t.nameAr} (${t.code}) — ${money(t.balance)}`;
+/** Prefer the English name on the English locale when present; safe fallback to Arabic. */
+export function localizedName(nameAr: string, nameEn: string | null | undefined, locale: "ar" | "en"): string {
+  if (locale === "en" && nameEn && nameEn.trim()) return nameEn;
+  return nameAr;
+}
+
+/** Selector option label: name (code) — branch — balance (locale-aware). */
+export function treasuryOptionLabel(
+  t: Pick<TreasuryRow, "nameAr" | "code" | "balance"> & { nameEn?: string | null; branchNameAr?: string; branchNameEn?: string | null },
+  locale: "ar" | "en" = "ar",
+): string {
+  const name = localizedName(t.nameAr, t.nameEn, locale);
+  const branch = t.branchNameAr !== undefined ? localizedName(t.branchNameAr, t.branchNameEn ?? null, locale) : "";
+  return `${name} (${t.code})${branch ? ` — ${branch}` : ""} — ${money(t.balance, locale)}`;
 }
 
 /** A transaction selector must offer ONLY active treasuries. */

@@ -15,7 +15,7 @@ import { createExpense } from "../../../../../lib/expenses-client";
 import { NegativeBalanceModal } from "../../../../../components/features/negative-balance-modal";
 import { parseTreasuryWarning, type TreasuryWarning } from "../../../../../lib/treasury-warning";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
-import { treasurySelector, type TreasuryRow } from "../../../../../lib/treasuries-client";
+import { TreasuryPicker } from "../../../../../components/features/treasury-picker";
 
 function todayISO(): string {
   const d = new Date();
@@ -45,7 +45,6 @@ export default function NewExpensePage() {
   const [glAccountId,        setGlAccountId]        = useState("");
   const [paymentGlAccountId, setPaymentGlAccountId] = useState("");
   const [leafAccounts,       setLeafAccounts]       = useState<AccountRow[]>([]);
-  const [treasuries,         setTreasuries]         = useState<TreasuryRow[]>([]);
   const [submitting,         setSubmitting]         = useState(false);
   const [error,              setError]              = useState<string | null>(null);
   const [success,            setSuccess]            = useState(false);
@@ -58,12 +57,7 @@ export default function NewExpensePage() {
       // Auto-select expense account: مصروف / مصاريف / expense
       setGlAccountId(autoSelectId(leaf, "مصروف", "مصاريف", "expense"));
     });
-    // The payment account comes from an ACTIVE, authorized treasury (treasury-aware
-    // selector) — a deactivated treasury never appears here. Default to the branch default.
-    void treasurySelector().then((r) => {
-      setTreasuries(r.items);
-      if (r.items[0]) setPaymentGlAccountId(r.items[0].glAccountId);
-    });
+    // The payment treasury is chosen via the branch-filtered TreasuryPicker below.
   }, []);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -177,20 +171,17 @@ export default function NewExpensePage() {
 
               <div>
                 <label className="block text-sm font-medium mb-1">
-                  حساب الدفع (دائن — نقدية/بنك)
+                  الخزنة (دائن — نقدية/بنك)
                 </label>
-                <select
+                <TreasuryPicker
+                  branchId={branchId}
                   value={paymentGlAccountId}
-                  onChange={(e) => setPaymentGlAccountId(e.target.value)}
-                  className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+                  onChange={setPaymentGlAccountId}
+                  includeEmptyOption
+                  emptyLabel="— بدون قيد محاسبي —"
                   disabled={submitting}
-                  data-testid="expense-treasury"
-                >
-                  <option value="">— بدون قيد محاسبي —</option>
-                  {treasuries.map((tr) => (
-                    <option key={tr.id} value={tr.glAccountId}>{tr.nameAr} ({tr.code})</option>
-                  ))}
-                </select>
+                  testId="expense-treasury"
+                />
               </div>
 
               {glAccountId && paymentGlAccountId && amount && (

@@ -8,9 +8,11 @@ export interface TreasuryRow {
   nameEn: string | null;
   branchId: string;
   branchNameAr: string;
+  branchNameEn: string | null;
   glAccountId: string;
   glAccountCode: string;
   glAccountNameAr: string;
+  glAccountNameEn: string | null;
   currencyCode: string;
   allowNegativeBalance: boolean;
   isDefault: boolean;
@@ -69,7 +71,8 @@ export interface TransferRow {
 
 export const listTreasuries = (includeInactive = false) =>
   apiCall<{ items: TreasuryRow[] }>(`/treasuries?includeInactive=${includeInactive ? "true" : "false"}`);
-export const treasurySelector = () => apiCall<{ items: TreasuryRow[] }>("/treasuries/selector");
+export const treasurySelector = (branchId?: string) =>
+  apiCall<{ items: TreasuryRow[] }>(`/treasuries/selector${branchId ? `?branchId=${branchId}` : ""}`);
 export const getTreasury = (id: string) => apiCall<TreasuryRow>(`/treasuries/${id}`);
 export const createTreasury = (body: {
   nameAr: string; nameEn?: string; code?: string; branchId: string;
@@ -97,9 +100,13 @@ export interface OpeningBalanceRow {
   entryDate: string;
   amount: string;
   counterpartAccountId: string | null;
+  counterpartAccountCode: string | null;
+  counterpartAccountNameAr: string | null;
+  counterpartAccountNameEn: string | null;
   status: "POSTED" | "REVERSED";
   reversalJournalEntryId: string | null;
   reversalEntryNumber: string | null;
+  reversedAt: string | null;
 }
 export const listOpeningBalances = (id: string) => apiCall<{ treasuryId: string; items: OpeningBalanceRow[] }>(`/treasuries/${id}/opening-balances`);
 export const reverseOpeningBalance = (id: string, entryId: string, reason: string) =>

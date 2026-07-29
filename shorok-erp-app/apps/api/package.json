@@ -12,6 +12,7 @@
     "test": "jest --passWithNoTests",
     "test:int": "jest --config jest.integration.config.cjs --passWithNoTests",
     "seed": "ts-node --transpile-only prisma/seed.ts",
+    "treasury:preflight": "ts-node --transpile-only prisma/treasury-preflight.ts",
     "prisma:generate": "prisma generate"
   },
   "prisma": {

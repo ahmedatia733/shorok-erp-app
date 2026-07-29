@@ -88,7 +88,7 @@ export default function TreasuryTransfersPage() {
                       <TD>{r.transferDate}</TD>
                       <TD>{r.sourceTreasuryNameAr}</TD>
                       <TD>{r.destinationTreasuryNameAr}</TD>
-                      <TD className="tabular-nums">{money(r.amount)}</TD>
+                      <TD className="tabular-nums">{money(r.amount, locale)}</TD>
                       <TD><Badge variant={statusVariant(r.status)}>{statusLabel(r.status)}</Badge></TD>
                       <TD>{r.journalEntryId ? <Link href={`/${locale}/accounting/journal`} className="text-primary hover:underline text-xs">{t("showLink")}</Link> : "—"}</TD>
                       <TD>
@@ -148,14 +148,14 @@ function CreateTransferModal({ treasuries, onClose, onCreated }: { treasuries: T
           <Label>{t("transferFrom")} *</Label>
           <select value={sourceTreasuryId} onChange={(e) => setSource(e.target.value)} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="transfer-source">
             <option value="">{t("choose")}</option>
-            {treasuries.map((tr) => <option key={tr.id} value={tr.id}>{treasuryOptionLabel(tr)}</option>)}
+            {treasuries.map((tr) => <option key={tr.id} value={tr.id}>{treasuryOptionLabel(tr, locale)}</option>)}
           </select>
         </div>
         <div className="space-y-1">
           <Label>{t("transferTo")} *</Label>
           <select value={destinationTreasuryId} onChange={(e) => setDest(e.target.value)} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="transfer-dest">
             <option value="">{t("choose")}</option>
-            {treasuries.map((tr) => <option key={tr.id} value={tr.id}>{treasuryOptionLabel(tr)}</option>)}
+            {treasuries.map((tr) => <option key={tr.id} value={tr.id}>{treasuryOptionLabel(tr, locale)}</option>)}
           </select>
         </div>
         <div className="space-y-1"><Label>{t("formNotes")}</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>

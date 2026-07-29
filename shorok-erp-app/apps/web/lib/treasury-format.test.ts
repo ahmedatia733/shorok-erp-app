@@ -1,4 +1,4 @@
-import { statusBadge, money, treasuryOptionLabel, selectableTreasuries, validateTreasuryForm, validateTransferForm } from "./treasury-format";
+import { statusBadge, money, localizedName, treasuryOptionLabel, selectableTreasuries, validateTreasuryForm, validateTransferForm } from "./treasury-format";
 
 describe("treasury-format", () => {
   it("maps transfer status to Arabic label + variant", () => {
@@ -8,11 +8,21 @@ describe("treasury-format", () => {
     expect(statusBadge("???")).toEqual({ label: "مسودة", variant: "warning" }); // safe fallback
   });
 
-  it("formats money with 2 decimals (locale-stable)", () => {
-    const expected = (n: number) => n.toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    expect(money("1000")).toBe(expected(1000));
-    expect(money("0")).toBe(expected(0));
-    expect(money(1234.5)).toBe(expected(1234.5));
+  it("formats money with 2 decimals (locale-aware)", () => {
+    const ar = (n: number) => n.toLocaleString("ar-EG", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const en = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    expect(money("1000")).toBe(ar(1000));      // default Arabic
+    expect(money("1000", "ar")).toBe(ar(1000));
+    expect(money("1000", "en")).toBe(en(1000)); // English digits: "1,000.00"
+    expect(money("1000", "en")).toBe("1,000.00");
+    expect(money("0", "ar")).toBe(ar(0));
+  });
+
+  it("prefers the English name on the English locale when present, falls back to Arabic", () => {
+    expect(localizedName("خزنة", "Sales Treasury", "en")).toBe("Sales Treasury");
+    expect(localizedName("خزنة", "", "en")).toBe("خزنة");       // no English → Arabic
+    expect(localizedName("خزنة", null, "en")).toBe("خزنة");
+    expect(localizedName("خزنة", "Sales Treasury", "ar")).toBe("خزنة"); // Arabic locale keeps Arabic
   });
 
   it("builds a selector label with name, code and balance", () => {

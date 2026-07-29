@@ -13,6 +13,8 @@ import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { SupplierPicker } from "../../../../../components/features/factory-ledger/supplier-picker";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { listAllBranches, type BranchRow } from "../../../../../lib/admin-client";
+import { TreasuryPicker } from "../../../../../components/features/treasury-picker";
 import { createSupplierPayment, getSupplierStatement, type SupplierStatement } from "../../../../../lib/payments-client";
 import { ApiClientError } from "../../../../../lib/api-client";
 import { NegativeBalanceModal } from "../../../../../components/features/negative-balance-modal";
@@ -213,6 +215,9 @@ export default function SupplierPaymentsPage() {
   const [supplierId, setSupplierId]       = useState<string | null>(null);
   const [apAccountId, setApAccountId]     = useState("");
   const [bankAccountId, setBankAccountId] = useState("");
+  const [branchId, setBranchId]           = useState<string | null>(null);
+  const [treasuryId, setTreasuryId]       = useState<string | null>(null);
+  const [branches, setBranches]           = useState<BranchRow[]>([]);
   const [amount, setAmount]               = useState("");
   const [paymentDate, setPaymentDate]     = useState(() => new Date().toISOString().slice(0, 10));
   const [reference, setReference]         = useState("");
@@ -226,6 +231,11 @@ export default function SupplierPaymentsPage() {
 
   useEffect(() => {
     listAccounts().then((rows) => setLeafAccounts(getAllLeafs(rows))).catch(() => {});
+    listAllBranches().then((rows) => {
+      const active = rows.filter((b) => b.active);
+      setBranches(active);
+      if (active[0]) setBranchId(active[0].id);
+    }).catch(() => {});
   }, []);
 
   // All liability leaf accounts for AP selection
@@ -266,6 +276,8 @@ export default function SupplierPaymentsPage() {
         supplierId: supplierId!,
         apAccountId,
         bankAccountId,
+        ...(treasuryId ? { treasuryId } : {}),
+        ...(branchId ? { branchId } : {}),
         amount,
         paymentDate,
         reference: reference || undefined,
@@ -332,14 +344,28 @@ export default function SupplierPaymentsPage() {
                   placeholder="— اختر حساب المورد (دائن) —"
                 />
 
-                {/* Bank / Cash Account — all ASSET accounts */}
-                <AccountSelect
-                  label="مصدر الدفع — بنك / خزينة / صندوق"
-                  hint="ابحث بالاسم أو الكود"
-                  accounts={bankCashAccounts}
+                {/* Branch + treasury-native payment source */}
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium mb-1">الفرع</label>
+                  <select
+                    value={branchId ?? ""}
+                    onChange={(e) => { setBranchId(e.target.value); setBankAccountId(""); setTreasuryId(null); }}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    data-testid="supplier-payment-branch"
+                  >
+                    <option value="">— اختر الفرع —</option>
+                    {branches.map((b) => <option key={b.id} value={b.id}>{b.nameAr}</option>)}
+                  </select>
+                </div>
+                <TreasuryPicker
+                  label="مصدر الدفع — الخزنة / البنك"
+                  branchId={branchId}
                   value={bankAccountId}
                   onChange={setBankAccountId}
-                  placeholder="— اختر البنك أو الخزينة —"
+                  onPick={(t) => setTreasuryId(t?.id ?? null)}
+                  includeEmptyOption
+                  emptyLabel="— اختر الخزنة —"
+                  testId="supplier-payment-treasury"
                 />
 
                 {/* Amount + Date */}

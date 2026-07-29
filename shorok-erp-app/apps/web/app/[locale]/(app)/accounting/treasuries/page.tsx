@@ -20,7 +20,7 @@ import {
   listTreasuries, createTreasury, updateTreasury, activateTreasury, deactivateTreasury,
   type TreasuryRow,
 } from "../../../../../lib/treasuries-client";
-import { money, validateTreasuryForm } from "../../../../../lib/treasury-format";
+import { money, localizedName, validateTreasuryForm } from "../../../../../lib/treasury-format";
 
 export default function TreasuriesPage() {
   const locale = useLocale() as AppLocale;
@@ -100,10 +100,10 @@ export default function TreasuriesPage() {
                   {rows.map((row) => (
                     <TR key={row.id} data-testid="treasury-row" data-code={row.code}>
                       <TD className="font-mono text-xs">{row.code}</TD>
-                      <TD className="font-medium">{row.nameAr}</TD>
-                      <TD>{row.branchNameAr}</TD>
+                      <TD className="font-medium">{localizedName(row.nameAr, row.nameEn, locale)}</TD>
+                      <TD>{localizedName(row.branchNameAr, row.branchNameEn, locale)}</TD>
                       <TD className="font-mono text-xs">{row.glAccountCode}</TD>
-                      <TD className="tabular-nums">{money(row.balance)}</TD>
+                      <TD className="tabular-nums">{money(row.balance, locale)}</TD>
                       <TD>{row.allowNegativeBalance ? t("yes") : t("no")}</TD>
                       <TD>{row.isDefault ? <Badge variant="success">{t("badgeDefault")}</Badge> : "—"}</TD>
                       <TD>{row.active ? <Badge variant="success">{t("statusActive")}</Badge> : <Badge variant="neutral">{t("statusInactive")}</Badge>}</TD>

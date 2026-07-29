@@ -77,6 +77,8 @@ export const createSupplierPayment = (body: {
   supplierId: string;
   apAccountId: string;
   bankAccountId: string;
+  treasuryId?: string;
+  branchId?: string;
   amount: string;
   paymentDate: string;
   reference?: string;
