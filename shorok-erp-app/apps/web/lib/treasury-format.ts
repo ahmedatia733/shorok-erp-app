@@ -21,17 +21,29 @@ export function selectableTreasuries<T extends { active: boolean }>(rows: T[]): 
   return rows.filter((t) => t.active);
 }
 
-/** Arabic validation for the create-treasury form. Returns an error message or null. */
-export function validateTreasuryForm(v: { nameAr: string; branchId: string }): string | null {
-  if (!v.nameAr.trim()) return "اسم الخزنة بالعربية مطلوب.";
-  if (!v.branchId) return "اختر الفرع.";
+/**
+ * Validation for the create-treasury form. Returns a (localized) error message
+ * or null. Messages default to Arabic; callers pass localized strings.
+ */
+export function validateTreasuryForm(
+  v: { nameAr: string; branchId: string },
+  msg: { nameRequired: string; branchRequired: string } = { nameRequired: "اسم الخزنة بالعربية مطلوب.", branchRequired: "اختر الفرع." },
+): string | null {
+  if (!v.nameAr.trim()) return msg.nameRequired;
+  if (!v.branchId) return msg.branchRequired;
   return null;
 }
 
-/** Arabic validation for the treasury-transfer form. Returns an error message or null. */
-export function validateTransferForm(v: { sourceTreasuryId: string; destinationTreasuryId: string; amount: string }): string | null {
-  if (!v.sourceTreasuryId || !v.destinationTreasuryId) return "اختر خزنة المصدر والوجهة.";
-  if (v.sourceTreasuryId === v.destinationTreasuryId) return "لا يمكن التحويل إلى نفس الخزنة.";
-  if (!v.amount || Number(v.amount) <= 0) return "أدخل مبلغاً أكبر من صفر.";
+/**
+ * Validation for the treasury-transfer form. Returns a (localized) error message
+ * or null. Messages default to Arabic; callers pass localized strings.
+ */
+export function validateTransferForm(
+  v: { sourceTreasuryId: string; destinationTreasuryId: string; amount: string },
+  msg: { both: string; same: string; amount: string } = { both: "اختر خزنة المصدر والوجهة.", same: "لا يمكن التحويل إلى نفس الخزنة.", amount: "أدخل مبلغاً أكبر من صفر." },
+): string | null {
+  if (!v.sourceTreasuryId || !v.destinationTreasuryId) return msg.both;
+  if (v.sourceTreasuryId === v.destinationTreasuryId) return msg.same;
+  if (!v.amount || Number(v.amount) <= 0) return msg.amount;
   return null;
 }

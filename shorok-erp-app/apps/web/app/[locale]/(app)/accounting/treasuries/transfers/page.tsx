@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import type { AppLocale } from "../../../../../../i18n";
 import { Alert } from "../../../../../../components/ui/alert";
@@ -19,10 +19,17 @@ import {
   listTransfers, createTransfer, confirmTransfer, cancelTransfer, treasurySelector,
   type TransferRow, type TreasuryRow,
 } from "../../../../../../lib/treasuries-client";
-import { statusBadge, money, treasuryOptionLabel, validateTransferForm } from "../../../../../../lib/treasury-format";
+import { money, treasuryOptionLabel, validateTransferForm } from "../../../../../../lib/treasury-format";
+
+function statusVariant(status: string): "neutral" | "success" | "warning" {
+  if (status === "CONFIRMED") return "success";
+  if (status === "CANCELLED") return "neutral";
+  return "warning";
+}
 
 export default function TreasuryTransfersPage() {
   const locale = useLocale() as AppLocale;
+  const t = useTranslations("treasury");
   const canManage = useHasRole("OWNER", "ACCOUNTANT");
   const [rows, setRows] = useState<TransferRow[]>([]);
   const [treasuries, setTreasuries] = useState<TreasuryRow[]>([]);
@@ -30,52 +37,49 @@ export default function TreasuryTransfersPage() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
+  const statusLabel = (s: string) => (s === "CONFIRMED" ? t("statusConfirmed") : s === "CANCELLED" ? t("statusCancelled") : t("statusDraft"));
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [tr, sel] = await Promise.all([listTransfers(), treasurySelector()]);
-      setRows(tr.items);
-      setTreasuries(sel.items);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّر تحميل التحويلات.");
-    } finally {
-      setLoading(false);
-    }
-  }, [locale]);
+      setRows(tr.items); setTreasuries(sel.items); setError(null);
+    } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : t("errTransfers")); }
+    finally { setLoading(false); }
+  }, [locale, t]);
 
   useEffect(() => { void load(); }, [load]);
 
   const act = async (fn: () => Promise<unknown>) => {
     try { await fn(); await load(); }
-    catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّرت العملية."); }
+    catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : t("errAction")); }
   };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">تحويلات الخزائن</h1>
-          <p className="text-sm text-textSecondary">نقل الأموال بين الخزائن بقيد مزدوج قابل للعكس.</p>
+          <h1 className="text-xl font-semibold">{t("transfersTitle")}</h1>
+          <p className="text-sm text-textSecondary">{t("transfersSubtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href={`/${locale}/accounting/treasuries`}><Button variant="ghost">الخزائن</Button></Link>
-          {canManage && <Button onClick={() => setOpen(true)} data-testid="add-transfer">تحويل جديد</Button>}
+          <Link href={`/${locale}/accounting/treasuries`}><Button variant="ghost">{t("treasuriesLink")}</Button></Link>
+          {canManage && <Button onClick={() => setOpen(true)} data-testid="add-transfer">{t("newTransfer")}</Button>}
         </div>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
 
       <Card>
-        <CardHeader><CardTitle>سجل التحويلات</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t("transfersListTitle")}</CardTitle></CardHeader>
         <CardBody>
           {loading ? <Skeleton className="h-40 w-full" /> : rows.length === 0 ? (
-            <p className="py-8 text-center text-textSecondary">لا توجد تحويلات بعد.</p>
+            <p className="py-8 text-center text-textSecondary">{t("noTransfers")}</p>
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <THead>
-                  <TR><TH>الرقم</TH><TH>التاريخ</TH><TH>من</TH><TH>إلى</TH><TH>المبلغ</TH><TH>الحالة</TH><TH>القيد</TH><TH>الإجراءات</TH></TR>
+                  <TR><TH>{t("colNumber")}</TH><TH>{t("colDate")}</TH><TH>{t("colFrom")}</TH><TH>{t("colTo")}</TH><TH>{t("colAmount")}</TH><TH>{t("colStatus")}</TH><TH>{t("entryLink")}</TH><TH>{t("colActions")}</TH></TR>
                 </THead>
                 <TBody>
                   {rows.map((r) => (
@@ -85,16 +89,12 @@ export default function TreasuryTransfersPage() {
                       <TD>{r.sourceTreasuryNameAr}</TD>
                       <TD>{r.destinationTreasuryNameAr}</TD>
                       <TD className="tabular-nums">{money(r.amount)}</TD>
-                      <TD><Badge variant={statusBadge(r.status).variant}>{statusBadge(r.status).label}</Badge></TD>
-                      <TD>{r.journalEntryId ? <Link href={`/${locale}/accounting/journal`} className="text-primary hover:underline text-xs">عرض</Link> : "—"}</TD>
+                      <TD><Badge variant={statusVariant(r.status)}>{statusLabel(r.status)}</Badge></TD>
+                      <TD>{r.journalEntryId ? <Link href={`/${locale}/accounting/journal`} className="text-primary hover:underline text-xs">{t("showLink")}</Link> : "—"}</TD>
                       <TD>
                         <div className="flex items-center gap-2">
-                          {canManage && r.status === "DRAFT" && (
-                            <button onClick={() => void act(() => confirmTransfer(r.id))} className="text-sm text-primary hover:underline" data-testid="confirm-transfer">تأكيد</button>
-                          )}
-                          {canManage && r.status !== "CANCELLED" && (
-                            <button onClick={() => { const reason = window.prompt("سبب الإلغاء؟"); if (reason) void act(() => cancelTransfer(r.id, reason)); }} className="text-sm text-textSecondary hover:underline">إلغاء</button>
-                          )}
+                          {canManage && r.status === "DRAFT" && <button onClick={() => void act(() => confirmTransfer(r.id))} className="text-sm text-primary hover:underline" data-testid="confirm-transfer">{t("confirm")}</button>}
+                          {canManage && r.status !== "CANCELLED" && <button onClick={() => { const reason = window.prompt(t("cancelReasonPrompt")); if (reason) void act(() => cancelTransfer(r.id, reason)); }} className="text-sm text-textSecondary hover:underline">{t("statusCancelled")}</button>}
                         </div>
                       </TD>
                     </TR>
@@ -106,19 +106,14 @@ export default function TreasuryTransfersPage() {
         </CardBody>
       </Card>
 
-      {open && (
-        <CreateTransferModal
-          treasuries={treasuries}
-          onClose={() => setOpen(false)}
-          onCreated={async () => { setOpen(false); await load(); }}
-        />
-      )}
+      {open && <CreateTransferModal treasuries={treasuries} onClose={() => setOpen(false)} onCreated={async () => { setOpen(false); await load(); }} />}
     </div>
   );
 }
 
 function CreateTransferModal({ treasuries, onClose, onCreated }: { treasuries: TreasuryRow[]; onClose: () => void; onCreated: () => void }) {
   const locale = useLocale() as AppLocale;
+  const t = useTranslations("treasury");
   const [transferDate, setTransferDate] = useState(new Date().toISOString().slice(0, 10));
   const [sourceTreasuryId, setSource] = useState("");
   const [destinationTreasuryId, setDest] = useState("");
@@ -128,54 +123,46 @@ function CreateTransferModal({ treasuries, onClose, onCreated }: { treasuries: T
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const opt = (t: TreasuryRow) => treasuryOptionLabel(t);
-
   const submit = async () => {
     setError(null);
-    const invalid = validateTransferForm({ sourceTreasuryId, destinationTreasuryId, amount });
+    const invalid = validateTransferForm({ sourceTreasuryId, destinationTreasuryId, amount }, { both: t("errTransferBoth"), same: t("errTransferSame"), amount: t("errTransferAmount") });
     if (invalid) return setError(invalid);
     setSaving(true);
     try {
       const created = await createTransfer({ transferDate, sourceTreasuryId, destinationTreasuryId, amount: Number(amount).toFixed(2), notes: notes.trim() || undefined });
       if (confirmNow) await confirmTransfer(created.id);
       onCreated();
-    } catch (e) {
-      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّر إنشاء التحويل.");
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : t("errTransferCreate")); }
+    finally { setSaving(false); }
   };
 
   return (
-    <Modal open onClose={onClose} title="تحويل بين الخزائن">
+    <Modal open onClose={onClose} title={t("transferTitle")}>
       <div className="space-y-3">
         {error && <Alert variant="error">{error}</Alert>}
         <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label>التاريخ *</Label><Input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} /></div>
-          <div className="space-y-1"><Label>المبلغ *</Label><Input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="transfer-amount" /></div>
+          <div className="space-y-1"><Label>{t("openingDate")} *</Label><Input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} /></div>
+          <div className="space-y-1"><Label>{t("colAmount")} *</Label><Input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="transfer-amount" /></div>
         </div>
         <div className="space-y-1">
-          <Label>من خزنة *</Label>
+          <Label>{t("transferFrom")} *</Label>
           <select value={sourceTreasuryId} onChange={(e) => setSource(e.target.value)} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="transfer-source">
-            <option value="">— اختر —</option>
-            {treasuries.map((t) => <option key={t.id} value={t.id}>{opt(t)}</option>)}
+            <option value="">{t("choose")}</option>
+            {treasuries.map((tr) => <option key={tr.id} value={tr.id}>{treasuryOptionLabel(tr)}</option>)}
           </select>
         </div>
         <div className="space-y-1">
-          <Label>إلى خزنة *</Label>
+          <Label>{t("transferTo")} *</Label>
           <select value={destinationTreasuryId} onChange={(e) => setDest(e.target.value)} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="transfer-dest">
-            <option value="">— اختر —</option>
-            {treasuries.map((t) => <option key={t.id} value={t.id}>{opt(t)}</option>)}
+            <option value="">{t("choose")}</option>
+            {treasuries.map((tr) => <option key={tr.id} value={tr.id}>{treasuryOptionLabel(tr)}</option>)}
           </select>
         </div>
-        <div className="space-y-1"><Label>ملاحظات</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={confirmNow} onChange={(e) => setConfirmNow(e.target.checked)} />
-          تأكيد التحويل فوراً (ترحيل القيد)
-        </label>
+        <div className="space-y-1"><Label>{t("formNotes")}</Label><Input value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={confirmNow} onChange={(e) => setConfirmNow(e.target.checked)} />{t("confirmNow")}</label>
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose} disabled={saving}>إلغاء</Button>
-          <Button onClick={() => void submit()} disabled={saving} data-testid="transfer-save">{saving ? "جارٍ الحفظ…" : "حفظ"}</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>{t("cancel")}</Button>
+          <Button onClick={() => void submit()} disabled={saving} data-testid="transfer-save">{saving ? t("saving") : t("save")}</Button>
         </div>
       </div>
     </Modal>

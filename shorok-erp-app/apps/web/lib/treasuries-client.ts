@@ -40,6 +40,9 @@ export interface TreasuryStatement {
   treasury: TreasuryRow;
   openingBalance: string;
   closingBalance: string;
+  currentBalance: string;
+  limit: number;
+  nextCursor: string | null;
   items: TreasuryStatementRow[];
 }
 
@@ -79,12 +82,28 @@ export const activateTreasury = (id: string) => apiCall<TreasuryRow>(`/treasurie
 export const deactivateTreasury = (id: string) => apiCall<TreasuryRow>(`/treasuries/${id}/deactivate`, { method: "POST", body: {} });
 export const postOpeningBalance = (id: string, body: { entryDate: string; amount: string; counterpartAccountId?: string; branchId?: string; reference?: string; notes?: string }) =>
   apiCall<{ treasuryId: string; journalEntryId: string; balance: string; idempotent: boolean }>(`/treasuries/${id}/opening-balance`, { method: "POST", body });
-export const getTreasuryStatement = (id: string, params: { from?: string; to?: string } = {}) => {
+export const getTreasuryStatement = (id: string, params: { from?: string; to?: string; cursor?: string; limit?: number } = {}) => {
   const p = new URLSearchParams();
   if (params.from) p.set("from", params.from);
   if (params.to) p.set("to", params.to);
+  if (params.cursor) p.set("cursor", params.cursor);
+  if (params.limit) p.set("limit", String(params.limit));
   return apiCall<TreasuryStatement>(`/treasuries/${id}/statement?${p.toString()}`);
 };
+
+export interface OpeningBalanceRow {
+  journalEntryId: string;
+  entryNumber: string;
+  entryDate: string;
+  amount: string;
+  counterpartAccountId: string | null;
+  status: "POSTED" | "REVERSED";
+  reversalJournalEntryId: string | null;
+  reversalEntryNumber: string | null;
+}
+export const listOpeningBalances = (id: string) => apiCall<{ treasuryId: string; items: OpeningBalanceRow[] }>(`/treasuries/${id}/opening-balances`);
+export const reverseOpeningBalance = (id: string, entryId: string, reason: string) =>
+  apiCall<{ balance: string; idempotent: boolean }>(`/treasuries/${id}/opening-balances/${entryId}/reverse`, { method: "POST", body: { reason } });
 
 export const listTransfers = () => apiCall<{ items: TransferRow[] }>("/treasuries/transfers");
 export const createTransfer = (body: { transferDate: string; sourceTreasuryId: string; destinationTreasuryId: string; amount: string; reference?: string; notes?: string }) =>
