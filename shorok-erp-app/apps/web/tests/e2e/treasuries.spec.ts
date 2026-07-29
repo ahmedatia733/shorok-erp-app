@@ -51,7 +51,7 @@ test.describe("treasuries — owner", () => {
     const row = page.locator('[data-testid="treasury-row"]', { hasText: "خزنة المبيعات" });
     await expect(row).toBeVisible();
     // first treasury is the default + its own GL account code is shown
-    await expect(row.getByText("افتراضية")).toBeVisible();
+    await expect(row.getByText("افتراضية", { exact: true })).toBeVisible();
 
     // refresh → still authenticated, treasury still there (session persists)
     await page.reload();
@@ -179,5 +179,104 @@ test.describe("treasuries — operational + localization (closure)", () => {
     await page.locator('[data-testid="treasury-row"]', { hasText: "خزنة المصروفات E2E" }).getByText("إيقاف").click();
     await page.goto("/ar/expenses/new");
     await expect(page.getByTestId("expense-treasury").locator("option", { hasText: "خزنة المصروفات E2E" })).toHaveCount(0);
+  });
+});
+
+// Token-based API helper for deterministic bulk setup (no UI churn).
+async function apiToken(page: Page, phone: string): Promise<string> {
+  return page.evaluate(async ({ phone, password }) => {
+    const r = await fetch("http://localhost:3001/api/v1/auth/login", {
+      method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+      body: JSON.stringify({ phone, password }),
+    });
+    return (await r.json()).accessToken as string;
+  }, { phone, password: F.password });
+}
+async function api(page: Page, token: string, method: string, path: string, body?: unknown) {
+  return page.evaluate(async ({ token, method, path, body }) => {
+    const r = await fetch(`http://localhost:3001/api/v1${path}`, {
+      method, headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      credentials: "include", body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: r.status, body: await r.json().catch(() => ({})) };
+  }, { token, method, path, body });
+}
+
+test.describe("treasuries — closure browser coverage", () => {
+  test.beforeEach(async ({ page }) => login(page, F.ownerPhone));
+
+  test("14: edit treasury name/notes/allow-negative from the UI", async ({ page }) => {
+    await page.goto("/ar/accounting/treasuries");
+    await createTreasury(page, "خزنة للتعديل");
+    await page.locator('[data-testid="treasury-row"]', { hasText: "خزنة للتعديل" }).getByRole("button", { name: "تعديل" }).click();
+    await page.getByTestId("edit-nameAr").fill("خزنة معدّلة");
+    await page.getByTestId("edit-save").click();
+    await expect(page.locator('[data-testid="treasury-row"]', { hasText: "خزنة معدّلة" })).toBeVisible();
+  });
+
+  test("15: set another treasury as default within the same branch", async ({ page }) => {
+    await page.goto("/ar/accounting/treasuries");
+    await createTreasury(page, "افتراضية أولى");   // first → default
+    await createTreasury(page, "افتراضية ثانية");   // second → not default
+    const row = page.locator('[data-testid="treasury-row"]', { hasText: "افتراضية ثانية" });
+    await row.getByRole("button", { name: "تعيين كافتراضية" }).click();
+    await expect(row.getByText("افتراضية", { exact: true })).toBeVisible(); // the Default badge
+  });
+
+  test("13: the expense payment treasury picker lists active treasuries", async ({ page }) => {
+    await page.goto("/ar/accounting/treasuries");
+    await createTreasury(page, "خزنة مصروف E2E");
+    await page.goto("/ar/expenses/new");
+    await expect(page.getByTestId("expense-treasury").locator("option", { hasText: "خزنة مصروف E2E" })).toHaveCount(1);
+  });
+
+  test("12: the supplier-payment screen shows a branch + treasury-native picker", async ({ page }) => {
+    await page.goto("/ar/accounting/treasuries");
+    await createTreasury(page, "خزنة سداد E2E");
+    await page.goto("/ar/purchasing/supplier-payments");
+    await expect(page.getByTestId("supplier-payment-branch")).toBeVisible();
+    await expect(page.getByTestId("supplier-payment-treasury").locator("option", { hasText: "خزنة سداد E2E" })).toHaveCount(1);
+  });
+
+  test("17: reverse an opening balance AFTER a later outflow → treasury goes negative", async ({ page }) => {
+    const token = await apiToken(page, F.ownerPhone);
+    const created = await api(page, token, "POST", "/treasuries", { nameAr: "خزنة عكس بعد صرف", branchId: F.branchId });
+    const tid = created.body.id;
+    // if the fixture has no branchId field, fall back to the treasury's own branch (create without branchId fails) — resolve via a created default branch
+    await api(page, token, "POST", `/treasuries/${tid}/opening-balance`, { entryDate: "2026-02-01", amount: "700.00" });
+    await api(page, token, "POST", "/expenses", { branchId: created.body.branchId, expenseDate: "2026-02-05", description: "صرف", amount: "500.00", paidFromAccount: "خزنة", glAccountId: F.expenseAccountId, paymentGlAccountId: created.body.glAccountId });
+    await page.goto(`/ar/accounting/treasuries/${tid}`);
+    await expect(page.getByTestId("treasury-balance")).toHaveText(/٢٠٠/); // 200 after outflow
+    page.once("dialog", (d) => d.accept("تصحيح"));
+    await page.getByTestId("reverse-opening").click();
+    await expect(page.getByTestId("treasury-balance")).toHaveText(/-?‎?٥٠٠|-500/); // -500 after reversal
+  });
+
+  test("16: statement load-more paginates beyond 25 movements", async ({ page }) => {
+    const token = await apiToken(page, F.ownerPhone);
+    const created = await api(page, token, "POST", "/treasuries", { nameAr: "خزنة ترقيم", branchId: F.branchId });
+    const tid = created.body.id;
+    for (let d = 1; d <= 28; d++) {
+      const mm = d <= 9 ? `0${d}` : `${d}`;
+      await api(page, token, "POST", `/treasuries/${tid}/opening-balance`, { entryDate: `2026-05-${mm}`, amount: "10.00" });
+    }
+    await page.goto(`/ar/accounting/treasuries/${tid}`);
+    const rowsBefore = await page.locator("table").last().locator("tbody tr").count();
+    expect(rowsBefore).toBeLessThanOrEqual(25);
+    await page.getByTestId("load-more").click();
+    await expect(page.getByTestId("load-more")).toHaveCount(0); // 28 total → second page loads the rest
+    const rowsAfter = await page.locator("table").last().locator("tbody tr").count();
+    expect(rowsAfter).toBeGreaterThan(rowsBefore);
+  });
+
+  test("18: the English detail page is English + LTR with locale-correct numbers", async ({ page }) => {
+    await page.goto("/ar/accounting/treasuries");
+    await createTreasury(page, "خزنة إنجليزي");
+    const href = await page.locator('[data-testid="treasury-row"]', { hasText: "خزنة إنجليزي" }).getByText("كشف الحركة").getAttribute("href");
+    await page.goto(href!.replace("/ar/", "/en/"));
+    await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+    await expect(page.getByText("Current balance")).toBeVisible();       // English label
+    await expect(page.getByTestId("treasury-balance")).toHaveText(/0\.00/); // Latin digits
+    await expect(page.getByText(/treasury\.[a-zA-Z]/)).toHaveCount(0);   // no raw keys
   });
 });

@@ -61,6 +61,7 @@ async function main() {
   const inv = await mk("E-INV", "ASSET", "CURRENT_ASSET");
   // Opening-equity counterpart so treasury opening balances can post (additive).
   const openingEquity = await mk("E-OEQ", "EQUITY", "EQUITY");
+  const expenseAcc = await mk("E-EXP", "EXPENSE", "EXPENSE");
   await prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), arAccountId: ar.id, apAccountId: ap.id, revenueAccountId: rev.id, salesReturnsAccountId: sret.id, vatOutputAccountId: vatO.id, vatInputAccountId: vatI.id, cogsAccountId: cogs.id, inventoryAccountId: inv.id, openingEquityAccountId: openingEquity.id, createdBy: owner.id } });
   for (let m = 1; m <= 12; m++) await prisma.financialPeriod.create({ data: { year: 2026, month: m, status: "OPEN" } });
 
@@ -177,6 +178,7 @@ async function main() {
     stockedPurchase2Id: stockedPurchase2.id, stockedPurchase2Number: "PINV-E2E-ACCT",
     purchaseManagerDraftReturnId: purchaseManagerDraft.id,
     branchBPhone: BRANCH_B_PHONE, branchBId: branchB.id,
+    branchId: branch.id, expenseAccountId: expenseAcc.id,
   };
   writeFileSync("/tmp/shorok-e2e-fixture.json", JSON.stringify(fixture, null, 2));
   // eslint-disable-next-line no-console
