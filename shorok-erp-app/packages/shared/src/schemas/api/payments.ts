@@ -16,6 +16,10 @@ export const CreateSupplierPaymentSchema = z.object({
   supplierId: UuidSchema,
   apAccountId: UuidSchema,
   bankAccountId: UuidSchema,
+  // Additive treasury dimension: when treasuryId is given, the backend resolves
+  // the GL account + branch from it; bankAccountId stays for legacy clients.
+  treasuryId: UuidSchema.optional(),
+  branchId: UuidSchema.optional(),
   amount: z.string().regex(/^\d+(\.\d{1,2})?$/),
   paymentDate: IsoDateSchema,
   reference: z.string().max(100).optional(),

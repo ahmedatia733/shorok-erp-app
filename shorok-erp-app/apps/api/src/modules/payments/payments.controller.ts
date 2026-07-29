@@ -9,7 +9,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { StatementService } from "../accounting-statements/statement.service";
 import { TreasuryGuardService } from "../posting/treasury-guard.service";
-import { resolveOperationalTreasury } from "../treasuries/treasury-validation";
+import { resolveOperationalTreasury, resolveOperationalTreasuryById } from "../treasuries/treasury-validation";
 
 @Controller()
 export class PaymentsController {
@@ -154,17 +154,28 @@ export class PaymentsController {
     if (!bankAccount) throw new NotFoundError({ bankAccountId: body.bankAccountId });
 
     return this.prisma.runInTransaction(async (tx) => {
-      // Multi-treasury: if the bank account maps to a Treasury it must be active
-      // and accessible to the user (legacy accounts keep prior behaviour).
-      await resolveOperationalTreasury(tx, { glAccountId: body.bankAccountId, user });
-      // Negative treasury/bank balance protection. This flow posts directly (not
-      // via the PostingEngine), so the guard is invoked here for the bank credit
-      // (outflow) — the guard hard-rejects when the mapped treasury disallows
-      // negatives, regardless of the acknowledgement flag.
+      // Multi-treasury branch dimension. Prefer an explicit treasuryId (new UI);
+      // fall back to the legacy bankAccountId. Either way, if the account maps to
+      // a Treasury it must be active + accessible, and its branch becomes the
+      // effective document branch stamped on BOTH journal lines.
+      let bankGlAccountId = body.bankAccountId;
+      let effectiveBranchId: string | null = body.branchId ?? null;
+      let treasuryId: string | null = null;
+      if (body.treasuryId) {
+        const tr = await resolveOperationalTreasuryById(tx, { treasuryId: body.treasuryId, documentBranchId: body.branchId, user });
+        bankGlAccountId = tr.glAccountId;
+        effectiveBranchId = tr.branchId;
+        treasuryId = tr.id;
+      } else {
+        const { treasury } = await resolveOperationalTreasury(tx, { glAccountId: body.bankAccountId, documentBranchId: body.branchId, user });
+        if (treasury) { effectiveBranchId = treasury.branchId; treasuryId = treasury.id; }
+      }
+      // Negative treasury/bank balance protection (hard-rejects a no-negative
+      // treasury regardless of the acknowledgement flag).
       await this.treasuryGuard.check(tx, {
         lines: [
           { accountId: body.apAccountId, debit: body.amount, credit: "0" },
-          { accountId: body.bankAccountId, debit: "0", credit: body.amount },
+          { accountId: bankGlAccountId, debit: "0", credit: body.amount },
         ],
         acknowledge: body.acknowledgeNegativeBalance,
         reason: body.negativeBalanceReason ?? null,
@@ -190,8 +201,8 @@ export class PaymentsController {
           createdBy: user.id,
           lines: {
             create: [
-              { accountId: body.apAccountId,   debit: body.amount, credit: "0", note: `سداد للمورد ${supplier.nameAr}`, partyType: "SUPPLIER", partyId: body.supplierId },
-              { accountId: body.bankAccountId, debit: "0", credit: body.amount, note: apAccount.nameAr },
+              { accountId: body.apAccountId, debit: body.amount, credit: "0", note: `سداد للمورد ${supplier.nameAr}`, partyType: "SUPPLIER", partyId: body.supplierId, branchId: effectiveBranchId },
+              { accountId: bankGlAccountId,  debit: "0", credit: body.amount, note: apAccount.nameAr, branchId: effectiveBranchId },
             ],
           },
         },
@@ -204,7 +215,7 @@ export class PaymentsController {
         action: "CREATE",
         entityType: "supplier_payment",
         entityId: entry.id,
-        afterSnapshot: { supplierId: body.supplierId, amount: body.amount, apAccountId: body.apAccountId, bankAccountId: body.bankAccountId },
+        afterSnapshot: { supplierId: body.supplierId, amount: body.amount, apAccountId: body.apAccountId, bankAccountId: bankGlAccountId, treasuryId, branchId: effectiveBranchId },
         summaryAr: `${user.name} سجّل دفعة ${body.amount} ج.م للمورد ${supplier.nameAr}`,
         summaryEn: `${user.name} recorded supplier payment ${body.amount} EGP to ${supplier.nameEn}`,
       });

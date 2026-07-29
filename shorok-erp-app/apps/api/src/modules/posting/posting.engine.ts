@@ -14,6 +14,12 @@ export interface PostInput extends PostingRequest {
   tx?: Prisma.TransactionClient;
   /** Warn-only negative-treasury policy: set true on the confirmed retry. */
   acknowledgeNegativeBalance?: boolean;
+  /**
+   * Set on REVERSALS/corrections: a reversing entry that drives a no-negative
+   * treasury below zero must still post (the money already moved) — it downgrades
+   * the guard's hard rejection to an audited allow. New outflows never set this.
+   */
+  treasuryCorrection?: boolean;
   /** Optional reason recorded with the acknowledgement audit row. */
   negativeBalanceReason?: string | null;
 }
@@ -131,6 +137,7 @@ export class PostingEngine {
     await this.treasuryGuard.check(tx, {
       lines: input.lines,
       acknowledge: input.acknowledgeNegativeBalance,
+      correction: input.treasuryCorrection,
       reason: input.negativeBalanceReason,
       actor: input.actor,
       sourceType: input.sourceType,

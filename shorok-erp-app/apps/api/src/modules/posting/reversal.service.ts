@@ -101,6 +101,9 @@ export class ReversalService {
         lines: mirroredLines,
         acknowledgeNegativeBalance: input.acknowledgeNegativeBalance,
         negativeBalanceReason: input.negativeBalanceReason,
+        // A reversal is a correction of an already-posted entry: it must post even
+        // if it drives a no-negative treasury below zero (the money already moved).
+        treasuryCorrection: true,
       });
 
       // If this key already produced a reversal, the engine returned it as

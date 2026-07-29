@@ -38,6 +38,8 @@ export class TreasuryGuardService {
     args: {
       lines: TreasuryCheckLine[];
       acknowledge?: boolean;
+      /** Reversal/correction: downgrade the hard no-negative rejection to an audited allow. */
+      correction?: boolean;
       reason?: string | null;
       actor: AuthenticatedUser;
       sourceType: string;
@@ -108,7 +110,10 @@ export class TreasuryGuardService {
       const t = policyByGl.get(String(o.treasuryAccountId));
       return t && !t.allowNegativeBalance;
     });
-    if (hardBlocked.length > 0) {
+    // A NEW outflow into a no-negative treasury is hard-rejected (acknowledge
+    // cannot override). A REVERSAL/correction is exempt — the money already moved,
+    // so it must post even if it drives the treasury negative, and is audited.
+    if (hardBlocked.length > 0 && !args.correction) {
       throw new ValidationError({
         reason: "insufficient_treasury_balance",
         accounts: hardBlocked,
@@ -116,13 +121,21 @@ export class TreasuryGuardService {
       });
     }
 
-    if (!args.acknowledge) {
+    // The remaining accounts (legacy, or treasuries that ALLOW negatives) keep the
+    // warn-only policy — a reversal does NOT auto-acknowledge these (legacy
+    // behaviour preserved). Only the correction-exempted hard-blocked accounts are
+    // force-allowed (and audited).
+    const hardBlockedGls = new Set(hardBlocked.map((o) => String(o.treasuryAccountId)));
+    const warnable = offending.filter((o) => !hardBlockedGls.has(String(o.treasuryAccountId)));
+
+    if (warnable.length > 0 && !args.acknowledge) {
       // No journal, no partial write — the caller's transaction rolls back.
-      throw new TreasuryNegativeBalanceWarning({ acknowledgementRequired: true, accounts: offending, ...offending[0] });
+      throw new TreasuryNegativeBalanceWarning({ acknowledgementRequired: true, accounts: warnable, ...warnable[0] });
     }
 
-    // Acknowledged: record the override (audit only — never a financial journal).
-    for (const o of offending) {
+    // Audit the acknowledged warnable overrides + any correction-exempted accounts.
+    const toAudit = [...(args.acknowledge ? warnable : []), ...(args.correction ? hardBlocked : [])];
+    for (const o of toAudit) {
       await this.audit.write({
         tx,
         actorId: args.actor.id,

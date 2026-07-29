@@ -88,8 +88,8 @@ export class TreasuriesController {
 
   @Get("selector")
   @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
-  async selector(@CurrentUser() user: AuthenticatedUser) {
-    return this.service.selector(user);
+  async selector(@Query("branchId") branchId: string | undefined, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.selector(user, branchId);
   }
 
   @Get(":id")

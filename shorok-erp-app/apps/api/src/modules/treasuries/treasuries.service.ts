@@ -127,9 +127,11 @@ export class TreasuriesService {
       nameEn: t.nameEn ?? null,
       branchId: t.branchId,
       branchNameAr: t.branch?.nameAr ?? "",
+      branchNameEn: t.branch?.nameEn ?? null,
       glAccountId: t.glAccountId,
       glAccountCode: t.glAccount?.code ?? "",
       glAccountNameAr: t.glAccount?.nameAr ?? "",
+      glAccountNameEn: t.glAccount?.nameEn ?? null,
       currencyCode: t.currencyCode,
       allowNegativeBalance: t.allowNegativeBalance,
       isDefault: t.isDefault,
@@ -147,7 +149,7 @@ export class TreasuriesService {
     if (!query.includeInactive) where.active = true;
     const treasuries = await this.prisma.treasury.findMany({
       where,
-      include: { branch: { select: { nameAr: true } }, glAccount: { select: { code: true, nameAr: true } } },
+      include: { branch: { select: { nameAr: true, nameEn: true } }, glAccount: { select: { code: true, nameAr: true, nameEn: true } } },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }],
     });
     const balances = await this.balancesFor(treasuries.map((t) => t.glAccountId));
@@ -155,10 +157,15 @@ export class TreasuriesService {
   }
 
   // ── selector: only ACTIVE + authorized treasuries (for txn screens) ───
-  async selector(user: AuthenticatedUser) {
+  async selector(user: AuthenticatedUser, branchId?: string) {
+    // An explicit branchId narrows to that branch's ACTIVE treasuries. A
+    // non-OWNER foreign branchId is already 403'd by the global BranchScopeGuard;
+    // this also filters to the requested branch for OWNER (multi-branch).
+    const where: Prisma.TreasuryWhereInput = { active: true, ...this.branchFilter(user) };
+    if (branchId) where.branchId = branchId;
     const treasuries = await this.prisma.treasury.findMany({
-      where: { active: true, ...this.branchFilter(user) },
-      include: { branch: { select: { nameAr: true } }, glAccount: { select: { code: true, nameAr: true } } },
+      where,
+      include: { branch: { select: { nameAr: true, nameEn: true } }, glAccount: { select: { code: true, nameAr: true, nameEn: true } } },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }],
     });
     const balances = await this.balancesFor(treasuries.map((t) => t.glAccountId));
@@ -169,7 +176,7 @@ export class TreasuriesService {
   private async loadOrNotFound(id: string, user: AuthenticatedUser) {
     const t = await this.prisma.treasury.findUnique({
       where: { id },
-      include: { branch: { select: { nameAr: true } }, glAccount: { select: { code: true, nameAr: true } } },
+      include: { branch: { select: { nameAr: true, nameEn: true } }, glAccount: { select: { code: true, nameAr: true, nameEn: true } } },
     });
     if (!t) throw new NotFoundError({ id });
     this.assertBranchOrNotFound(user, t.branchId, id);
@@ -241,7 +248,7 @@ export class TreasuriesService {
           allowNegativeBalance: body.allowNegativeBalance, isDefault, active: true,
           notes: body.notes ?? null, createdBy: user.id,
         },
-        include: { branch: { select: { nameAr: true } }, glAccount: { select: { code: true, nameAr: true } } },
+        include: { branch: { select: { nameAr: true, nameEn: true } }, glAccount: { select: { code: true, nameAr: true, nameEn: true } } },
       });
 
       await this.audit.write({
@@ -278,7 +285,7 @@ export class TreasuriesService {
           isDefault: body.isDefault ?? undefined,
           notes: body.notes === undefined ? undefined : body.notes,
         },
-        include: { branch: { select: { nameAr: true } }, glAccount: { select: { code: true, nameAr: true } } },
+        include: { branch: { select: { nameAr: true, nameEn: true } }, glAccount: { select: { code: true, nameAr: true, nameEn: true } } },
       });
       await this.audit.write({
         tx, actorId: user.id, action: "UPDATE", entityType: "treasury", entityId: id,
@@ -298,7 +305,7 @@ export class TreasuriesService {
       if (!existing) throw new NotFoundError({ id });
       this.assertBranchOrNotFound(user, existing.branchId, id);
       if (existing.active === active) {
-        const t = await tx.treasury.findUnique({ where: { id }, include: { branch: { select: { nameAr: true } }, glAccount: { select: { code: true, nameAr: true } } } });
+        const t = await tx.treasury.findUnique({ where: { id }, include: { branch: { select: { nameAr: true, nameEn: true } }, glAccount: { select: { code: true, nameAr: true, nameEn: true } } } });
         return this.fmt(t, (await this.balanceOf(tx, existing.glAccountId)).toFixed(2));
       }
       if (!active) {
@@ -310,7 +317,7 @@ export class TreasuriesService {
       }
       const treasury = await tx.treasury.update({
         where: { id }, data: { active },
-        include: { branch: { select: { nameAr: true } }, glAccount: { select: { code: true, nameAr: true } } },
+        include: { branch: { select: { nameAr: true, nameEn: true } }, glAccount: { select: { code: true, nameAr: true, nameEn: true } } },
       });
       await this.audit.write({
         tx, actorId: user.id, action: "UPDATE", entityType: "treasury", entityId: id,
@@ -379,28 +386,41 @@ export class TreasuriesService {
   // ── opening-balance lifecycle: list + reverse ────────────────────────
   async listOpeningBalances(id: string, user: AuthenticatedUser) {
     const treasury = await this.loadOrNotFound(id, user);
+    // ORIGINAL opening entries only — a reversal inherits sourceType=TREASURY_OPENING
+    // but carries reversalOfId, so exclude those (they are not independent openings).
     const entries = await this.prisma.journalEntry.findMany({
-      where: { sourceType: "TREASURY_OPENING", sourceId: treasury.id },
+      where: { sourceType: "TREASURY_OPENING", sourceId: treasury.id, reversalOfId: null },
       include: {
         lines: { select: { accountId: true, debit: true, credit: true } },
-        reversedBy: { select: { id: true, entryNumber: true, entryDate: true } },
+        reversedBy: { select: { id: true, entryNumber: true, entryDate: true, createdAt: true } },
       },
       orderBy: { entryNumber: "desc" },
     });
+    // Resolve counterpart account code + name (never expose a bare UUID).
+    const counterpartIds = [...new Set(entries.map((e) => e.lines.find((l) => l.accountId !== treasury.glAccountId)?.accountId).filter(Boolean) as string[])];
+    const accounts = counterpartIds.length
+      ? await this.prisma.account.findMany({ where: { id: { in: counterpartIds } }, select: { id: true, code: true, nameAr: true, nameEn: true } })
+      : [];
+    const acctById = new Map(accounts.map((a) => [a.id, a]));
     const items = entries.map((e) => {
       const treasuryLine = e.lines.find((l) => l.accountId === treasury.glAccountId);
       const amount = treasuryLine ? new Decimal(treasuryLine.debit.toString()).sub(treasuryLine.credit.toString()) : new Decimal(0);
-      const counterpart = e.lines.find((l) => l.accountId !== treasury.glAccountId);
+      const counterpartId = e.lines.find((l) => l.accountId !== treasury.glAccountId)?.accountId ?? null;
+      const cp = counterpartId ? acctById.get(counterpartId) : undefined;
       const rev = e.reversedBy[0];
       return {
         journalEntryId: e.id,
         entryNumber: String(e.entryNumber),
         entryDate: e.entryDate.toISOString().slice(0, 10),
         amount: amount.toFixed(2),
-        counterpartAccountId: counterpart?.accountId ?? null,
-        status: e.status,
+        counterpartAccountId: counterpartId,
+        counterpartAccountCode: cp?.code ?? null,
+        counterpartAccountNameAr: cp?.nameAr ?? null,
+        counterpartAccountNameEn: cp?.nameEn ?? null,
+        status: e.status, // POSTED | REVERSED
         reversalJournalEntryId: rev?.id ?? null,
         reversalEntryNumber: rev ? String(rev.entryNumber) : null,
+        reversedAt: rev?.createdAt ? rev.createdAt.toISOString() : null,
       };
     });
     return { treasuryId: treasury.id, items };

@@ -51,3 +51,27 @@ export async function resolveOperationalTreasury(
   }
   return { treasury, glAccountId: treasury.glAccountId };
 }
+
+/**
+ * Resolve a treasury by its id for a NEW money document. Enforces the same
+ * active + branch + access rules and returns the linked GL account + branch so
+ * the caller can post lines in the treasury's branch. A foreign treasury is 404.
+ */
+export async function resolveOperationalTreasuryById(
+  tx: Tx,
+  args: { treasuryId: string; documentBranchId?: string; user: AuthenticatedUser },
+): Promise<ResolvedTreasury> {
+  const treasury = await tx.treasury.findUnique({
+    where: { id: args.treasuryId },
+    select: { id: true, glAccountId: true, branchId: true, allowNegativeBalance: true, active: true },
+  });
+  if (!treasury) throw new NotFoundError({ treasuryId: args.treasuryId });
+  if (args.user.role !== "OWNER" && !args.user.allowedBranches.includes(treasury.branchId)) {
+    throw new NotFoundError({ treasuryId: args.treasuryId });
+  }
+  if (!treasury.active) throw new ValidationError({ reason: "treasury_inactive", treasuryId: treasury.id });
+  if (args.documentBranchId !== undefined && treasury.branchId !== args.documentBranchId) {
+    throw new ValidationError({ reason: "treasury_branch_mismatch", treasuryId: treasury.id, treasuryBranchId: treasury.branchId, documentBranchId: args.documentBranchId });
+  }
+  return treasury;
+}
