@@ -4,6 +4,7 @@ import {
   UpdateTreasurySchema,
   TreasuryQuerySchema,
   TreasuryOpeningBalanceSchema,
+  ReverseTreasuryOpeningBalanceSchema,
   TreasuryStatementQuerySchema,
   CreateTreasuryTransferSchema,
   UpdateTreasuryTransferSchema,
@@ -13,6 +14,7 @@ import {
   type UpdateTreasury,
   type TreasuryQuery,
   type TreasuryOpeningBalance,
+  type ReverseTreasuryOpeningBalance,
   type TreasuryStatementQuery,
   type CreateTreasuryTransfer,
   type UpdateTreasuryTransfer,
@@ -130,5 +132,17 @@ export class TreasuriesController {
   @Roles("OWNER")
   async openingBalance(@Param("id") id: string, @Body(new ZodValidationPipe(TreasuryOpeningBalanceSchema)) body: TreasuryOpeningBalance, @CurrentUser() user: AuthenticatedUser) {
     return this.service.postOpeningBalance(id, body, user);
+  }
+
+  @Get(":id/opening-balances")
+  @Roles("OWNER", "ACCOUNTANT", "BRANCH_MANAGER")
+  async listOpeningBalances(@Param("id") id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.listOpeningBalances(id, user);
+  }
+
+  @Post(":id/opening-balances/:entryId/reverse")
+  @Roles("OWNER")
+  async reverseOpeningBalance(@Param("id") id: string, @Param("entryId") entryId: string, @Body(new ZodValidationPipe(ReverseTreasuryOpeningBalanceSchema)) body: ReverseTreasuryOpeningBalance, @CurrentUser() user: AuthenticatedUser) {
+    return this.service.reverseOpeningBalance(id, entryId, body, user);
   }
 }

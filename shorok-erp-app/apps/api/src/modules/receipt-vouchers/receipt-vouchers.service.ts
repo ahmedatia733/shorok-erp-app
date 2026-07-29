@@ -14,6 +14,7 @@ import { AuditService } from "../audit/audit.service";
 import { PostingEngine } from "../posting/posting.engine";
 import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
+import { resolveOperationalTreasury } from "../treasuries/treasury-validation";
 
 type Tx = Prisma.TransactionClient;
 type AllocInput = { salesInvoiceId: string; amount: string };
@@ -179,6 +180,9 @@ export class ReceiptVouchersService {
       await this.requireBranch(tx, body.branchId);
       await this.requireCustomer(tx, body.customerId);
       await this.requireTreasury(tx, body.treasuryAccountId);
+      // Multi-treasury: a treasury-mapped account must be active and in the
+      // voucher's branch; legacy accounts keep the checks above.
+      await resolveOperationalTreasury(tx, { glAccountId: body.treasuryAccountId, documentBranchId: body.branchId, user });
       const amount = new Decimal(body.amount);
       const allocations = body.allocations ?? [];
       await this.validateAllocations(tx, { allocations, amount, customerId: body.customerId, branchId: body.branchId });

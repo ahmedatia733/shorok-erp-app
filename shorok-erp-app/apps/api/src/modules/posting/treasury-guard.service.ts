@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { Prisma } from "../../prisma/prisma.service";
-import { TreasuryNegativeBalanceWarning } from "../../common/errors/api-errors";
+import { TreasuryNegativeBalanceWarning, ValidationError } from "../../common/errors/api-errors";
 import { AuditService } from "../audit/audit.service";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 
@@ -93,6 +93,28 @@ export class TreasuryGuardService {
       }
     }
     if (offending.length === 0) return;
+
+    // Treasury-aware policy (multi-treasury): an offending account that maps to a
+    // Treasury with allowNegativeBalance=false is a HARD rejection that the
+    // acknowledgement flag can NOT override. Accounts mapped to a treasury that
+    // allows negatives, or legacy accounts not yet mapped to any treasury, keep
+    // the warn-only (acknowledge-to-proceed) policy.
+    const treasuries = await tx.treasury.findMany({
+      where: { glAccountId: { in: offending.map((o) => String(o.treasuryAccountId)) } },
+      select: { glAccountId: true, allowNegativeBalance: true, code: true },
+    });
+    const policyByGl = new Map(treasuries.map((t) => [t.glAccountId, t]));
+    const hardBlocked = offending.filter((o) => {
+      const t = policyByGl.get(String(o.treasuryAccountId));
+      return t && !t.allowNegativeBalance;
+    });
+    if (hardBlocked.length > 0) {
+      throw new ValidationError({
+        reason: "insufficient_treasury_balance",
+        accounts: hardBlocked,
+        ...hardBlocked[0],
+      });
+    }
 
     if (!args.acknowledge) {
       // No journal, no partial write — the caller's transaction rolls back.

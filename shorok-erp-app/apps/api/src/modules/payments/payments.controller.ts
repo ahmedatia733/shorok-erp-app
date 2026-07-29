@@ -9,6 +9,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
 import { StatementService } from "../accounting-statements/statement.service";
 import { TreasuryGuardService } from "../posting/treasury-guard.service";
+import { resolveOperationalTreasury } from "../treasuries/treasury-validation";
 
 @Controller()
 export class PaymentsController {
@@ -153,9 +154,13 @@ export class PaymentsController {
     if (!bankAccount) throw new NotFoundError({ bankAccountId: body.bankAccountId });
 
     return this.prisma.runInTransaction(async (tx) => {
-      // Negative treasury/bank balance protection (warn-only). This flow posts
-      // directly (not via the PostingEngine), so the guard is invoked here for
-      // the bank credit (outflow).
+      // Multi-treasury: if the bank account maps to a Treasury it must be active
+      // and accessible to the user (legacy accounts keep prior behaviour).
+      await resolveOperationalTreasury(tx, { glAccountId: body.bankAccountId, user });
+      // Negative treasury/bank balance protection. This flow posts directly (not
+      // via the PostingEngine), so the guard is invoked here for the bank credit
+      // (outflow) — the guard hard-rejects when the mapped treasury disallows
+      // negatives, regardless of the acknowledgement flag.
       await this.treasuryGuard.check(tx, {
         lines: [
           { accountId: body.apAccountId, debit: body.amount, credit: "0" },

@@ -12,6 +12,7 @@ import { NotFoundError, ValidationError, ConflictError } from "../../common/erro
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { AuditService } from "../audit/audit.service";
 import { PostingEngine } from "../posting/posting.engine";
+import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
 
 type Tx = Prisma.TransactionClient;
@@ -29,6 +30,7 @@ export class TreasuriesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly postingEngine: PostingEngine,
+    private readonly reversal: ReversalService,
     private readonly effectiveConfig: EffectiveConfigService,
   ) {}
 
@@ -215,11 +217,13 @@ export class TreasuriesService {
         glAccountId = created.id;
       }
 
-      // 2. Default handling: first treasury is forced default; a new default unsets the old one.
-      const count = await tx.treasury.count();
+      // 2. Default handling is PER-BRANCH: the first treasury in a branch is
+      //    forced default; a new default unsets the previous default of the
+      //    SAME branch only.
+      const branchCount = await tx.treasury.count({ where: { branchId: body.branchId } });
       let isDefault = body.isDefault;
-      if (count === 0) isDefault = true;
-      if (isDefault) await tx.treasury.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+      if (branchCount === 0) isDefault = true;
+      if (isDefault) await tx.treasury.updateMany({ where: { branchId: body.branchId, isDefault: true }, data: { isDefault: false } });
 
       // 3. Create the treasury.
       const treasuryCode = body.code
@@ -228,7 +232,7 @@ export class TreasuriesService {
             if (dup) throw new ValidationError({ reason: "treasury_code_exists", code: body.code });
             return body.code!;
           })()
-        : await this.uniqueTreasuryCode(tx, `TRZ-${String(count + 1).padStart(3, "0")}`);
+        : await this.uniqueTreasuryCode(tx, `TRZ-${String((await tx.treasury.count()) + 1).padStart(3, "0")}`);
 
       const treasury = await tx.treasury.create({
         data: {
@@ -259,7 +263,7 @@ export class TreasuriesService {
       this.assertBranchOrNotFound(user, existing.branchId, id);
 
       if (body.isDefault === true && !existing.isDefault) {
-        await tx.treasury.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+        await tx.treasury.updateMany({ where: { branchId: existing.branchId, isDefault: true }, data: { isDefault: false } });
       }
       if (body.isDefault === false && existing.isDefault) {
         throw new ValidationError({ reason: "cannot_unset_default_directly" });
@@ -341,7 +345,12 @@ export class TreasuriesService {
       const counterpart = await tx.account.findUnique({ where: { id: counterpartId }, select: { id: true, isLeaf: true, active: true } });
       if (!counterpart || !counterpart.isLeaf || !counterpart.active) throw new ValidationError({ reason: "invalid_counterpart_account", counterpartAccountId: counterpartId });
 
-      const branchId = body.branchId ?? treasury.branchId;
+      // The entry is ALWAYS booked in the treasury's own branch — a client
+      // branchId that disagrees is rejected, never silently honoured.
+      if (body.branchId && body.branchId !== treasury.branchId) {
+        throw new ValidationError({ reason: "opening_balance_branch_mismatch", treasuryBranchId: treasury.branchId, submittedBranchId: body.branchId });
+      }
+      const branchId = treasury.branchId;
       const amount = new Decimal(body.amount).toFixed(2);
 
       const posted = await this.postingEngine.post({
@@ -367,25 +376,109 @@ export class TreasuriesService {
     });
   }
 
+  // ── opening-balance lifecycle: list + reverse ────────────────────────
+  async listOpeningBalances(id: string, user: AuthenticatedUser) {
+    const treasury = await this.loadOrNotFound(id, user);
+    const entries = await this.prisma.journalEntry.findMany({
+      where: { sourceType: "TREASURY_OPENING", sourceId: treasury.id },
+      include: {
+        lines: { select: { accountId: true, debit: true, credit: true } },
+        reversedBy: { select: { id: true, entryNumber: true, entryDate: true } },
+      },
+      orderBy: { entryNumber: "desc" },
+    });
+    const items = entries.map((e) => {
+      const treasuryLine = e.lines.find((l) => l.accountId === treasury.glAccountId);
+      const amount = treasuryLine ? new Decimal(treasuryLine.debit.toString()).sub(treasuryLine.credit.toString()) : new Decimal(0);
+      const counterpart = e.lines.find((l) => l.accountId !== treasury.glAccountId);
+      const rev = e.reversedBy[0];
+      return {
+        journalEntryId: e.id,
+        entryNumber: String(e.entryNumber),
+        entryDate: e.entryDate.toISOString().slice(0, 10),
+        amount: amount.toFixed(2),
+        counterpartAccountId: counterpart?.accountId ?? null,
+        status: e.status,
+        reversalJournalEntryId: rev?.id ?? null,
+        reversalEntryNumber: rev ? String(rev.entryNumber) : null,
+      };
+    });
+    return { treasuryId: treasury.id, items };
+  }
+
+  async reverseOpeningBalance(id: string, journalEntryId: string, body: { reason: string; reversalDate?: string }, user: AuthenticatedUser) {
+    return this.prisma.runInTransaction(async (tx) => {
+      const treasury = await tx.treasury.findUnique({ where: { id } });
+      if (!treasury) throw new NotFoundError({ id });
+      this.assertBranchOrNotFound(user, treasury.branchId, id);
+      // The entry must be THIS treasury's opening balance (no cross-treasury reversal).
+      const entry = await tx.journalEntry.findUnique({ where: { id: journalEntryId }, select: { id: true, sourceType: true, sourceId: true, status: true } });
+      if (!entry || entry.sourceType !== "TREASURY_OPENING" || entry.sourceId !== treasury.id) {
+        throw new NotFoundError({ journalEntryId });
+      }
+      // ReversalService is idempotent: a repeated reverse returns the existing
+      // reversal instead of creating a duplicate.
+      const reversal = await this.reversal.reverse({ tx, entryId: journalEntryId, reason: body.reason, reversalDate: body.reversalDate, actor: user });
+      await this.audit.write({
+        tx, actorId: user.id, action: "CANCEL", entityType: "treasury_opening_balance", entityId: treasury.id,
+        afterSnapshot: { treasuryId: treasury.id, openingEntryId: journalEntryId, reversalJournalEntryId: reversal.journalEntryId },
+        summaryAr: `${user.name} عكس الرصيد الافتتاحي للخزنة ${treasury.code}`,
+        summaryEn: `${user.name} reversed the opening balance of treasury ${treasury.code}`,
+      });
+      const balance = (await this.balanceOf(tx, treasury.glAccountId)).toFixed(2);
+      return { treasuryId: treasury.id, openingEntryId: journalEntryId, reversalJournalEntryId: reversal.journalEntryId, idempotent: reversal.idempotent ?? false, balance };
+    });
+  }
+
   // ── statement (journal-line derived, running balance) ────────────────
   async statement(id: string, query: TreasuryStatementQuery, user: AuthenticatedUser) {
     const treasury = await this.loadOrNotFound(id, user);
     const gl = treasury.glAccountId;
 
-    // Opening balance = everything strictly before `from` (or 0 if no from).
+    const limit = query.limit ?? 50;
+    // A branch filter narrows the statement to lines booked in that branch (must
+    // be an allowed branch for a non-OWNER).
+    const branchId = query.branchId;
+    if (branchId && user.role !== "OWNER" && !user.allowedBranches.includes(branchId)) {
+      throw new NotFoundError({ id }); // no-leak
+    }
+    const acctClause = Prisma.sql`jl.account_id = ${gl}::uuid`;
+    const branchClause = branchId ? Prisma.sql` AND jl.branch_id = ${branchId}::uuid` : Prisma.empty;
+    const fromClause = query.from ? Prisma.sql` AND je.entry_date >= ${query.from}::date` : Prisma.empty;
+    const toClause = query.to ? Prisma.sql` AND je.entry_date <= ${query.to}::date` : Prisma.empty;
+
+    // Window opening = everything strictly before `from` (0 if no from).
     const opening = query.from
       ? await this.prisma.$queryRaw<Array<{ bal: string }>>`
           SELECT COALESCE(SUM(jl.debit - jl.credit), 0)::text AS bal
           FROM journal_lines jl JOIN journal_entries je ON je.id = jl.journal_entry_id
-          WHERE jl.account_id = ${gl}::uuid AND je.entry_date < ${query.from}::date`
+          WHERE ${acctClause}${branchClause} AND je.entry_date < ${query.from}::date`
       : [{ bal: "0" }];
-    const openingBalance = new Decimal(opening[0]?.bal ?? "0");
+    const windowOpening = new Decimal(opening[0]?.bal ?? "0");
 
-    // Lines within the window, chronological.
-    const dateClauses: Prisma.Sql[] = [Prisma.sql`jl.account_id = ${gl}::uuid`];
-    if (query.from) dateClauses.push(Prisma.sql`je.entry_date >= ${query.from}::date`);
-    if (query.to) dateClauses.push(Prisma.sql`je.entry_date <= ${query.to}::date`);
-    const where = Prisma.join(dateClauses, " AND ");
+    // Cursor = the last journalLineId of the previous page. The page's starting
+    // balance = windowOpening + Σ(window lines strictly BEFORE the cursor row in
+    // the deterministic (date, entry_number, line-id) order) — so running
+    // balances stay correct across pages without loading the whole statement.
+    let cursorClause = Prisma.empty;
+    let beforeCursor = new Decimal(0);
+    if (query.cursor) {
+      const c = await this.prisma.$queryRaw<Array<{ entry_date: Date; entry_number: bigint }>>`
+        SELECT je.entry_date, je.entry_number FROM journal_lines jl JOIN journal_entries je ON je.id = jl.journal_entry_id
+        WHERE jl.id = ${query.cursor}::uuid`;
+      if (c[0]) {
+        const cd = c[0].entry_date.toISOString().slice(0, 10);
+        const cn = c[0].entry_number;
+        cursorClause = Prisma.sql` AND (je.entry_date, je.entry_number, jl.id) > (${cd}::date, ${cn}::bigint, ${query.cursor}::uuid)`;
+        const bc = await this.prisma.$queryRaw<Array<{ bal: string }>>`
+          SELECT COALESCE(SUM(jl.debit - jl.credit), 0)::text AS bal
+          FROM journal_lines jl JOIN journal_entries je ON je.id = jl.journal_entry_id
+          WHERE ${acctClause}${branchClause}${fromClause}${toClause}
+            AND (je.entry_date, je.entry_number, jl.id) <= (${cd}::date, ${cn}::bigint, ${query.cursor}::uuid)`;
+        beforeCursor = new Decimal(bc[0]?.bal ?? "0");
+      }
+    }
+    const pageStart = windowOpening.add(beforeCursor);
 
     const rows = await this.prisma.$queryRaw<Array<{
       id: string; entry_date: Date; entry_number: bigint; description: string; reference: string | null;
@@ -398,11 +491,15 @@ export class TreasuriesService {
       FROM journal_lines jl
       JOIN journal_entries je ON je.id = jl.journal_entry_id
       JOIN users u ON u.id = je.created_by
-      WHERE ${where}
-      ORDER BY je.entry_date ASC, je.entry_number ASC, jl.id ASC`;
+      WHERE ${acctClause}${branchClause}${fromClause}${toClause}${cursorClause}
+      ORDER BY je.entry_date ASC, je.entry_number ASC, jl.id ASC
+      LIMIT ${limit + 1}`;
 
-    let running = openingBalance;
-    const items = rows.map((r) => {
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    let running = pageStart;
+    const items = pageRows.map((r) => {
       running = running.add(new Decimal(r.debit)).sub(new Decimal(r.credit));
       return {
         journalLineId: r.id,
@@ -421,10 +518,19 @@ export class TreasuriesService {
       };
     });
 
+    // Authoritative current balance (whole account, branch-scoped if filtered).
+    const totalRows = branchId
+      ? await this.prisma.$queryRaw<Array<{ bal: string }>>`SELECT COALESCE(SUM(jl.debit - jl.credit),0)::text AS bal FROM journal_lines jl WHERE jl.account_id = ${gl}::uuid AND jl.branch_id = ${branchId}::uuid`
+      : await this.prisma.$queryRaw<Array<{ bal: string }>>`SELECT COALESCE(SUM(debit - credit),0)::text AS bal FROM journal_lines WHERE account_id = ${gl}::uuid`;
+    const currentBalance = new Decimal(totalRows[0]?.bal ?? "0");
+
     return {
-      treasury: this.fmt(treasury, running.toFixed(2)),
-      openingBalance: openingBalance.toFixed(2),
-      closingBalance: running.toFixed(2),
+      treasury: this.fmt(treasury, currentBalance.toFixed(2)),
+      openingBalance: pageStart.toFixed(2),       // balance carried INTO this page
+      closingBalance: running.toFixed(2),          // balance at the end of this page
+      currentBalance: currentBalance.toFixed(2),   // authoritative account balance
+      limit,
+      nextCursor: hasMore ? pageRows[pageRows.length - 1]!.id : null,
       items,
     };
   }

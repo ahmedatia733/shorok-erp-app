@@ -22,6 +22,7 @@ import { AuditService } from "../audit/audit.service";
 import { PostingEngine } from "../posting/posting.engine";
 import { ReversalService } from "../posting/reversal.service";
 import { EffectiveConfigService } from "../configuration/effective-config.service";
+import { resolveOperationalTreasury } from "../treasuries/treasury-validation";
 
 @Controller("expenses")
 export class ExpensesController {
@@ -175,6 +176,9 @@ export class ExpensesController {
           creditAccountId = ap;
           creditParty = { partyType: "SUPPLIER", partyId: body.supplierId };
         } else if (body.paymentGlAccountId) {
+          // Multi-treasury: a treasury-mapped payment account must be active and
+          // in the expense's branch (legacy accounts keep prior behaviour).
+          await resolveOperationalTreasury(tx, { glAccountId: body.paymentGlAccountId, documentBranchId: body.branchId, user });
           creditAccountId = body.paymentGlAccountId;
         } else {
           throw new ValidationError({ reason: "payment_account_required" });

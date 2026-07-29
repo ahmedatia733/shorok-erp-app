@@ -61,6 +61,12 @@ export const TreasuryOpeningBalanceSchema = z.object({
 });
 export type TreasuryOpeningBalance = z.infer<typeof TreasuryOpeningBalanceSchema>;
 
+export const ReverseTreasuryOpeningBalanceSchema = z.object({
+  reason: z.string().trim().min(1).max(300),
+  reversalDate: IsoDateSchema.optional(),
+});
+export type ReverseTreasuryOpeningBalance = z.infer<typeof ReverseTreasuryOpeningBalanceSchema>;
+
 // ── Treasury statement query ─────────────────────────────────────────
 export const TreasuryStatementQuerySchema = z.object({
   from: IsoDateSchema.optional(),

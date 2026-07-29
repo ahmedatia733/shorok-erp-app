@@ -85,8 +85,10 @@ export class TreasuryTransfersService {
     if (query.status) where.status = query.status as never;
     if (query.treasuryId) where.OR = [{ sourceTreasuryId: query.treasuryId }, { destinationTreasuryId: query.treasuryId }];
     if (user.role !== "OWNER") {
+      // A non-OWNER may only see a transfer when BOTH sides are in their branches
+      // — one allowed side is NOT enough (no foreign-side leak).
       const branches = user.allowedBranches.length ? user.allowedBranches : ["__none__"];
-      where.AND = [{ OR: [{ source: { branchId: { in: branches } } }, { destination: { branchId: { in: branches } } }] }];
+      where.AND = [{ source: { branchId: { in: branches } } }, { destination: { branchId: { in: branches } } }];
     }
     const rows = await this.prisma.treasuryTransfer.findMany({ where, include: this.include, orderBy: { transferNumber: "desc" }, take: 200 });
     return { items: rows.map((r) => this.fmt(r)) };
@@ -108,6 +110,9 @@ export class TreasuryTransfersService {
       this.assertBranchOrNotFound(user, [src.branchId, dst.branchId], body.sourceTreasuryId);
       if (!src.active) throw new ValidationError({ reason: "source_treasury_inactive" });
       if (!dst.active) throw new ValidationError({ reason: "destination_treasury_inactive" });
+      // Cross-branch transfers are out of scope (no approved interbranch clearing
+      // design in the repo) — both treasuries must be in the same branch.
+      if (src.branchId !== dst.branchId) throw new ValidationError({ reason: "cross_branch_transfer_not_allowed", sourceBranchId: src.branchId, destinationBranchId: dst.branchId });
 
       const transfer = await tx.treasuryTransfer.create({
         data: {
