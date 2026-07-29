@@ -15,6 +15,7 @@ import { createExpense } from "../../../../../lib/expenses-client";
 import { NegativeBalanceModal } from "../../../../../components/features/negative-balance-modal";
 import { parseTreasuryWarning, type TreasuryWarning } from "../../../../../lib/treasury-warning";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { treasurySelector, type TreasuryRow } from "../../../../../lib/treasuries-client";
 
 function todayISO(): string {
   const d = new Date();
@@ -44,6 +45,7 @@ export default function NewExpensePage() {
   const [glAccountId,        setGlAccountId]        = useState("");
   const [paymentGlAccountId, setPaymentGlAccountId] = useState("");
   const [leafAccounts,       setLeafAccounts]       = useState<AccountRow[]>([]);
+  const [treasuries,         setTreasuries]         = useState<TreasuryRow[]>([]);
   const [submitting,         setSubmitting]         = useState(false);
   const [error,              setError]              = useState<string | null>(null);
   const [success,            setSuccess]            = useState(false);
@@ -55,8 +57,12 @@ export default function NewExpensePage() {
       setLeafAccounts(leaf);
       // Auto-select expense account: مصروف / مصاريف / expense
       setGlAccountId(autoSelectId(leaf, "مصروف", "مصاريف", "expense"));
-      // Auto-select payment account: نقدية / صندوق / cash / petty
-      setPaymentGlAccountId(autoSelectId(leaf, "نقدية", "صندوق", "cash", "petty"));
+    });
+    // The payment account comes from an ACTIVE, authorized treasury (treasury-aware
+    // selector) — a deactivated treasury never appears here. Default to the branch default.
+    void treasurySelector().then((r) => {
+      setTreasuries(r.items);
+      if (r.items[0]) setPaymentGlAccountId(r.items[0].glAccountId);
     });
   }, []);
 
@@ -178,10 +184,11 @@ export default function NewExpensePage() {
                   onChange={(e) => setPaymentGlAccountId(e.target.value)}
                   className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
                   disabled={submitting}
+                  data-testid="expense-treasury"
                 >
                   <option value="">— بدون قيد محاسبي —</option>
-                  {leafAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} — {a.nameAr}</option>
+                  {treasuries.map((tr) => (
+                    <option key={tr.id} value={tr.glAccountId}>{tr.nameAr} ({tr.code})</option>
                   ))}
                 </select>
               </div>

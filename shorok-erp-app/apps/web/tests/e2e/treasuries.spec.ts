@@ -139,3 +139,45 @@ test.describe("treasuries — authorization", () => {
     await expect(page.getByText(/غير موجود|تعذّر تحميل/)).toBeVisible();
   });
 });
+
+test.describe("treasuries — operational + localization (closure)", () => {
+  test.beforeEach(async ({ page }) => login(page, F.ownerPhone));
+
+  test("EN: the English treasury page is English and LTR with no raw keys", async ({ page }) => {
+    await page.goto("/en/accounting/treasuries");
+    await expect(page).not.toHaveURL(/\/login/);
+    await expect(page.getByRole("heading", { name: "Treasuries", exact: true })).toBeVisible();
+    await expect(page.getByTestId("add-treasury")).toHaveText(/Add treasury/);
+    // page direction is LTR on /en
+    await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+    // no raw i18n keys leaked (e.g. "treasury.title")
+    await expect(page.getByText(/treasury\.[a-zA-Z]/)).toHaveCount(0);
+  });
+
+  test("opening balance can be reversed from the UI", async ({ page }) => {
+    await page.goto("/ar/accounting/treasuries");
+    await createTreasury(page, "خزنة العكس E2E");
+    await page.locator('[data-testid="treasury-row"]', { hasText: "خزنة العكس E2E" }).getByText("كشف الحركة").click();
+    await page.getByTestId("opening-balance-btn").click();
+    await page.getByTestId("opening-amount").fill("800");
+    await page.getByTestId("opening-save").click();
+    await expect(page.getByTestId("treasury-balance")).toHaveText(/٨[٬,]?٠٠/);
+    // reverse the opening balance (accept the prompt)
+    page.once("dialog", (d) => d.accept("خطأ في الإدخال"));
+    await page.getByTestId("reverse-opening").click();
+    await expect(page.getByTestId("treasury-balance")).toHaveText(/^٠٫٠٠$|0\.00/);
+  });
+
+  test("a new active treasury appears in the expense payment selector; a deactivated one does not", async ({ page }) => {
+    await page.goto("/ar/accounting/treasuries");
+    await createTreasury(page, "خزنة المصروفات E2E");
+    // appears in the expense treasury selector
+    await page.goto("/ar/expenses/new");
+    await expect(page.getByTestId("expense-treasury").locator("option", { hasText: "خزنة المصروفات E2E" })).toHaveCount(1);
+    // deactivate it, then it disappears from the selector
+    await page.goto("/ar/accounting/treasuries");
+    await page.locator('[data-testid="treasury-row"]', { hasText: "خزنة المصروفات E2E" }).getByText("إيقاف").click();
+    await page.goto("/ar/expenses/new");
+    await expect(page.getByTestId("expense-treasury").locator("option", { hasText: "خزنة المصروفات E2E" })).toHaveCount(0);
+  });
+});
