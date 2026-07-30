@@ -10,7 +10,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "../../../../../../compone
 import { Input } from "../../../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
 import { formatCurrency, formatDate } from "../../../../../../lib/format";
-import { ApiClientError } from "../../../../../../lib/api-client";
+import { returnErrorMessage } from "../../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../../lib/auth";
 import { getPurchaseReturn, getPurchaseReturnable, confirmPurchaseReturn, cancelPurchaseReturn, updatePurchaseReturn, type PurchaseReturnRow, type PurchaseReturnable } from "../../../../../../lib/returns-client";
 
@@ -46,7 +46,7 @@ export default function PurchaseReturnDetailPage() {
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true); setError(null);
     try { await fn(); await load(); }
-    catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); }
+    catch (e) { setError(returnErrorMessage(e, locale)); }
     finally { setBusy(false); }
   };
 
@@ -63,7 +63,7 @@ export default function PurchaseReturnDetailPage() {
       setEditReason(row.reason ?? "");
       setEditNotes(row.notes ?? "");
       setEditing(true);
-    } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); }
+    } catch (e) { setError(returnErrorMessage(e, locale)); }
   };
 
   const lineError = (rl: PurchaseReturnable["lines"][number]): string | null => {

@@ -10,7 +10,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "../../../../../../compone
 import { Input } from "../../../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
 import { formatCurrency } from "../../../../../../lib/format";
-import { ApiClientError } from "../../../../../../lib/api-client";
+import { returnErrorMessage } from "../../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../../lib/auth";
 import { listSalesInvoices, type SalesInvoiceRow } from "../../../../../../lib/sales-invoices-client";
 import { getSalesReturnable, createSalesReturn, type SalesReturnable, type ReturnableLine } from "../../../../../../lib/returns-client";
@@ -57,7 +57,7 @@ export default function NewSalesReturnPage() {
     setError(null); setSelected(inv); setRet(null); setBoards({});
     try {
       setRet(await getSalesReturnable(inv.id));
-    } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); }
+    } catch (e) { setError(returnErrorMessage(e, locale)); }
   };
 
   /** Per-line derived quantities/money from the entered whole boards. */
@@ -95,7 +95,7 @@ export default function NewSalesReturnPage() {
     try {
       const created = await createSalesReturn({ originalSalesInvoiceId: selected.id, returnDate, reason: reason || undefined, settlementMode, lines });
       router.push(`/${locale}/sales/returns/${created.id}`);
-    } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); setBusy(false); }
+    } catch (e) { setError(returnErrorMessage(e, locale)); setBusy(false); }
   };
 
   if (!canCreate) {

@@ -1,4 +1,4 @@
-import { ApiClientError } from "./api-client";
+import { ApiClientError, apiCall } from "./api-client";
 
 /**
  * Reasons the server returns when an invoice cannot post because the effective
@@ -21,4 +21,28 @@ export function isPostingConfigError(e: unknown): boolean {
     return typeof reason === "string" && POSTING_CONFIG_REASONS.has(reason);
   }
   return false;
+}
+
+interface PostingProfileLite {
+  effectiveFrom: string;
+  createdAt: string;
+  salesReturnsAccountId: string | null;
+}
+
+/**
+ * Whether the posting profile effective on `returnDateISO` (YYYY-MM-DD) has a
+ * Sales Returns account — so the UI can warn and disable confirm BEFORE the user
+ * hits the server-side `sales_returns_account_required` guard. Mirrors the
+ * server resolver (greatest effectiveFrom ≤ date, newest createdAt on a tie).
+ * Requires an ACCOUNTANT/OWNER token; callers must gate the call by role.
+ */
+export async function salesReturnsAccountConfigured(returnDateISO: string): Promise<boolean> {
+  const day = returnDateISO.slice(0, 10);
+  const profiles = await apiCall<PostingProfileLite[]>("/settings/posting-profiles");
+  const eff = profiles
+    .filter((p) => p.effectiveFrom.slice(0, 10) <= day)
+    .sort((a, b) =>
+      a.effectiveFrom === b.effectiveFrom ? b.createdAt.localeCompare(a.createdAt) : b.effectiveFrom.localeCompare(a.effectiveFrom),
+    )[0];
+  return !!eff?.salesReturnsAccountId;
 }

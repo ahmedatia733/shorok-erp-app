@@ -111,6 +111,50 @@ test.describe("returns — owner sales flow", () => {
     await expect(page.getByRole("alert").first()).toBeVisible({ timeout: 10000 });
     await expect(page).toHaveURL(/\/sales\/returns\/new/);
   });
+
+  test("9: a confirm backend failure shows the SPECIFIC Arabic reason, not the generic message", async ({ page }) => {
+    // Create a fresh draft on an invoice no other test confirms.
+    await page.goto("/ar/sales/returns/new");
+    await searchAndPickSale(page, F.overReturnSaleNumber);
+    await page.getByPlaceholder("0").first().fill("1");
+    await page.getByRole("button", { name: "حفظ كمسودة" }).click();
+    await expect(page).toHaveURL(/\/sales\/returns\/[0-9a-f-]{36}/);
+
+    // Force the backend confirm to return the real structured reason.
+    await page.route("**/sales-returns/*/confirm", (route) =>
+      route.fulfill({
+        status: 409, contentType: "application/json",
+        body: JSON.stringify({
+          code: "validation_failed",
+          message_ar: "البيانات المدخلة غير صحيحة.",
+          message_en: "The submitted data is invalid.",
+          details: { reason: "sales_returns_account_required" },
+        }),
+      }),
+    );
+    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: "تأكيد المردود" }).click();
+    // Specific reason shown; generic message NOT shown.
+    await expect(page.getByText(/حساب مردودات المبيعات غير مُحدد/)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("البيانات المدخلة غير صحيحة.")).toHaveCount(0);
+  });
+
+  test("9b: an unconfigured Sales Returns account warns and disables confirm before posting (Task D)", async ({ page }) => {
+    // Make the posting-profile read report the account as missing.
+    await page.route("**/settings/posting-profiles", (route) =>
+      route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify([{ id: "x", effectiveFrom: "2026-01-01T00:00:00.000Z", createdAt: "2026-01-01T00:00:00.000Z", salesReturnsAccountId: null }]),
+      }),
+    );
+    await page.goto("/ar/sales/returns/new");
+    await searchAndPickSale(page, F.overReturnSaleNumber);
+    await page.getByPlaceholder("0").first().fill("1");
+    await page.getByRole("button", { name: "حفظ كمسودة" }).click();
+    await expect(page).toHaveURL(/\/sales\/returns\/[0-9a-f-]{36}/);
+    await expect(page.getByTestId("posting-config-warning")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("button", { name: "تأكيد المردود" })).toBeDisabled();
+  });
 });
 
 test.describe("returns — permissions (§11/§12)", () => {

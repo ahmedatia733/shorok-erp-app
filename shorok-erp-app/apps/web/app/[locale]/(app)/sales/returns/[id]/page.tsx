@@ -10,8 +10,9 @@ import { Card, CardBody, CardHeader, CardTitle } from "../../../../../../compone
 import { Input } from "../../../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
 import { formatCurrency, formatDate } from "../../../../../../lib/format";
-import { ApiClientError } from "../../../../../../lib/api-client";
+import { returnErrorMessage } from "../../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../../lib/auth";
+import { salesReturnsAccountConfigured } from "../../../../../../lib/posting-config";
 import { getSalesReturn, getSalesReturnable, confirmSalesReturn, cancelSalesReturn, updateSalesReturn, type SalesReturnRow, type SalesReturnable } from "../../../../../../lib/returns-client";
 
 const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", CANCELLED: "ملغي" };
@@ -40,6 +41,10 @@ export default function SalesReturnDetailPage() {
   const [editDate, setEditDate] = useState("");
   const [editReason, setEditReason] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  // Task D — is the Sales Returns account configured for this return's date?
+  // null = unknown/not-checked; true/false = resolved. Frontend gate only; the
+  // API stays authoritative.
+  const [postingReady, setPostingReady] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     try { setRow(await getSalesReturn(id)); }
@@ -47,10 +52,21 @@ export default function SalesReturnDetailPage() {
   }, [id]);
   useEffect(() => { void load(); }, [load]);
 
+  // Only confirm-capable roles (OWNER/ACCOUNTANT) may read posting profiles, and
+  // only a DRAFT can be confirmed — so the pre-check is scoped to that case.
+  useEffect(() => {
+    if (!row || row.status !== "DRAFT" || !canCreateOrConfirm) return;
+    let cancelled = false;
+    void salesReturnsAccountConfigured(row.returnDate)
+      .then((ok) => { if (!cancelled) setPostingReady(ok); })
+      .catch(() => { if (!cancelled) setPostingReady(null); }); // unknown → don't block on a read failure
+    return () => { cancelled = true; };
+  }, [row, canCreateOrConfirm]);
+
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true); setError(null);
     try { await fn(); await load(); }
-    catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); }
+    catch (e) { setError(returnErrorMessage(e, locale)); }
     finally { setBusy(false); }
   };
 
@@ -69,7 +85,7 @@ export default function SalesReturnDetailPage() {
       setEditReason(row.reason ?? "");
       setEditNotes(row.notes ?? "");
       setEditing(true);
-    } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); }
+    } catch (e) { setError(returnErrorMessage(e, locale)); }
   };
 
   // Immediate (client) Arabic validation per line — whole boards only. Server
@@ -108,11 +124,23 @@ export default function SalesReturnDetailPage() {
         <h1 className="text-xl font-semibold">مردود مبيعات #{row.returnNumber}</h1>
         <div className="flex gap-2">
           {isDraft && !editing && canCreateOrConfirm && <Button variant="ghost" disabled={busy} onClick={() => void startEdit()}>تعديل</Button>}
-          {isDraft && !editing && canCreateOrConfirm && <Button disabled={busy} onClick={() => { if (confirm("تأكيد المردود؟ سيتم ترحيل القيود وإرجاع المخزون.")) void act(() => confirmSalesReturn(row.id)); }}>تأكيد المردود</Button>}
+          {isDraft && !editing && canCreateOrConfirm && <Button disabled={busy || postingReady === false} onClick={() => { if (confirm("تأكيد المردود؟ سيتم ترحيل القيود وإرجاع المخزون.")) void act(() => confirmSalesReturn(row.id)); }}>تأكيد المردود</Button>}
           {row.status === "CONFIRMED" && canCancel && <Button variant="danger" disabled={busy} onClick={() => { if (confirm("هل تريد إلغاء هذا المردود؟ سيتم عكس كل القيود والمخزون.")) void act(() => cancelSalesReturn(row.id, "إلغاء من المستخدم")); }}>إلغاء المردود</Button>}
         </div>
       </div>
       {error && <Alert variant="error">{error}</Alert>}
+
+      {/* Task D — surface the missing Sales Returns account BEFORE confirmation,
+          rather than as a late generic error. The API remains authoritative. */}
+      {isDraft && !editing && canCreateOrConfirm && postingReady === false && (
+        <div data-testid="posting-config-warning">
+          <Alert variant="error">
+            {locale === "ar"
+              ? "لا يمكن تأكيد المردود: حساب مردودات المبيعات غير مُحدد في إعدادات الترحيل المحاسبي. يرجى ضبط الإعدادات المحاسبية أولاً."
+              : "The return cannot be confirmed: the Sales Returns account is not configured in the accounting posting settings. Please configure the accounting settings first."}
+          </Alert>
+        </div>
+      )}
 
       {editing && ret ? (
         <Card>

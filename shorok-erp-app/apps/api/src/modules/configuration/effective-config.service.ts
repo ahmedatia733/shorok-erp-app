@@ -13,12 +13,15 @@ type Tx = Prisma.TransactionClient;
 export class EffectiveConfigService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Posting profile in force on `date` (YYYY-MM-DD), or null if none yet. */
+  /** Posting profile in force on `date` (YYYY-MM-DD), or null if none yet.
+   *  On an effective-date tie the most-recently created version wins, so a later
+   *  append that completes an earlier profile (e.g. backfilling a missing
+   *  account) is picked deterministically. */
   async postingProfileAsOf(date: string, tx?: Tx) {
     const db = tx ?? this.prisma;
     return db.postingProfile.findFirst({
       where: { effectiveFrom: { lte: new Date(date) } },
-      orderBy: { effectiveFrom: "desc" },
+      orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }],
     });
   }
 

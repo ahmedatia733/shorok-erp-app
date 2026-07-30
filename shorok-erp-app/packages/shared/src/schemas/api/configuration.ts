@@ -55,6 +55,10 @@ export const CreatePostingProfileSchema = z.object({
   arAccountId: UuidSchema.optional().nullable(),
   apAccountId: UuidSchema.optional().nullable(),
   revenueAccountId: UuidSchema.optional().nullable(),
+  // Contra-revenue account debited when a sales return is confirmed. Previously
+  // absent from this schema, so it could never be configured — the direct cause
+  // of the sales_returns_account_required confirmation failure.
+  salesReturnsAccountId: UuidSchema.optional().nullable(),
   cogsAccountId: UuidSchema.optional().nullable(),
   inventoryAccountId: UuidSchema.optional().nullable(),
   vatInputAccountId: UuidSchema.optional().nullable(),

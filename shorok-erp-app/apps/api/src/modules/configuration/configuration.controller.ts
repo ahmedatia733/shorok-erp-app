@@ -14,7 +14,7 @@ import {
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
-import { NotFoundError } from "../../common/errors/api-errors";
+import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../audit/audit.service";
@@ -98,6 +98,20 @@ export class ConfigurationController {
     @Body(new ZodValidationPipe(CreatePostingProfileSchema)) body: CreatePostingProfile,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    // The sales-returns account is debited by the posting engine on confirm, so
+    // it must be a REAL contra-revenue posting account: existing, active, a leaf
+    // (parents are never postable), and REVENUE. Guard only the field being
+    // wired here — the other legs are unchanged.
+    if (body.salesReturnsAccountId) {
+      const acc = await this.prisma.account.findUnique({ where: { id: body.salesReturnsAccountId } });
+      if (!acc || !acc.active || !acc.isLeaf || acc.category !== "REVENUE") {
+        throw new ValidationError({
+          reason: "invalid_sales_returns_account",
+          accountId: body.salesReturnsAccountId,
+          requirement: "active_leaf_revenue",
+        });
+      }
+    }
     return this.prisma.runInTransaction(async (tx) => {
       const profile = await tx.postingProfile.create({
         data: {
@@ -105,6 +119,7 @@ export class ConfigurationController {
           arAccountId: body.arAccountId ?? null,
           apAccountId: body.apAccountId ?? null,
           revenueAccountId: body.revenueAccountId ?? null,
+          salesReturnsAccountId: body.salesReturnsAccountId ?? null,
           cogsAccountId: body.cogsAccountId ?? null,
           inventoryAccountId: body.inventoryAccountId ?? null,
           vatInputAccountId: body.vatInputAccountId ?? null,

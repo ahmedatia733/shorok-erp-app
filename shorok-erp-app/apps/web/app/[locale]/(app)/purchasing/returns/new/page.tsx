@@ -10,7 +10,7 @@ import { Card, CardBody, CardHeader, CardTitle } from "../../../../../../compone
 import { Input } from "../../../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
 import { formatCurrency } from "../../../../../../lib/format";
-import { ApiClientError } from "../../../../../../lib/api-client";
+import { returnErrorMessage } from "../../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../../lib/auth";
 import { listPurchaseInvoices, type PurchaseInvoiceRow } from "../../../../../../lib/purchase-invoices-client";
 import { getPurchaseReturnable, createPurchaseReturn, type PurchaseReturnable, type PurchaseReturnableLine } from "../../../../../../lib/returns-client";
@@ -54,7 +54,7 @@ export default function NewPurchaseReturnPage() {
   const pick = async (inv: PurchaseInvoiceRow) => {
     setError(null); setSelected(inv); setRet(null); setBoards({});
     try { setRet(await getPurchaseReturnable(inv.id)); }
-    catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); }
+    catch (e) { setError(returnErrorMessage(e, locale)); }
   };
 
   const lineCalc = (l: PurchaseReturnableLine) => {
@@ -90,7 +90,7 @@ export default function NewPurchaseReturnPage() {
     try {
       const created = await createPurchaseReturn({ originalPurchaseInvoiceId: selected.id, returnDate, reason: reason || undefined, settlementMode, lines });
       router.push(`/${locale}/purchasing/returns/${created.id}`);
-    } catch (e) { setError(e instanceof ApiClientError ? e.localizedMessage(locale) : (e as Error).message); setBusy(false); }
+    } catch (e) { setError(returnErrorMessage(e, locale)); setBusy(false); }
   };
 
   if (!canCreate) {
