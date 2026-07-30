@@ -12,6 +12,11 @@ export interface ReturnableLine {
   colorName: string | null;            // color, not a product name
   currentVariantSize: string | null;   // CURRENT master data (hint only)
   effectiveOriginalMetersPerBoard: string | null; // derived from the original line
+  metersPerBoard: string | null;       // authoritative whole-board size (dims → variant)
+  boardSizeSource: "dimensions" | "variant" | null;
+  eligibleWholeBoards: string;
+  previouslyReturnedBoards: string;
+  maximumReturnableBoards: string;
   unitLabel: string;
   lengthM: string | null;              // HISTORICAL original dimensions
   widthM: string | null;
@@ -37,6 +42,8 @@ export interface PurchaseReturnableLine {
   originalLineId: string; productVariantId: string;
   productCode: string | null; colorName: string | null;
   currentVariantSize: string | null; effectiveOriginalMetersPerBoard: string | null; unitLabel: string;
+  metersPerBoard: string | null; boardSizeSource: "dimensions" | "variant" | null;
+  eligibleWholeBoards: string; previouslyReturnedBoards: string; maximumReturnableBoards: string;
   lengthM: string | null; widthM: string | null;
   originalMeters: string; originalBoards: string; returnedMeters: string; returnedBoards: string;
   remainingMeters: string; remainingBoards: string;
@@ -111,8 +118,9 @@ export interface PurchaseReturnRow {
   lines?: PurchaseReturnLineDetail[];
 }
 
-export interface SalesReturnLineInput { originalSalesInvoiceLineId: string; returnedMeters: string; returnedBoards?: string; reason?: string; note?: string }
-export interface PurchaseReturnLineInput { originalPurchaseInvoiceLineId: string; returnedMeters: string; returnedBoards?: string; reason?: string; note?: string }
+// Boards are the sole quantity authority; the server derives metres. (returnedMeters is gone.)
+export interface SalesReturnLineInput { originalSalesInvoiceLineId: string; returnedBoards: string; reason?: string; note?: string }
+export interface PurchaseReturnLineInput { originalPurchaseInvoiceLineId: string; returnedBoards: string; reason?: string; note?: string }
 
 // ── sales returns ────────────────────────────────────────────────────────────
 export const listSalesReturns = (q: { status?: string; limit?: number; originalInvoiceId?: string } = {}) =>

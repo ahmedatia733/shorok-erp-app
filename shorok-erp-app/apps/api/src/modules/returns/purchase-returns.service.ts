@@ -75,24 +75,30 @@ export class PurchaseReturnsService {
     const built = reqLines.map((r) => {
       const orig = byId.get(r.originalPurchaseInvoiceLineId);
       if (!orig) throw new ValidationError({ reason: "line_not_on_invoice", lineId: r.originalPurchaseInvoiceLineId });
-      const requestedMeters = new Decimal(r.returnedMeters);
-      if (!requestedMeters.isFinite() || requestedMeters.lte(0)) {
-        throw new ValidationError({ reason: "return_meters_must_be_positive", lineId: r.originalPurchaseInvoiceLineId });
+
+      // ── WHOLE-BOARD quantity authority — boards drive; metres are derived ─────
+      const requestedBoards = new Decimal(r.returnedBoards);
+      if (!requestedBoards.isFinite() || requestedBoards.lte(0)) {
+        throw new ValidationError({ reason: "returned_boards_must_be_positive", lineId: r.originalPurchaseInvoiceLineId });
       }
-      const remaining = new Decimal(orig.remainingMeters);
-      if (requestedMeters.gt(remaining)) {
-        throw new ValidationError({ reason: "over_return", lineId: r.originalPurchaseInvoiceLineId, requestedMeters: requestedMeters.toFixed(4), remainingMeters: remaining.toFixed(4) });
+      if (!requestedBoards.isInteger()) {
+        throw new ValidationError({ reason: "returned_boards_must_be_whole", lineId: r.originalPurchaseInvoiceLineId, requestedBoards: requestedBoards.toString() });
       }
-      const remainingBoards = new Decimal(orig.remainingBoards);
-      const requestedBoards = r.returnedBoards != null ? new Decimal(r.returnedBoards) : null;
-      if (requestedBoards != null) {
-        if (!requestedBoards.isFinite() || requestedBoards.lte(0)) {
-          throw new ValidationError({ reason: "return_boards_must_be_positive", lineId: r.originalPurchaseInvoiceLineId });
-        }
-        if (requestedBoards.gt(remainingBoards.plus(new Decimal("0.0001")))) {
-          throw new ValidationError({ reason: "over_return_boards", lineId: r.originalPurchaseInvoiceLineId, requestedBoards: requestedBoards.toFixed(4), remainingBoards: remainingBoards.toFixed(4) });
-        }
+      if (orig.metersPerBoard == null || orig.boardSizeSource == null) {
+        throw new ValidationError({ reason: "return_board_size_unavailable", lineId: r.originalPurchaseInvoiceLineId, productCode: orig.productCode });
       }
+      const metersPerBoard = new Decimal(orig.metersPerBoard);
+      const maxReturnable = new Decimal(orig.maximumReturnableBoards);
+      if (maxReturnable.lte(0)) {
+        throw new ValidationError({ reason: "no_full_boards_available_for_return", lineId: r.originalPurchaseInvoiceLineId });
+      }
+      if (requestedBoards.gt(maxReturnable)) {
+        throw new ValidationError({
+          reason: "returned_boards_exceed_remaining", lineId: r.originalPurchaseInvoiceLineId,
+          requestedBoards: requestedBoards.toFixed(0), maximumReturnableBoards: maxReturnable.toFixed(0),
+        });
+      }
+      const requestedMeters = requestedBoards.mul(metersPerBoard);
 
       const sum = alreadyById.get(r.originalPurchaseInvoiceLineId);
       const net = new Decimal(orig.originalNetExTax);

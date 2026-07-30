@@ -152,13 +152,13 @@ describe("WAC edge cases + costing lock (§2)", () => {
     const v = await newVariant();
     const p = await buy(v, "10", "300");    // 40m @300
     const inv = await sell(v, "5", "700");  // sell 20m → 20m left
-    const prDraft = await pRet(p, "10", "2"); // return 10m to supplier (value 3000)
-    const srDraft = await sRet(inv, "4", "1"); // return 4m to stock (COGS 1200)
+    const prDraft = await pRet(p, "8", "2"); // return 2 whole boards (8m) to supplier (value 2400)
+    const srDraft = await sRet(inv, "4", "1"); // return 1 board (4m) to stock (COGS 1200)
     const [pr, sr] = await Promise.all([confirmPRet(prDraft), confirmSRet(srDraft)]);
     expect(pr.status).toBeLessThan(300);
     expect(sr.status).toBeLessThan(300);
-    // 20 − 10 (pRet) + 4 (sRet) = 14m; value 6000 − 3000 + 1200 = 4200 → 300/m.
-    expect((await companyMeters(v)).toFixed(4)).toBe("14.0000");
+    // 20 − 8 (pRet) + 4 (sRet) = 16m; value 6000 − 2400 + 1200 = 4800 → 300/m.
+    expect((await companyMeters(v)).toFixed(4)).toBe("16.0000");
     expect(D((await variant(v))!.avgCostPerMeter).toFixed(2)).toBe("300.00");
   });
 

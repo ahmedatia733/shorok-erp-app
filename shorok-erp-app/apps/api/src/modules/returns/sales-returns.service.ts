@@ -90,34 +90,35 @@ export class SalesReturnsService {
     const built = reqLines.map((r) => {
       const orig = byId.get(r.originalSalesInvoiceLineId);
       if (!orig) throw new ValidationError({ reason: "line_not_on_invoice", lineId: r.originalSalesInvoiceLineId });
-      // A legacy line whose metres can't be reliably reconstructed is blocked —
-      // never guess (boards are NOT metres). §7.
-      if (orig.legacyAmbiguous) {
-        throw new ValidationError({ reason: "legacy_return_quantity_ambiguous", lineId: r.originalSalesInvoiceLineId, productCode: orig.productCode });
-      }
 
-      const requestedMeters = new Decimal(r.returnedMeters);
-      if (!requestedMeters.isFinite() || requestedMeters.lte(0)) {
-        throw new ValidationError({ reason: "return_meters_must_be_positive", lineId: r.originalSalesInvoiceLineId });
+      // ── WHOLE-BOARD quantity authority (§ whole boards) ──────────────────────
+      // The client sends only returnedBoards; the server derives the metres. Any
+      // client-supplied returnedMeters is ignored — never trusted.
+      const requestedBoards = new Decimal(r.returnedBoards);
+      if (!requestedBoards.isFinite() || requestedBoards.lte(0)) {
+        throw new ValidationError({ reason: "returned_boards_must_be_positive", lineId: r.originalSalesInvoiceLineId });
       }
-      const remaining = new Decimal(orig.remainingMeters);
-      if (requestedMeters.gt(remaining)) {
+      if (!requestedBoards.isInteger()) {
+        throw new ValidationError({ reason: "returned_boards_must_be_whole", lineId: r.originalSalesInvoiceLineId, requestedBoards: requestedBoards.toString() });
+      }
+      // A line whose whole-board size can't be determined (legacy metres/size
+      // ambiguity) is blocked — never guess. §7 / return_board_size_unavailable.
+      if (orig.legacyAmbiguous || orig.metersPerBoard == null || orig.boardSizeSource == null) {
+        throw new ValidationError({ reason: "return_board_size_unavailable", lineId: r.originalSalesInvoiceLineId, productCode: orig.productCode });
+      }
+      const metersPerBoard = new Decimal(orig.metersPerBoard);
+      const maxReturnable = new Decimal(orig.maximumReturnableBoards);
+      if (maxReturnable.lte(0)) {
+        throw new ValidationError({ reason: "no_full_boards_available_for_return", lineId: r.originalSalesInvoiceLineId });
+      }
+      if (requestedBoards.gt(maxReturnable)) {
         throw new ValidationError({
-          reason: "over_return", lineId: r.originalSalesInvoiceLineId,
-          requestedMeters: requestedMeters.toFixed(4), remainingMeters: remaining.toFixed(4),
+          reason: "returned_boards_exceed_remaining", lineId: r.originalSalesInvoiceLineId,
+          requestedBoards: requestedBoards.toFixed(0), maximumReturnableBoards: maxReturnable.toFixed(0),
         });
       }
-      // Board/piece validation (§5): positive, and cumulative ≤ original boards.
-      const remainingBoards = new Decimal(orig.remainingBoards);
-      const requestedBoards = r.returnedBoards != null ? new Decimal(r.returnedBoards) : null;
-      if (requestedBoards != null) {
-        if (!requestedBoards.isFinite() || requestedBoards.lte(0)) {
-          throw new ValidationError({ reason: "return_boards_must_be_positive", lineId: r.originalSalesInvoiceLineId });
-        }
-        if (requestedBoards.gt(remainingBoards.plus(new Decimal("0.0001")))) {
-          throw new ValidationError({ reason: "over_return_boards", lineId: r.originalSalesInvoiceLineId, requestedBoards: requestedBoards.toFixed(4), remainingBoards: remainingBoards.toFixed(4) });
-        }
-      }
+      // Metres are derived, never accepted: returnedMeters = boards × board size.
+      const requestedMeters = requestedBoards.mul(metersPerBoard);
 
       const sum = alreadyById.get(r.originalSalesInvoiceLineId);
       const already: AlreadyReturned = {

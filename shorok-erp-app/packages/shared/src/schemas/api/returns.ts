@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-const QtyStr  = z.string().regex(/^\d+(\.\d{1,4})?$/); // metres / boards, up to 4dp, ≥ 0
+const QtyStr  = z.string().regex(/^\d+(\.\d{1,4})?$/); // metres, up to 4dp, ≥ 0 (legacy field)
+// Whole-board return quantity: a positive integer, optionally sent with a
+// trailing ".0000" (persisted Decimal form). Fractions like 0.5 / 1.25 / 2.1 are
+// rejected here at the edge; the service re-validates authoritatively (§ whole
+// boards). Boards are the ONE quantity authority — metres are derived server-side.
+const BoardsStr = z.string().regex(/^[1-9]\d*(\.0+)?$/);
 const DateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 // ── settlement + disposition vocab ─────────────────────────────────────────
@@ -34,14 +39,15 @@ export type InventoryDisposition = z.infer<typeof InventoryDispositionEnum>;
 export const ReturnStatusEnum = z.enum(["DRAFT", "CONFIRMED", "CANCELLED"]);
 export type ReturnStatus = z.infer<typeof ReturnStatusEnum>;
 
-// The client only ever chooses WHICH original line and HOW MANY metres to
-// return (plus operational board count). It can NEVER send historical prices,
-// discounts, taxes or costs — the server derives all money from the original
-// invoice line snapshots.
+// The client only ever chooses WHICH original line and HOW MANY WHOLE BOARDS to
+// return. It can NEVER send historical prices, discounts, taxes, costs — nor the
+// returned metres: the server derives metres = returnedBoards × metresPerBoard
+// (from the original line) and all money from the original invoice line
+// snapshots. `returnedMeters` is accepted for backward compatibility but IGNORED.
 export const SalesReturnLineInputSchema = z.object({
   originalSalesInvoiceLineId: z.string().uuid(),
-  returnedMeters: QtyStr,             // CANONICAL returned quantity (square metres)
-  returnedBoards: QtyStr.optional(),  // operational piece/board count (defaults proportional)
+  returnedBoards: BoardsStr,          // CANONICAL returned quantity — whole boards only
+  returnedMeters: QtyStr.optional(),  // DEPRECATED/IGNORED — server recomputes from boards
   inventoryDisposition: InventoryDispositionEnum.optional().default("RETURN_TO_AVAILABLE_STOCK"),
   reason: z.string().max(300).optional(),
   note: z.string().max(300).optional(),
@@ -81,8 +87,8 @@ export type UpdateSalesReturn = z.infer<typeof UpdateSalesReturnSchema>;
 
 export const PurchaseReturnLineInputSchema = z.object({
   originalPurchaseInvoiceLineId: z.string().uuid(),
-  returnedMeters: QtyStr,
-  returnedBoards: QtyStr.optional(),
+  returnedBoards: BoardsStr,          // CANONICAL — whole boards only; metres derived server-side
+  returnedMeters: QtyStr.optional(),  // DEPRECATED/IGNORED — server recomputes from boards
   reason: z.string().max(300).optional(),
   note: z.string().max(300).optional(),
 });

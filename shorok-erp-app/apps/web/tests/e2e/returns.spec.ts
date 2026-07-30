@@ -41,20 +41,24 @@ test.describe("returns — owner sales flow", () => {
     // §3 historical snapshots on the create page.
     await expect(page.getByText("E2E-RED").first()).toBeVisible();
     await expect(page.getByText("أحمر").first()).toBeVisible();
-    await expect(page.getByText("متوسط مساحة اللوح بالفاتورة")).toBeVisible(); // effective-per-board column
+    await expect(page.getByText("متر / لوح").first()).toBeVisible(); // whole-board size column
+    await expect(page.getByText("عدد الألواح المرتجعة").first()).toBeVisible();
     // §9 refund options absent.
     const settlement = page.locator("select").first();
     await expect(settlement).toContainText("رصيد دائن للعميل");
     await expect(settlement).not.toContainText("رد نقدي");
 
-    await page.getByPlaceholder("0").first().fill("4");
-    await page.getByPlaceholder("تلقائي").first().fill("1");
+    // Whole boards only — enter 1 board; metres are derived + read-only.
+    await page.getByPlaceholder("0").first().fill("1");
+    const metersCell = page.locator('[data-testid^="meters-"]').first();
+    await expect(metersCell).toHaveText(/[0-9]/);          // derived metres shown
+    await expect(metersCell.locator("input")).toHaveCount(0); // not editable
     await page.getByRole("button", { name: "حفظ كمسودة" }).click();
     await expect(page).toHaveURL(/\/sales\/returns\/[0-9a-f-]{36}/);
 
-    // §3 edit: quantities + reason + notes + line note.
+    // §3 edit: quantities + reason + notes + line note (boards input is numeric).
     await page.getByRole("button", { name: "تعديل" }).click();
-    await page.locator('input[inputmode="decimal"]').first().fill("8");
+    await page.locator('input[inputmode="numeric"]').first().fill("1");
     await page.getByLabel("السبب").fill("سبب تجريبي");
     await page.getByLabel("ملاحظات").fill("ملاحظة رأسية");
     await page.getByPlaceholder("اختياري").last().fill("ملاحظة سطر");
@@ -130,8 +134,7 @@ test.describe("returns — permissions (§11/§12)", () => {
     await login(page, F.accountantPhone);
     await page.goto("/ar/sales/returns/new");
     await searchAndPickSale(page, F.freshSaleAccountantNumber);
-    await page.getByPlaceholder("0").first().fill("4");
-    await page.getByPlaceholder("تلقائي").first().fill("1");
+    await page.getByPlaceholder("0").first().fill("1");
     await page.getByRole("button", { name: "حفظ كمسودة" }).click();
     await expect(page).toHaveURL(/\/sales\/returns\/[0-9a-f-]{36}/);
     // Edit is allowed for the accountant.
@@ -190,8 +193,7 @@ test.describe("returns — purchase UI permissions (§5)", () => {
     await page.goto("/ar/purchasing/returns/new");
     await page.getByPlaceholder("رقم الفاتورة أو اسم المورد").fill(F.stockedPurchase2Number);
     await page.getByRole("button", { name: "اختيار" }).first().click();
-    await page.getByPlaceholder("0").first().fill("4");
-    await page.getByPlaceholder("تلقائي").first().fill("1");
+    await page.getByPlaceholder("0").first().fill("1");
     await page.getByRole("button", { name: "حفظ كمسودة" }).click();
     await expect(page).toHaveURL(/\/purchasing\/returns\/[0-9a-f-]{36}/);
     await page.getByRole("button", { name: "تعديل" }).click();
@@ -211,12 +213,11 @@ test.describe("returns — purchase flow (§13/§14/§15)", () => {
     await page.getByPlaceholder("رقم الفاتورة أو اسم المورد").fill(F.stockedPurchaseNumber);
     await page.getByRole("button", { name: "اختيار" }).first().click();
     await expect(page.getByText("E2E-BLU").first()).toBeVisible();
-    await page.getByPlaceholder("0").first().fill("4");
-    await page.getByPlaceholder("تلقائي").first().fill("1");
+    await page.getByPlaceholder("0").first().fill("1");
     await page.getByRole("button", { name: "حفظ كمسودة" }).click();
     await expect(page).toHaveURL(/\/purchasing\/returns\/[0-9a-f-]{36}/);
     await page.getByRole("button", { name: "تعديل" }).click();
-    await page.locator('input[inputmode="decimal"]').first().fill("8");
+    await page.locator('input[inputmode="numeric"]').first().fill("1");
     await page.getByRole("button", { name: "حفظ التعديلات" }).click();
     page.once("dialog", (d) => d.accept());
     await page.getByRole("button", { name: "تأكيد المردود" }).click();

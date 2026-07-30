@@ -72,10 +72,13 @@ describe("returns (§22/§23)", () => {
   };
   const invLineId = async (invoiceId: string) => (await h.prisma.salesInvoiceLine.findFirst({ where: { invoiceId } }))!.id;
   const pInvLineId = async (invoiceId: string) => (await h.prisma.purchaseInvoiceLine.findFirst({ where: { invoiceId } }))!.id;
-  const retSale = (invoiceId: string, lineId: string, meters: string, boards: string, extra: any = {}) =>
+  // Boards are the ONE quantity authority now; the metres arg is accepted but the
+  // server ignores it (it derives metres = boards × board size). Kept in the
+  // signature so existing call sites read unchanged.
+  const retSale = (invoiceId: string, lineId: string, _meters: string, boards: string, extra: any = {}) =>
     request(srv()).post("/api/v1/sales-returns").set(auth()).send({
       originalSalesInvoiceId: invoiceId, returnDate: "2026-03-15",
-      lines: [{ originalSalesInvoiceLineId: lineId, returnedMeters: meters, returnedBoards: boards }], ...extra,
+      lines: [{ originalSalesInvoiceLineId: lineId, returnedBoards: boards }], ...extra,
     });
   const confirmSaleRet = (id: string) => request(srv()).post(`/api/v1/sales-returns/${id}/confirm`).set(auth()).send({});
   const bal = async (v: string) => h.prisma.branchInventoryBalance.findUnique({ where: { branchId_productVariantId: { branchId: h.branchId, productVariantId: v } } });
@@ -167,14 +170,14 @@ describe("returns (§22/§23)", () => {
     expect(rep.grossProfit).toBe("0.00");
   });
 
-  // ── Scenario D — over-return blocked ───────────────────────────────────────
-  it("D) returning 0.0001 m² more than remaining fails (409)", async () => {
+  // ── Scenario D — over-return blocked (one whole board past the eligible count) ─
+  it("D) returning 1 whole board more than remaining fails (409)", async () => {
     const { variantId: v } = await buy("4.0000", "300", "2");
-    const inv = await sell(v, "2", "500"); // 8m
+    const inv = await sell(v, "2", "500"); // 2 boards, 8m — eligible = 2 boards
     const lineId = await invLineId(inv);
-    const r = await retSale(inv, lineId, "8.0001", "2");
-    // fails either at draft-create or confirm; assert create rejects.
+    const r = await retSale(inv, lineId, "12", "3"); // 3 > 2 eligible boards
     expect(r.status).toBe(409);
+    expect(r.body.details?.reason ?? r.body.reason).toBe("returned_boards_exceed_remaining");
   });
 
   // ── Scenario E — concurrent confirmation of the same remaining ─────────────
@@ -283,8 +286,8 @@ describe("returns (§22/§23)", () => {
     const lineId = await invLineId(inv);
     // Foreign line id (belongs to the draft, not this invoice).
     expect((await retSale(inv, draftLine, "1", "1")).status).toBe(409);
-    // Zero quantity.
-    expect((await retSale(inv, lineId, "0", "0")).status).toBe(409);
+    // Zero boards — rejected at the DTO (positive integer required) → 400.
+    expect((await retSale(inv, lineId, "0", "0")).status).toBe(400);
   });
 
   // ── Scenario I — purchase return + WAC recompute ───────────────────────────

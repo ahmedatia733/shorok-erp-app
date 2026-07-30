@@ -175,7 +175,7 @@ describe("return text fields (§2/§3)", () => {
 
     // (B) update the line WITHOUT reason/note keys → both preserved.
     await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5" }],
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "4", returnedBoards: "1" }],
     });
     row = await getSale(created.body.id);
     expect(row.lines[0].reason).toBe("سبب باقٍ");
@@ -183,7 +183,7 @@ describe("return text fields (§2/§3)", () => {
 
     // Mixed: omit reason (preserve), clear note (whitespace → null).
     await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5", note: "   " }],
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "4", returnedBoards: "1", note: "   " }],
     });
     row = await getSale(created.body.id);
     expect(row.lines[0].reason).toBe("سبب باقٍ");
@@ -191,14 +191,14 @@ describe("return text fields (§2/§3)", () => {
 
     // (C) empty reason → null (note already null).
     await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "" }],
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "4", returnedBoards: "1", reason: "" }],
     });
     row = await getSale(created.body.id);
     expect(row.lines[0].reason).toBeNull();
 
     // (D) new values → trimmed + separate.
     await request(srv()).put(`/api/v1/sales-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "  سبب جديد  ", note: "  ملاحظة جديدة  " }],
+      lines: [{ originalSalesInvoiceLineId: saleLineId, returnedMeters: "4", returnedBoards: "1", reason: "  سبب جديد  ", note: "  ملاحظة جديدة  " }],
     });
     row = await getSale(created.body.id);
     expect(row.lines[0].reason).toBe("سبب جديد");
@@ -219,7 +219,7 @@ describe("return text fields (§2/§3)", () => {
 
     // (B) update WITHOUT reason/note → preserved.
     await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5" }],
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "4", returnedBoards: "1" }],
     });
     row = await getPurchase(created.body.id);
     expect(row.lines[0].reason).toBe("سبب باقٍ");
@@ -227,7 +227,7 @@ describe("return text fields (§2/§3)", () => {
 
     // Mixed: omit reason (preserve), clear note.
     await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5", note: "" }],
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "4", returnedBoards: "1", note: "" }],
     });
     row = await getPurchase(created.body.id);
     expect(row.lines[0].reason).toBe("سبب باقٍ");
@@ -235,14 +235,14 @@ describe("return text fields (§2/§3)", () => {
 
     // (C) empty reason → null.
     await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "  " }],
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "4", returnedBoards: "1", reason: "  " }],
     });
     row = await getPurchase(created.body.id);
     expect(row.lines[0].reason).toBeNull();
 
     // (D) new values → trimmed + separate.
     await request(srv()).put(`/api/v1/purchase-returns/${created.body.id}`).set(auth()).send({
-      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "2", returnedBoards: "0.5", reason: "  سبب جديد  ", note: "  ملاحظة جديدة  " }],
+      lines: [{ originalPurchaseInvoiceLineId: purchaseLineId, returnedMeters: "4", returnedBoards: "1", reason: "  سبب جديد  ", note: "  ملاحظة جديدة  " }],
     });
     row = await getPurchase(created.body.id);
     expect(row.lines[0].reason).toBe("سبب جديد");

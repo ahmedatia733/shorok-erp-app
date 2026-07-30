@@ -15,9 +15,13 @@ import { useHasRole } from "../../../../../../lib/auth";
 import { getPurchaseReturn, getPurchaseReturnable, confirmPurchaseReturn, cancelPurchaseReturn, updatePurchaseReturn, type PurchaseReturnRow, type PurchaseReturnable } from "../../../../../../lib/returns-client";
 
 const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", CANCELLED: "ملغي" };
-const D = (v: string | number) => Number(v || "0");
+const D = (v: string | number | null) => Number(v || "0");
 
-type LineEntry = { meters: string; boards: string; reason: string; note: string };
+type LineEntry = { boards: string; reason: string; note: string };
+const blockReason = (l: PurchaseReturnable["lines"][number]): string | null => {
+  if (l.metersPerBoard == null || l.boardSizeSource == null) return "مقاس اللوح غير متاح — غير قابل للإرجاع";
+  return null;
+};
 
 export default function PurchaseReturnDetailPage() {
   const locale = useLocale() as AppLocale;
@@ -53,7 +57,7 @@ export default function PurchaseReturnDetailPage() {
       const r = await getPurchaseReturnable(row.originalPurchaseInvoiceId);
       setRet(r);
       const pre: Record<string, LineEntry> = {};
-      for (const l of row.lines ?? []) pre[l.originalPurchaseInvoiceLineId] = { meters: String(D(l.returnedMetersQuantity)), boards: String(D(l.returnedBoards)), reason: l.reason ?? "", note: l.note ?? "" };
+      for (const l of row.lines ?? []) pre[l.originalPurchaseInvoiceLineId] = { boards: String(Math.floor(D(l.returnedBoards))), reason: l.reason ?? "", note: l.note ?? "" };
       setQty(pre);
       setEditDate(row.returnDate.slice(0, 10));
       setEditReason(row.reason ?? "");
@@ -64,17 +68,14 @@ export default function PurchaseReturnDetailPage() {
 
   const lineError = (rl: PurchaseReturnable["lines"][number]): string | null => {
     const e = qty[rl.originalLineId];
-    if (!e) return null;
-    const m = Number(e.meters || "0");
-    const b = Number(e.boards || "0");
-    if (e.meters !== "" && (isNaN(m) || m < 0)) return "قيمة غير صالحة";
-    if (m > D(rl.remainingMeters) + 1e-9) return `الكمية تتجاوز المتبقي (${D(rl.remainingMeters).toFixed(2)} م²)`;
-    if (e.boards !== "" && (isNaN(b) || b < 0)) return "عدد ألواح غير صالح";
-    if (b > D(rl.remainingBoards) + 1e-9) return `عدد الألواح يتجاوز المتبقي (${D(rl.remainingBoards).toFixed(2)})`;
+    if (!e || e.boards === "") return null;
+    const b = Number(e.boards);
+    if (isNaN(b) || b < 0 || !Number.isInteger(b)) return "عدد ألواح غير صالح (أعداد صحيحة فقط)";
+    if (b > D(rl.maximumReturnableBoards)) return `عدد الألواح يتجاوز الحد الأقصى (${Math.floor(D(rl.maximumReturnableBoards))})`;
     return null;
   };
 
-  const enteredLines = useMemo(() => (ret?.lines ?? []).filter((l) => Number(qty[l.originalLineId]?.meters || "0") > 0), [ret, qty]);
+  const enteredLines = useMemo(() => (ret?.lines ?? []).filter((l) => Math.floor(Number(qty[l.originalLineId]?.boards || "0")) > 0), [ret, qty]);
   const anyLineError = useMemo(() => (ret?.lines ?? []).some((l) => lineError(l) != null), [ret, qty]); // eslint-disable-line react-hooks/exhaustive-deps
   const canSave = editing && enteredLines.length > 0 && !anyLineError;
 
@@ -82,8 +83,7 @@ export default function PurchaseReturnDetailPage() {
     if (!row || !ret || !canSave) return;
     const lines = enteredLines.map((l) => ({
       originalPurchaseInvoiceLineId: l.originalLineId,
-      returnedMeters: qty[l.originalLineId]?.meters ?? "0",
-      returnedBoards: qty[l.originalLineId]?.boards || undefined,
+      returnedBoards: String(Math.floor(Number(qty[l.originalLineId]!.boards))),
       // Text fields are sent VERBATIM (empty string = deliberate clear, §3).
       reason: qty[l.originalLineId]?.reason ?? "",
       note: qty[l.originalLineId]?.note ?? "",
@@ -117,29 +117,36 @@ export default function PurchaseReturnDetailPage() {
             </div>
             <div className="overflow-x-auto">
               <Table>
-                <THead><TR><TH>الكود</TH><TH>اللون</TH><TH>الأصلي (م²)</TH><TH>المتبقي (م²)</TH><TH>سعر المتر</TH><TH>الكمية المرتجعة (م²)</TH><TH>عدد الألواح</TH><TH>سبب السطر</TH><TH>ملاحظة السطر</TH></TR></THead>
+                <THead><TR><TH>الكود</TH><TH>اللون</TH><TH>متر / لوح</TH><TH>الحد الأقصى (ألواح)</TH><TH>سعر المتر</TH><TH>عدد الألواح المرتجعة</TH><TH>إجمالي الأمتار</TH><TH>سبب السطر</TH><TH>ملاحظة السطر</TH></TR></THead>
                 <TBody>
                   {ret.lines.map((l) => {
                     const err = lineError(l);
+                    const blocked = blockReason(l);
+                    const b = Math.floor(Number(qty[l.originalLineId]?.boards || "0"));
+                    const meters = !blocked && b > 0 ? b * D(l.metersPerBoard) : 0;
                     return (
                       <TR key={l.originalLineId}>
                         <TD>{l.productCode ?? "—"}</TD>
                         <TD>{l.colorName ?? "—"}</TD>
-                        <TD>{D(l.originalMeters).toFixed(2)}</TD>
-                        <TD>{D(l.remainingMeters).toFixed(2)}</TD>
+                        <TD>{l.metersPerBoard ? D(l.metersPerBoard).toFixed(2) : "—"}</TD>
+                        <TD>{blocked ? "—" : Math.floor(D(l.maximumReturnableBoards))}</TD>
                         <TD>{formatCurrency(l.originalUnitPrice, locale)}</TD>
-                        <TD style={{ maxWidth: 150 }}>
-                          <Input inputMode="decimal" max={l.remainingMeters} value={qty[l.originalLineId]?.meters ?? ""} onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { boards: "", reason: "", note: "" }), meters: e.target.value } }))} />
-                          {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
+                        <TD style={{ maxWidth: 130 }}>
+                          {blocked
+                            ? <span className="text-xs text-amber-600">{blocked}</span>
+                            : <>
+                                <Input inputMode="numeric" type="number" min={0} step={1} max={D(l.maximumReturnableBoards)}
+                                  data-testid={`boards-${l.originalLineId}`}
+                                  value={qty[l.originalLineId]?.boards ?? ""} onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { reason: "", note: "" }), boards: e.target.value } }))} />
+                                {err && <div className="mt-1 text-xs text-red-600">{err}</div>}
+                              </>}
                         </TD>
-                        <TD style={{ maxWidth: 100 }}>
-                          <Input inputMode="decimal" max={l.remainingBoards} value={qty[l.originalLineId]?.boards ?? ""} placeholder="تلقائي" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", reason: "", note: "" }), boards: e.target.value } }))} />
+                        <TD className="tabular-nums" dir="ltr">{blocked ? "—" : meters.toFixed(2)}</TD>
+                        <TD style={{ maxWidth: 160 }}>
+                          <Input value={qty[l.originalLineId]?.reason ?? ""} placeholder="سبب اختياري" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { boards: "", note: "" }), reason: e.target.value } }))} />
                         </TD>
                         <TD style={{ maxWidth: 160 }}>
-                          <Input value={qty[l.originalLineId]?.reason ?? ""} placeholder="سبب اختياري" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", boards: "", note: "" }), reason: e.target.value } }))} />
-                        </TD>
-                        <TD style={{ maxWidth: 160 }}>
-                          <Input value={qty[l.originalLineId]?.note ?? ""} placeholder="ملاحظة اختيارية" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { meters: "", boards: "", reason: "" }), note: e.target.value } }))} />
+                          <Input value={qty[l.originalLineId]?.note ?? ""} placeholder="ملاحظة اختيارية" onChange={(e) => setQty((s) => ({ ...s, [l.originalLineId]: { ...(s[l.originalLineId] ?? { boards: "", reason: "" }), note: e.target.value } }))} />
                         </TD>
                       </TR>
                     );

@@ -19,6 +19,20 @@ export interface ReturnableLine {
   // computed average from the original invoice, independent of the current
   // product master. The original lengthM/widthM below are shown separately.
   effectiveOriginalMetersPerBoard: string | null;
+  // AUTHORITATIVE whole-board size for this line — the metres a single full board
+  // represents. Preference: the original line's chosen dimensions (exact, immune
+  // to later master edits), else the linked variant's current sizeMetersPerBoard
+  // (legacy fallback). Drives returnedMeters = returnedBoards × metersPerBoard AND
+  // the whole-board eligibility floor. NULL → the board size can't be determined
+  // and the line cannot be returned.
+  metersPerBoard: string | null;
+  boardSizeSource: "dimensions" | "variant" | null;
+  // Whole, uncut boards this line can EVER yield = min(originalBoards,
+  // floor(originalMeters / metersPerBoard)). A board cut below its full size is
+  // excluded (its metres don't complete a whole board).
+  eligibleWholeBoards: string;
+  previouslyReturnedBoards: string;    // Σ CONFIRMED returned boards
+  maximumReturnableBoards: string;     // eligibleWholeBoards − previouslyReturnedBoards (≥ 0)
   unitLabel: string;
   lengthM: string | null;              // HISTORICAL chosen dimensions (original line)
   widthM: string | null;
@@ -47,6 +61,8 @@ export interface PurchaseReturnableLine {
   originalLineId: string; productVariantId: string;
   productCode: string | null; colorName: string | null;
   currentVariantSize: string | null; effectiveOriginalMetersPerBoard: string | null;
+  metersPerBoard: string | null; boardSizeSource: "dimensions" | "variant" | null;
+  eligibleWholeBoards: string; previouslyReturnedBoards: string; maximumReturnableBoards: string;
   unitLabel: string; lengthM: string | null; widthM: string | null;
   originalMeters: string; originalBoards: string;
   returnedMeters: string; returnedBoards: string;
@@ -70,6 +86,44 @@ export class ReturnableService {
 
   private db(tx?: Tx) {
     return tx ?? this.prisma;
+  }
+
+  // Absorbs stored-precision noise (4 dp) so e.g. 11.9999 metres of a 4-metre
+  // board still floors to 3 boards, WITHOUT ever admitting a real partial board.
+  private static readonly BOARD_TOL = new Decimal("0.0001");
+
+  /**
+   * The whole-board size (metres a single full board represents) for an original
+   * line, in precedence: the line's chosen dimensions (exact, immune to later
+   * master edits) → the linked variant's current sizeMetersPerBoard (legacy
+   * fallback) → none. `length × (width || 1)` mirrors the invoice's own area
+   * rule (custom = length×width, كبير/صغير = length, else the variant size).
+   */
+  private boardSize(
+    lengthM: Prisma.Decimal | null,
+    widthM: Prisma.Decimal | null,
+    variantSize: Prisma.Decimal | null,
+  ): { mpb: Decimal | null; source: "dimensions" | "variant" | null } {
+    if (lengthM != null) {
+      const len = new Decimal(lengthM.toString());
+      if (len.gt(0)) {
+        const wid = widthM != null && new Decimal(widthM.toString()).gt(0) ? new Decimal(widthM.toString()) : new Decimal(1);
+        return { mpb: len.mul(wid), source: "dimensions" };
+      }
+    }
+    if (variantSize != null) {
+      const s = new Decimal(variantSize.toString());
+      if (s.gt(0)) return { mpb: s, source: "variant" };
+    }
+    return { mpb: null, source: null };
+  }
+
+  /** min(originalBoards, floor(originalMeters / metresPerBoard)) — the uncut whole
+   *  boards this line can EVER return. 0 when the board size is unknown. */
+  private eligibleWholeBoards(originalMeters: Decimal, originalBoards: Decimal, mpb: Decimal | null): Decimal {
+    if (mpb == null || mpb.lte(0)) return new Decimal(0);
+    const whole = originalMeters.div(mpb).plus(ReturnableService.BOARD_TOL).floor();
+    return Decimal.max(new Decimal(0), Decimal.min(originalBoards, whole));
   }
 
   /**
@@ -142,6 +196,12 @@ export class ReturnableService {
       const lineCogs = l.lineCogsAtPosting != null
         ? new Decimal(l.lineCogsAtPosting.toString())
         : new Decimal(l.quantity.toString()).mul(new Decimal(l.unitCostAtPosting?.toString() ?? "0"));
+      // Whole-board size + eligibility. When the metres are legacy-ambiguous there
+      // is no reliable board size either, so it stays null and the line is blocked.
+      const variantSize = l.productVariant ? l.productVariant.sizeMetersPerBoard : null;
+      const { mpb, source: boardSizeSource } = legacyAmbiguous ? { mpb: null, source: null as null } : this.boardSize(l.lengthM, l.widthM, variantSize);
+      const eligibleWhole = this.eligibleWholeBoards(originalMeters, originalBoards, mpb);
+      const maxReturnable = Decimal.max(new Decimal(0), eligibleWhole.minus(returnedBoards));
       return {
         originalLineId: l.id,
         productVariantId: l.productVariantId,
@@ -149,6 +209,11 @@ export class ReturnableService {
         colorName: l.productVariant?.sku?.colorNameAr ?? null,
         currentVariantSize: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(4) : null,
         effectiveOriginalMetersPerBoard: !legacyAmbiguous && originalBoards.gt(0) ? originalMeters.div(originalBoards).toFixed(4) : null,
+        metersPerBoard: mpb != null ? mpb.toFixed(4) : null,
+        boardSizeSource,
+        eligibleWholeBoards: eligibleWhole.toFixed(0),
+        previouslyReturnedBoards: returnedBoards.toFixed(0),
+        maximumReturnableBoards: maxReturnable.toFixed(0),
         unitLabel: l.unitLabel,
         lengthM: l.lengthM != null ? new Decimal(l.lengthM.toString()).toFixed(4) : null,
         widthM: l.widthM != null ? new Decimal(l.widthM.toString()).toFixed(4) : null,
@@ -213,6 +278,10 @@ export class ReturnableService {
       const sum = byLine.get(l.id);
       const returnedMeters = new Decimal(sum?.returnedMetersQuantity?.toString() ?? "0");
       const returnedBoards = new Decimal(sum?.returnedBoards?.toString() ?? "0");
+      const variantSize = l.productVariant ? l.productVariant.sizeMetersPerBoard : null;
+      const { mpb, source: boardSizeSource } = this.boardSize(l.lengthM, l.widthM, variantSize);
+      const eligibleWhole = this.eligibleWholeBoards(originalMeters, originalBoards, mpb);
+      const maxReturnable = Decimal.max(new Decimal(0), eligibleWhole.minus(returnedBoards));
       return {
         originalLineId: l.id,
         productVariantId: l.productVariantId,
@@ -221,6 +290,11 @@ export class ReturnableService {
         currentVariantSize: l.productVariant ? new Decimal(l.productVariant.sizeMetersPerBoard.toString()).toFixed(4) : null,
         // Purchase lines persist metersQuantity + boardsQuantity → historical board area is exact.
         effectiveOriginalMetersPerBoard: originalBoards.gt(0) ? originalMeters.div(originalBoards).toFixed(4) : null,
+        metersPerBoard: mpb != null ? mpb.toFixed(4) : null,
+        boardSizeSource,
+        eligibleWholeBoards: eligibleWhole.toFixed(0),
+        previouslyReturnedBoards: returnedBoards.toFixed(0),
+        maximumReturnableBoards: maxReturnable.toFixed(0),
         unitLabel: l.unitLabel ?? "متر",
         lengthM: l.lengthM != null ? new Decimal(l.lengthM.toString()).toFixed(4) : null,
         widthM: l.widthM != null ? new Decimal(l.widthM.toString()).toFixed(4) : null,
