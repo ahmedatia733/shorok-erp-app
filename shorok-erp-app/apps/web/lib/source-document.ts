@@ -24,11 +24,18 @@ export interface SourceRef {
 const SOURCE_ROUTES: Record<string, (id: string, locale: string) => string> = {
   SALES_INVOICE: (id, l) => `/${l}/sales/invoices/${id}`,
   PURCHASE_INVOICE: (id, l) => `/${l}/purchasing/invoices/${id}`,
+  // Returns link to their OWN document (sourceId = the return id), never to the
+  // original invoice. The destination page enforces branch scope (404 for a
+  // foreign branch), so building the link leaks nothing the statement didn't.
+  SALES_RETURN: (id, l) => `/${l}/sales/returns/${id}`,
+  PURCHASE_RETURN: (id, l) => `/${l}/purchasing/returns/${id}`,
 };
 
 export const SOURCE_LABELS: Record<string, string> = {
   SALES_INVOICE: "فاتورة مبيعات",
   PURCHASE_INVOICE: "فاتورة مشتريات",
+  SALES_RETURN: "مردود فاتورة مبيعات",
+  PURCHASE_RETURN: "مردود فاتورة مشتريات",
   RECEIPT_VOUCHER: "سند قبض",
   PAYMENT_VOUCHER: "سند صرف",
   EXPENSE: "مصروف",

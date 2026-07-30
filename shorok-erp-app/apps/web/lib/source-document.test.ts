@@ -37,11 +37,30 @@ describe("source-document resolver", () => {
   it("exposes Arabic source labels", () => {
     expect(sourceLabel("SALES_INVOICE")).toBe("فاتورة مبيعات");
     expect(sourceLabel("RECEIPT_VOUCHER")).toBe("سند قبض");
+    expect(sourceLabel("SALES_RETURN")).toBe("مردود فاتورة مبيعات");
+    expect(sourceLabel("PURCHASE_RETURN")).toBe("مردود فاتورة مشتريات");
     expect(sourceLabel(null)).toBeNull();
     expect(sourceLabel("WHATEVER")).toBeNull();
   });
 
   it("respects the locale segment", () => {
     expect(sourceDocumentHref({ sourceType: "SALES_INVOICE", sourceId: "si-1" }, "en")).toBe("/en/sales/invoices/si-1");
+  });
+
+  it("a SALES_RETURN row links to the sales-return document (its own sourceId), not the invoice", () => {
+    const row = { sourceType: "SALES_RETURN", sourceId: "sr-2", journalEntryId: "je-9" };
+    expect(sourceDocumentHref(row, "ar")).toBe("/ar/sales/returns/sr-2");
+    expect(sourceDocumentHref(row, "en")).toBe("/en/sales/returns/sr-2");
+    expect(hasSourceDocument(row)).toBe(true);
+  });
+
+  it("a PURCHASE_RETURN row links to the purchase-return document", () => {
+    expect(sourceDocumentHref({ sourceType: "PURCHASE_RETURN", sourceId: "pr-3", journalEntryId: "je-x" }, "ar"))
+      .toBe("/ar/purchasing/returns/pr-3");
+  });
+
+  it("a SALES_RETURN row missing its sourceId falls back to the journal entry (no broken link)", () => {
+    expect(sourceDocumentHref({ sourceType: "SALES_RETURN", sourceId: null, journalEntryId: "je-9" }, "ar"))
+      .toBe("/ar/accounting/journal/je-9");
   });
 });

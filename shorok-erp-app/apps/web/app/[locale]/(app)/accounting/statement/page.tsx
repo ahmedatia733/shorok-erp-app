@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { ACCOUNT_CATEGORIES, accountsInCategory } from "@shorok/shared";
 import type { AppLocale } from "../../../../../i18n";
@@ -296,7 +297,7 @@ export default function StatementPage() {
                   {t("accountsDetails", { count: data.breakdown.length })}
                 </div>
                 <div className="max-h-[520px] overflow-auto border-t border-border" data-testid="statement-accounts-scroll">
-                  <table className="w-full border-collapse text-sm" data-testid="statement-accounts-table">
+                  <table className="w-full min-w-[720px] border-collapse text-sm [&_td]:border [&_td]:border-border [&_th]:border [&_th]:border-border" data-testid="statement-accounts-table">
                     <thead className="sticky top-0 z-10 bg-background text-xs uppercase tracking-wide text-textSecondary">
                       <tr>
                         <th className="px-3 py-2 text-start font-medium">{t("code")}</th>
@@ -363,7 +364,7 @@ export default function StatementPage() {
                 {t("movements", { count: data.rows.length })}
               </div>
               <div className="max-h-[520px] overflow-auto border-t border-border">
-                <table className="w-full border-collapse text-sm">
+                <table className="w-full min-w-[720px] border-collapse text-sm [&_td]:border [&_td]:border-border [&_th]:border [&_th]:border-border" data-testid="statement-movements-table">
                   <thead className="sticky top-0 z-10 bg-background text-xs uppercase tracking-wide text-textSecondary">
                     <tr>
                       <th className="px-3 py-2 text-start font-medium">{t("date")}</th>
@@ -394,13 +395,16 @@ export default function StatementPage() {
                                 <span className="font-mono" dir="ltr">{r.accountCode}</span> — {r.accountName}
                               </td>
                             )}
-                            <td className="px-3 py-2">
+                            <td className="max-w-[320px] truncate px-3 py-2" title={statementRowLabel(r, locale)}>
                               {href ? (
-                                <a href={href} className="text-primary hover:underline">
-                                  {statementRowLabel(r)} ↗
-                                </a>
+                                <Link
+                                  href={href}
+                                  className="text-primary underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-none"
+                                >
+                                  {statementRowLabel(r, locale)} ↗
+                                </Link>
                               ) : (
-                                statementRowLabel(r)
+                                statementRowLabel(r, locale)
                               )}
                             </td>
                             <td className="px-3 py-2 text-end">
