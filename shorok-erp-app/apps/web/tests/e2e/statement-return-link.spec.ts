@@ -43,11 +43,14 @@ async function seed(page: Page): Promise<Ctx> {
     const sret = await mk(`SRLSR${u}`, `مردودات مبيعات ${u}`, `Sales Returns ${u}`, "REVENUE", "REVENUE");
     const cogs = await mk(`SRLCG${u}`, `تكلفة ${u}`, `COGS ${u}`, "COST_OF_SALES", "COST_OF_SALES");
     const inv = await mk(`SRLIN${u}`, `مخزون ${u}`, `Inv ${u}`, "ASSET", "CURRENT_ASSET");
-    // Append a posting profile that HAS the sales-returns account (createdAt
-    // tiebreaker makes it the one in force), so the return can confirm.
+    const vatOut = await mk(`SRLVO${u}`, `ض مخرجات ${u}`, `VAT Out ${u}`, "LIABILITY", "LIABILITY");
+    const vatIn = await mk(`SRLVI${u}`, `ض مدخلات ${u}`, `VAT In ${u}`, "ASSET", "CURRENT_ASSET");
+    // Append a COMPLETE posting profile (incl. VAT) that HAS the sales-returns
+    // account (createdAt tiebreaker makes it the one in force).
     await call("/settings/posting-profiles", token, {
       effectiveFrom: "2026-01-01", arAccountId: ar, apAccountId: ap, revenueAccountId: rev,
       salesReturnsAccountId: sret, cogsAccountId: cogs, inventoryAccountId: inv,
+      vatOutputAccountId: vatOut, vatInputAccountId: vatIn,
     });
 
     const branchId = ((await call("/branches", token)) as Array<{ id: string }>)[0].id;
@@ -149,7 +152,7 @@ test.describe("statement — sales return label + link", () => {
       credit: normalizeDigits(await cells.nth(-2).innerText()),
       balance: normalizeDigits(await cells.nth(-1).innerText()),
     };
-    expect(before.credit).toContain("2,000.00");
+    expect(before.credit).toContain("2,000");
 
     await link.click();
     await expect(page).toHaveURL(new RegExp(`/ar/sales/returns/${ctx.salesReturnId}`));

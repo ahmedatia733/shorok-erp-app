@@ -20,8 +20,16 @@ export class InvoicePdfService {
   private readonly workerPath = join(__dirname, "render.cjs");
 
   async renderInvoice(data: InvoicePdfData): Promise<Buffer> {
-    const html = buildInvoiceHtml(data);
-    const dir = mkdtempSync(join(tmpdir(), "invoice-pdf-"));
+    return this.renderHtml(buildInvoiceHtml(data));
+  }
+
+  /**
+   * Renders any self-contained HTML document to a PDF buffer through the same
+   * headless-Chromium worker. Shared by the invoice and return PDFs so there is
+   * one renderer, one Chromium resolution and one Jest-safe child-process path.
+   */
+  async renderHtml(html: string): Promise<Buffer> {
+    const dir = mkdtempSync(join(tmpdir(), "shorok-pdf-"));
     const htmlPath = join(dir, `${randomUUID()}.html`);
     const outPath = join(dir, `${randomUUID()}.pdf`);
     writeFileSync(htmlPath, html, "utf8");

@@ -443,6 +443,29 @@ export class PurchaseReturnsService {
     return data;
   }
 
+  /** Read-only fetch for the PDF: full snapshot + branch-scope 404 (no leak).
+   *  Works for DRAFT and CONFIRMED — never requires journalEntryId. */
+  async getRawForPdf(id: string, user: AuthenticatedUser) {
+    const ret = await this.prisma.purchaseReturn.findUnique({
+      where: { id },
+      include: {
+        supplier: { select: { nameAr: true } },
+        branch: { select: { nameAr: true } },
+        originalInvoice: { select: { invoiceNumber: true, invoiceDate: true } },
+        confirmer: { select: { name: true } },
+        lines: { include: { productVariant: { include: { sku: { select: { code: true, colorNameAr: true } } } } } },
+      },
+    });
+    if (!ret) throw new NotFoundError({ id });
+    this.assertBranch(user, ret.branchId, { id });
+    let journalEntryNumber: string | null = null;
+    if (ret.journalEntryId) {
+      const je = await this.prisma.journalEntry.findUnique({ where: { id: ret.journalEntryId }, select: { entryNumber: true } });
+      journalEntryNumber = je ? String(je.entryNumber) : null;
+    }
+    return { ret, journalEntryNumber };
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private format(r: any) {
     const lines: any[] = r.lines ?? [];

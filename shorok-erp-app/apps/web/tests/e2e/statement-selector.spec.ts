@@ -209,8 +209,8 @@ test.describe("unified account statement", () => {
     // كل البنوك: every bank listed; Bank A reflects the 700 spend, Bank B untouched.
     await select(page, "banks", "كل البنوك");
     await expect(page.locator("text=عرض مجمّع")).toBeVisible();
-    expect(await rowText(page, `E2EB1${ctx.suffix}`)).toContain("4,300.00"); // 5000 − 700
-    expect(await rowText(page, `E2EB2${ctx.suffix}`)).toContain("2,000.00"); // unchanged
+    expect(await rowText(page, `E2EB1${ctx.suffix}`)).toContain("4,300"); // 5000 − 700
+    expect(await rowText(page, `E2EB2${ctx.suffix}`)).toContain("2,000"); // unchanged
 
     // One bank: only Bank A's movements.
     await select(page, "banks", `بنك اختبار أ ${ctx.suffix}`);
@@ -225,8 +225,8 @@ test.describe("unified account statement", () => {
   test("Flow 2 — all treasuries vs one treasury", async ({ page }) => {
     await openStatement(page);
     await select(page, "vaults", "كل الخزن");
-    expect(await rowText(page, `E2EC1${ctx.suffix}`)).toContain("2,600.00"); // 3000 − 400
-    expect(await rowText(page, `E2EC2${ctx.suffix}`)).toContain("1,000.00");
+    expect(await rowText(page, `E2EC1${ctx.suffix}`)).toContain("2,600"); // 3000 − 400
+    expect(await rowText(page, `E2EC2${ctx.suffix}`)).toContain("1,000");
 
     await select(page, "vaults", `خزنة اختبار أ ${ctx.suffix}`);
     await expect(page.locator("text=عرض تفصيلي")).toBeVisible();
@@ -237,31 +237,31 @@ test.describe("unified account statement", () => {
     await openStatement(page);
     await select(page, "expense", "كل المصروفات");
     // 700 (bank) + 400 (cash) + 900 (supplier) = 2000
-    expect(await rowText(page, `E2EX${ctx.suffix}`)).toContain("2,000.00");
+    expect(await rowText(page, `E2EX${ctx.suffix}`)).toContain("2,000");
 
     await select(page, "expense", `مصاريف تشغيل اختبار ${ctx.suffix}`);
     await expect(page.locator("text=عرض تفصيلي")).toBeVisible();
-    expect(await tableText(page)).toContain("2,000.00");
+    expect(await tableText(page)).toContain("2,000");
   });
 
   test("Flow 4 — customers, all and specific", async ({ page }) => {
     await openStatement(page);
     await select(page, "customers", "كل العملاء");
-    expect(await rowText(page, `عميل أ ${ctx.suffix}`)).toContain("1,500.00");
+    expect(await rowText(page, `عميل أ ${ctx.suffix}`)).toContain("1,500");
 
     await select(page, "customers", `عميل أ ${ctx.suffix}`);
     await expect(page.locator("text=عرض تفصيلي")).toBeVisible();
-    expect(await tableText(page)).toContain("1,500.00");
+    expect(await tableText(page)).toContain("1,500");
   });
 
   test("Flow 5 — suppliers, all and specific", async ({ page }) => {
     await openStatement(page);
     await select(page, "suppliers", "كل الموردين");
-    expect(await rowText(page, `مورد أ ${ctx.suffix}`)).toContain("900.00");
+    expect(await rowText(page, `مورد أ ${ctx.suffix}`)).toContain("900");
 
     await select(page, "suppliers", `مورد أ ${ctx.suffix}`);
     await expect(page.locator("text=عرض تفصيلي")).toBeVisible();
-    expect(await tableText(page)).toContain("900.00");
+    expect(await tableText(page)).toContain("900");
   });
 
   test("second selector searches by code and clears an invalid selection on category change", async ({ page }) => {

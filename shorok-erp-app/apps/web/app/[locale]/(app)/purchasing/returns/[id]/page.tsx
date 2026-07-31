@@ -12,6 +12,7 @@ import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui
 import { formatCurrency, formatDate } from "../../../../../../lib/format";
 import { returnErrorMessage } from "../../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../../lib/auth";
+import { downloadReturnPdf } from "../../../../../../lib/returns-pdf-client";
 import { getPurchaseReturn, getPurchaseReturnable, confirmPurchaseReturn, cancelPurchaseReturn, updatePurchaseReturn, type PurchaseReturnRow, type PurchaseReturnable } from "../../../../../../lib/returns-client";
 
 const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", CANCELLED: "ملغي" };
@@ -37,11 +38,25 @@ export default function PurchaseReturnDetailPage() {
   const [editDate, setEditDate] = useState("");
   const [editReason, setEditReason] = useState("");
   const [editNotes, setEditNotes] = useState("");
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const load = useCallback(async () => {
     try { setRow(await getPurchaseReturn(id)); } catch (e) { setError((e as Error).message); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
+
+  // Read-only PDF download (DRAFT or CONFIRMED) — never mutates the return.
+  async function handlePdf() {
+    if (!row || pdfLoading) return; // guards duplicate rapid clicks
+    setPdfLoading(true); setError(null);
+    try {
+      await downloadReturnPdf("purchase", row.id, locale, `PR-${row.returnNumber}`);
+    } catch (e) {
+      setError(returnErrorMessage(e, locale));
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true); setError(null);
@@ -99,6 +114,10 @@ export default function PurchaseReturnDetailPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">مردود مشتريات #{row.returnNumber}</h1>
         <div className="flex gap-2">
+          {/* Read-only PDF — always available to a viewer, DRAFT or CONFIRMED. */}
+          <Button variant="ghost" data-testid="purchase-return-pdf" disabled={pdfLoading} onClick={() => void handlePdf()}>
+            {pdfLoading ? (locale === "ar" ? "جارٍ التحضير…" : "Preparing…") : (locale === "ar" ? "حفظ PDF" : "Download PDF")}
+          </Button>
           {isDraft && !editing && canCreateOrConfirm && <Button variant="ghost" disabled={busy} onClick={() => void startEdit()}>تعديل</Button>}
           {isDraft && !editing && canCreateOrConfirm && <Button disabled={busy} onClick={() => { if (confirm("تأكيد المردود؟ سيتم عكس القيود وخصم المخزون.")) void act(() => confirmPurchaseReturn(row.id)); }}>تأكيد المردود</Button>}
           {row.status === "CONFIRMED" && canCancel && <Button variant="danger" disabled={busy} onClick={() => { if (confirm("هل تريد إلغاء هذا المردود؟ سيتم عكس القيود وإرجاع المخزون.")) void act(() => cancelPurchaseReturn(row.id, "إلغاء من المستخدم")); }}>إلغاء المردود</Button>}

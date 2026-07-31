@@ -13,6 +13,7 @@ import { formatCurrency, formatDate } from "../../../../../../lib/format";
 import { returnErrorMessage } from "../../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../../lib/auth";
 import { salesReturnsAccountConfigured } from "../../../../../../lib/posting-config";
+import { downloadReturnPdf } from "../../../../../../lib/returns-pdf-client";
 import { getSalesReturn, getSalesReturnable, confirmSalesReturn, cancelSalesReturn, updateSalesReturn, type SalesReturnRow, type SalesReturnable } from "../../../../../../lib/returns-client";
 
 const STATUS_AR: Record<string, string> = { DRAFT: "مسودة", CONFIRMED: "مؤكد", CANCELLED: "ملغي" };
@@ -45,12 +46,26 @@ export default function SalesReturnDetailPage() {
   // null = unknown/not-checked; true/false = resolved. Frontend gate only; the
   // API stays authoritative.
   const [postingReady, setPostingReady] = useState<boolean | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const load = useCallback(async () => {
     try { setRow(await getSalesReturn(id)); }
     catch (e) { setError((e as Error).message); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
+
+  // Read-only PDF download (DRAFT or CONFIRMED) — never mutates the return.
+  async function handlePdf() {
+    if (!row || pdfLoading) return; // guards duplicate rapid clicks
+    setPdfLoading(true); setError(null);
+    try {
+      await downloadReturnPdf("sales", row.id, locale, `SR-${row.returnNumber}`);
+    } catch (e) {
+      setError(returnErrorMessage(e, locale));
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   // Only confirm-capable roles (OWNER/ACCOUNTANT) may read posting profiles, and
   // only a DRAFT can be confirmed — so the pre-check is scoped to that case.
@@ -123,6 +138,10 @@ export default function SalesReturnDetailPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">مردود مبيعات #{row.returnNumber}</h1>
         <div className="flex gap-2">
+          {/* Read-only PDF — always available to a viewer, DRAFT or CONFIRMED. */}
+          <Button variant="ghost" data-testid="sales-return-pdf" disabled={pdfLoading} onClick={() => void handlePdf()}>
+            {pdfLoading ? (locale === "ar" ? "جارٍ التحضير…" : "Preparing…") : (locale === "ar" ? "حفظ PDF" : "Download PDF")}
+          </Button>
           {isDraft && !editing && canCreateOrConfirm && <Button variant="ghost" disabled={busy} onClick={() => void startEdit()}>تعديل</Button>}
           {isDraft && !editing && canCreateOrConfirm && <Button disabled={busy || postingReady === false} onClick={() => { if (confirm("تأكيد المردود؟ سيتم ترحيل القيود وإرجاع المخزون.")) void act(() => confirmSalesReturn(row.id)); }}>تأكيد المردود</Button>}
           {row.status === "CONFIRMED" && canCancel && <Button variant="danger" disabled={busy} onClick={() => { if (confirm("هل تريد إلغاء هذا المردود؟ سيتم عكس كل القيود والمخزون.")) void act(() => cancelSalesReturn(row.id, "إلغاء من المستخدم")); }}>إلغاء المردود</Button>}

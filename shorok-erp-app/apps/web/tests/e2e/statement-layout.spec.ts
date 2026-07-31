@@ -177,12 +177,12 @@ test.describe("account statement — unified report layout", () => {
     await expect(firstMoney).toHaveAttribute("dir", "ltr");
   });
 
-  test("21: seeded balances are unchanged (funded bank closes at 4,300.00)", async ({ page }) => {
+  test("21: seeded balances are unchanged (funded bank closes at 4,300)", async ({ page }) => {
     await openStatement(page);
     await select(page, "banks", "كل البنوك");
     const row = page.locator("tr", { hasText: `LAYB${ctx.suffix}` }).first();
     await expect(row).toBeVisible({ timeout: 15_000 });
-    expect(normalizeDigits(await row.innerText())).toContain("4,300.00");
+    expect(normalizeDigits(await row.innerText())).toContain("4,300");
     // The totals footer restates the authoritative total for the same column.
     const footer = page.getByTestId("statement-accounts-table").locator("tfoot");
     await expect(footer).toBeVisible();
@@ -200,7 +200,7 @@ test.describe("account statement — unified report layout", () => {
     await expect(neg).toBeVisible();
     const txt = normalizeDigits(await neg.innerText());
     expect(txt.startsWith("(")).toBeTruthy();
-    expect(txt).toContain("900.00");
+    expect(txt).toContain("900");
     await expect(neg).toHaveAttribute("aria-label", /رصيد سالب/);
   });
 

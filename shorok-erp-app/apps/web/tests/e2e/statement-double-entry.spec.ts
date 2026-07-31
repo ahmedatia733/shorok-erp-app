@@ -264,26 +264,26 @@ test.describe.serial("double-entry propagation through the unified statement", (
 
     // Banks → all banks: the paid-into bank rose to 6,000; the other is untouched.
     await select(page, "banks", "كل البنوك");
-    expect(await rowText(page, `DEB1A${ctx.suffix}`)).toContain("6,000.00"); // 5000 + 1000
-    expect(await rowText(page, `DEB1B${ctx.suffix}`)).toContain("2,000.00"); // unchanged
+    expect(await rowText(page, `DEB1A${ctx.suffix}`)).toContain("6,000"); // 5000 + 1000
+    expect(await rowText(page, `DEB1B${ctx.suffix}`)).toContain("2,000"); // unchanged
 
     // Banks → that bank: the exact 1,000 debit is on its statement.
     await select(page, "banks", `بنك الطرفين أ ${ctx.suffix}`);
     await expect(page.locator("text=عرض تفصيلي")).toBeVisible();
-    expect(await tableText(page)).toContain("1,000.00");
+    expect(await tableText(page)).toContain("1,000");
     const bankHref = await page.locator(`table a[href*="${ctx.pay1}"]`).first().getAttribute("href");
     expect(bankHref).toBeTruthy();
 
     // Customers → all customers: A's receivable dropped to 2,000; B untouched.
     await select(page, "customers", "كل العملاء");
-    expect(await rowText(page, `عميل الطرفين أ ${ctx.suffix}`)).toContain("2,000.00"); // 3000 − 1000
-    expect(await rowText(page, `عميل الطرفين ب ${ctx.suffix}`)).toContain("500.00"); // unchanged
+    expect(await rowText(page, `عميل الطرفين أ ${ctx.suffix}`)).toContain("2,000"); // 3000 − 1000
+    expect(await rowText(page, `عميل الطرفين ب ${ctx.suffix}`)).toContain("500"); // unchanged
 
     // Customers → customer A: the exact 1,000 credit — the other half of the
     // same journal, read from the customer's own lines.
     await select(page, "customers", `عميل الطرفين أ ${ctx.suffix}`);
     await expect(page.locator("text=عرض تفصيلي")).toBeVisible();
-    expect(await tableText(page)).toContain("1,000.00");
+    expect(await tableText(page)).toContain("1,000");
     const custHref = await page.locator(`table a[href*="${ctx.pay1}"]`).first().getAttribute("href");
 
     // Both sides drill down to the same journal.
@@ -325,27 +325,27 @@ test.describe.serial("double-entry propagation through the unified statement", (
 
     // Customer receivable up 800; bank down to 3,200 — no re-login, no cache.
     await select(page, "customers", `عميل العكسي ${ctx.suffix}`);
-    expect(await tableText(page)).toContain("800.00");
+    expect(await tableText(page)).toContain("800");
     await select(page, "customers", "كل العملاء");
-    expect(await rowText(page, `عميل العكسي ${ctx.suffix}`)).toContain("800.00");
+    expect(await rowText(page, `عميل العكسي ${ctx.suffix}`)).toContain("800");
 
     await select(page, "banks", "كل البنوك");
-    expect(await rowText(page, `DEB2${ctx.suffix}`)).toContain("3,200.00"); // 4000 − 800
+    expect(await rowText(page, `DEB2${ctx.suffix}`)).toContain("3,200"); // 4000 − 800
 
     // Reverse it: both sides come back, and both rows stay visible.
     await api(page, `/journal/${posted.id}/reverse`, { reason: "إلغاء اختبار", acknowledgeNegativeBalance: true });
 
     await openStatement(page);
     await select(page, "banks", "كل البنوك");
-    expect(await rowText(page, `DEB2${ctx.suffix}`)).toContain("4,000.00"); // back to funded
+    expect(await rowText(page, `DEB2${ctx.suffix}`)).toContain("4,000"); // back to funded
 
     await select(page, "customers", "كل العملاء");
     // The customer nets back to zero, and both the original and its reversal
     // remain on the statement — posted journals are never deleted.
     await select(page, "banks", `بنك العكسي ${ctx.suffix}`);
     const bankRows = await tableText(page);
-    expect(bankRows).toContain("800.00");
-    expect((bankRows.match(/800\.00/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(bankRows).toContain("800");
+    expect((bankRows.match(/800(?![\d.])/g) ?? []).length).toBeGreaterThanOrEqual(2); // 800 shows without .00 now
   });
 
   // ── E2E 3 — expense paid from a treasury ─────────────────────────────────
@@ -363,14 +363,14 @@ test.describe.serial("double-entry propagation through the unified statement", (
     await openStatement(page);
 
     await select(page, "expense", "كل المصروفات");
-    expect(await rowText(page, `DEX3${ctx.suffix}`)).toContain("600.00");
+    expect(await rowText(page, `DEX3${ctx.suffix}`)).toContain("600");
     await select(page, "expense", `مصاريف تشغيل الطرفين ${ctx.suffix}`);
-    expect(await tableText(page)).toContain("600.00");
+    expect(await tableText(page)).toContain("600");
 
     await select(page, "vaults", "كل الخزن");
-    expect(await rowText(page, `DEC3${ctx.suffix}`)).toContain("2,400.00"); // 3000 − 600
+    expect(await rowText(page, `DEC3${ctx.suffix}`)).toContain("2,400"); // 3000 − 600
     await select(page, "vaults", `خزنة المصروف ${ctx.suffix}`);
-    expect(await tableText(page)).toContain("600.00");
+    expect(await tableText(page)).toContain("600");
   });
 
   // ── E2E 4 — sales invoice reaches every posted account ───────────────────
@@ -387,21 +387,21 @@ test.describe.serial("double-entry propagation through the unified statement", (
 
     // 4 × 1000 = 4,000 + 14% VAT 560 → 4,560 receivable; COGS 4 × 560 = 2,240.
     await select(page, "customers", "كل العملاء");
-    expect(await rowText(page, `عميل الفاتورة ${ctx.suffix}`)).toContain("4,560.00");
+    expect(await rowText(page, `عميل الفاتورة ${ctx.suffix}`)).toContain("4,560");
 
     await select(page, "customers", `عميل الفاتورة ${ctx.suffix}`);
     const custTable = await tableText(page);
-    expect(custTable).toContain("4,560.00");
+    expect(custTable).toContain("4,560");
 
     // Every other posted account received its own line from the same invoice.
     await select(page, "revenue", "إيرادات الترحيل");
-    expect(await tableText(page)).toContain("4,000.00");
+    expect(await tableText(page)).toContain("4,000");
 
     await select(page, "tax", "ضريبة مبيعات الترحيل");
-    expect(await tableText(page)).toContain("560.00");
+    expect(await tableText(page)).toContain("560");
 
     await select(page, "cogs", "تكلفة مبيعات الترحيل");
-    expect(await tableText(page)).toContain("2,240.00");
+    expect(await tableText(page)).toContain("2,240");
   });
 
   // ── E2E 5 — purchase invoice reaches every posted account ────────────────
@@ -424,7 +424,7 @@ test.describe.serial("double-entry propagation through the unified statement", (
     expect(await tableText(page)).toContain("2,553.60");
 
     await select(page, "inventory", "مخزون الترحيل");
-    expect(await tableText(page)).toContain("2,240.00");
+    expect(await tableText(page)).toContain("2,240");
 
     await select(page, "tax", "ضريبة مشتريات الترحيل");
     expect(await tableText(page)).toContain("313.60");
