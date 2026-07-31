@@ -5,6 +5,7 @@ import {
   findCategory,
   normalSideForCategory,
   type AccountCategoryDef,
+  type BalanceSide,
 } from "@shorok/shared";
 import { PrismaService } from "../../prisma/prisma.service";
 import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
@@ -99,14 +100,17 @@ export class ConsolidatedStatementService {
     from?: string;
     to?: string;
     includeZero?: boolean;
+    balanceSide?: BalanceSide;
   }): Promise<ConsolidatedStatementResult> {
     const def = findCategory(params.category);
     if (!def) throw new ValidationError({ reason: "unknown_category", category: params.category });
 
     const specific = params.entityId && params.entityId !== "all" ? params.entityId : null;
+    // balanceSide filters the aggregated party statement only; GL-account
+    // categories ignore it (the UI never offers it there).
     return def.kind === "ACCOUNTS"
       ? this.buildForAccounts(def, specific, params)
-      : this.buildForParties(def, specific, params);
+      : this.buildForParties(def, specific, { ...params, balanceSide: params.balanceSide ?? "ALL" });
   }
 
   // ── GL account categories (banks, treasuries, expenses, …) ────────────────
@@ -186,12 +190,13 @@ export class ConsolidatedStatementService {
   private async buildForParties(
     def: AccountCategoryDef,
     specific: string | null,
-    params: { from?: string; to?: string; includeZero?: boolean },
+    params: { from?: string; to?: string; includeZero?: boolean; balanceSide?: BalanceSide },
   ): Promise<ConsolidatedStatementResult> {
     const isCustomers = def.kind === "CUSTOMERS";
     const partyType = isCustomers ? "CUSTOMER" : "SUPPLIER";
     // AR is an asset (debit-normal); AP is a liability (credit-normal).
     const side: NormalSide = isCustomers ? "DEBIT" : "CREDIT";
+    const balanceSide: BalanceSide = params.balanceSide ?? "ALL";
 
     // Resolve the control accounts through the same shared predicate the selector
     // uses, so this stays correct on installations where systemRole was never
@@ -257,6 +262,26 @@ export class ConsolidatedStatementService {
       });
     }
     breakdown.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+
+    // Balance-side filter (aggregated party statement only): keep the parties
+    // whose FINAL balance is on the requested side, then recompute the aggregate
+    // totals AND movement rows from ONLY those parties' lines — so the cards,
+    // the count, the breakdown table and the movements all describe the same
+    // population. The side is read relative to the party's normal side (customer
+    // debit-normal, supplier credit-normal): a DEBIT party owes us, a CREDIT
+    // party is owed. Zero-balance parties match neither. Decimal comparison —
+    // never JS float.
+    if (balanceSide !== "ALL") {
+      const sign = side === "DEBIT" ? 1 : -1;
+      breakdown = breakdown.filter((b) => {
+        const net = new Decimal(b.endingBalance).mul(sign);
+        return balanceSide === "DEBIT" ? net.gt(0) : net.lt(0);
+      });
+      const retained = new Set(breakdown.map((b) => b.entityId));
+      const filteredLines = lines.filter((l) => l.partyId != null && retained.has(l.partyId));
+      const refiltered = StatementService.reduce(filteredLines, () => side, params.from, params.to);
+      return this.partyResult(def, null, def.allLabel, refiltered, breakdown, accountById);
+    }
 
     return this.partyResult(def, null, def.allLabel, merged, breakdown, accountById);
   }

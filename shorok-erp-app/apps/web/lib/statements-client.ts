@@ -76,6 +76,8 @@ export interface ConsolidatedStatement {
 
 export const getStatementOptions = () => apiCall<StatementOptions>("/statements/options");
 
+export type BalanceSide = "ALL" | "DEBIT" | "CREDIT";
+
 /** `entityId` omitted or "all" → consolidated statement for the whole category. */
 export function getConsolidatedStatement(params: {
   category: string;
@@ -83,11 +85,14 @@ export function getConsolidatedStatement(params: {
   from?: string;
   to?: string;
   includeZero?: boolean;
+  balanceSide?: BalanceSide;
 }): Promise<ConsolidatedStatement> {
   const q = new URLSearchParams({ category: params.category });
   if (params.entityId && params.entityId !== "all") q.set("entityId", params.entityId);
   if (params.from) q.set("from", params.from);
   if (params.to) q.set("to", params.to);
   if (params.includeZero) q.set("includeZero", "true");
+  // Default ALL is left off the query so existing URLs/consumers are unchanged.
+  if (params.balanceSide && params.balanceSide !== "ALL") q.set("balanceSide", params.balanceSide);
   return apiCall<ConsolidatedStatement>(`/statements/consolidated?${q.toString()}`);
 }

@@ -15,6 +15,18 @@ const CategoryId = z.enum(
  * `entityId` omitted or "all" → consolidated statement for the whole category;
  * a uuid → the statement for that single account / customer / supplier.
  */
+/**
+ * Balance-side filter for the aggregated party (customer/supplier) statement,
+ * classifying each party by its FINAL balance for the period:
+ *   ALL    → every party (default; unchanged behaviour)
+ *   DEBIT  → only parties whose final balance is a net debit  (customer owes us)
+ *   CREDIT → only parties whose final balance is a net credit (we owe them)
+ * Zero-balance parties are excluded from DEBIT and CREDIT. Ignored for a specific
+ * party and for GL-account categories.
+ */
+export const BalanceSideEnum = z.enum(["ALL", "DEBIT", "CREDIT"]);
+export type BalanceSide = z.infer<typeof BalanceSideEnum>;
+
 export const ConsolidatedStatementQuerySchema = z.object({
   category: CategoryId,
   entityId: z.union([z.literal("all"), z.string().uuid()]).optional(),
@@ -25,5 +37,7 @@ export const ConsolidatedStatementQuerySchema = z.object({
     .union([z.literal("true"), z.literal("false"), z.boolean()])
     .optional()
     .transform((v) => v === true || v === "true"),
+  /** Filter the aggregated party statement by final-balance side. Default ALL. */
+  balanceSide: BalanceSideEnum.optional().default("ALL"),
 });
 export type ConsolidatedStatementQuery = z.infer<typeof ConsolidatedStatementQuerySchema>;

@@ -18,6 +18,7 @@ import { sourceDocumentHref } from "../../../../../lib/source-document";
 import {
   getConsolidatedStatement,
   getStatementOptions,
+  type BalanceSide,
   type ConsolidatedStatement,
   type StatementOptions,
 } from "../../../../../lib/statements-client";
@@ -64,12 +65,27 @@ export default function StatementPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [includeZero, setIncludeZero] = useState(false);
+  const [balanceSide, setBalanceSide] = useState<BalanceSide>("ALL");
 
   const [data, setData] = useState<ConsolidatedStatement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const categoryDef = ACCOUNT_CATEGORIES.find((c) => c.id === category);
+  const isParty = categoryDef?.kind === "CUSTOMERS" || categoryDef?.kind === "SUPPLIERS";
+  const isSpecific = entityId !== ALL;
+  // The balance-side filter only shapes the AGGREGATED party statement. It is
+  // disabled (and sent as ALL) for a specific party or a GL-account category, so
+  // a selected entity is never hidden by it.
+  const showBalanceSide = isParty;
+  const effectiveBalanceSide: BalanceSide = isParty && !isSpecific ? balanceSide : "ALL";
+
+  // Selecting a specific entity resets the balance-side filter to ALL so the
+  // chosen party always shows (used by the picker AND the row drill-down).
+  const selectEntity = (id: string) => {
+    setEntityId(id);
+    if (id !== ALL) setBalanceSide("ALL");
+  };
 
   // ── options (categories + selectable entities) ───────────────────────────
 
@@ -79,9 +95,22 @@ export default function StatementPage() {
         const o = await getStatementOptions();
         setOptions(o);
 
+        // Restore filters from the URL so a shared link / refresh reopens the
+        // same view (additive — existing links without these params are unchanged).
+        const sp = new URLSearchParams(window.location.search);
+        const urlCategory = sp.get("category");
+        if (urlCategory && ACCOUNT_CATEGORIES.some((c) => c.id === urlCategory)) setCategory(urlCategory);
+        const urlBalance = sp.get("balanceSide");
+        if (urlBalance === "DEBIT" || urlBalance === "CREDIT") setBalanceSide(urlBalance);
+        const urlEntity = sp.get("entityId");
+        if (urlEntity && (o.customers.some((c) => c.id === urlEntity) || o.suppliers.some((s) => s.id === urlEntity) || o.accounts.some((a) => a.id === urlEntity))) {
+          setEntityId(urlEntity);
+          if (urlBalance) setBalanceSide("ALL"); // a specific entity ignores the side filter
+        }
+
         // Deep link from an invoice / income statement: ?accountId=… selects the
         // account inside whichever category owns it.
-        const accountId = new URLSearchParams(window.location.search).get("accountId");
+        const accountId = sp.get("accountId");
         if (accountId && o.accounts.some((a) => a.id === accountId)) {
           const owning = ACCOUNT_CATEGORIES.find(
             (c) => c.id !== ALL && c.kind === "ACCOUNTS" && accountsInCategory(c.id, o.accounts).some((a) => a.id === accountId),
@@ -141,6 +170,17 @@ export default function StatementPage() {
     setData(null);
   }
 
+  // Keep the URL in sync so refresh / a shared link reopens the same view.
+  useEffect(() => {
+    if (!options) return; // don't overwrite the URL before the initial restore
+    const sp = new URLSearchParams(window.location.search);
+    sp.set("category", category);
+    if (isSpecific) sp.set("entityId", entityId); else sp.delete("entityId");
+    if (effectiveBalanceSide !== "ALL") sp.set("balanceSide", effectiveBalanceSide); else sp.delete("balanceSide");
+    sp.delete("accountId"); // consumed on load
+    window.history.replaceState(null, "", `${window.location.pathname}?${sp.toString()}`);
+  }, [category, entityId, effectiveBalanceSide, isSpecific, options]);
+
   // ── load statement ───────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
@@ -156,6 +196,7 @@ export default function StatementPage() {
         from: from || undefined,
         to: to || undefined,
         includeZero,
+        balanceSide: effectiveBalanceSide,
       }));
     } catch (e) {
       setData(null);
@@ -163,7 +204,7 @@ export default function StatementPage() {
     } finally {
       setLoading(false);
     }
-  }, [category, entityId, from, to, includeZero, categoryDef, locale, t]);
+  }, [category, entityId, from, to, includeZero, effectiveBalanceSide, categoryDef, locale, t]);
 
   useEffect(() => {
     if (!options) return;
@@ -237,12 +278,30 @@ export default function StatementPage() {
               <SearchableSelect
                 id="stmt-entity"
                 value={entityId}
-                onChange={setEntityId}
+                onChange={selectEntity}
                 options={entityOptions}
                 placeholder={t("searchEntity")}
                 emptyText={t("noEntities")}
               />
             </div>
+
+            {showBalanceSide && (
+              <div className="flex flex-col">
+                <label htmlFor="stmt-balance-side" className="mb-1 text-xs font-medium text-textSecondary">{t("balanceType")}</label>
+                <select
+                  id="stmt-balance-side"
+                  data-testid="stmt-balance-side"
+                  className="h-9 w-full rounded border border-border bg-background px-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                  value={effectiveBalanceSide}
+                  disabled={isSpecific}
+                  onChange={(e) => setBalanceSide(e.target.value as BalanceSide)}
+                >
+                  <option value="ALL">{t("balanceAll")}</option>
+                  <option value="DEBIT">{t("balanceDebit")}</option>
+                  <option value="CREDIT">{t("balanceCredit")}</option>
+                </select>
+              </div>
+            )}
 
             <div className="flex flex-col">
               <label htmlFor="stmt-from" className="mb-1 text-xs font-medium text-textSecondary">{t("fromDate")}</label>
@@ -330,7 +389,7 @@ export default function StatementPage() {
                               <button
                                 type="button"
                                 className="rounded border border-border px-2 py-1 text-xs text-primary hover:bg-primary/10"
-                                onClick={() => setEntityId(b.entityId)}
+                                onClick={() => selectEntity(b.entityId)}
                               >
                                 {t("viewDetails")}
                               </button>

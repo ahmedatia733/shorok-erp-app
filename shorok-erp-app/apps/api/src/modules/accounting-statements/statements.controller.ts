@@ -76,6 +76,7 @@ export class StatementsController {
       from: query.from,
       to: query.to,
       includeZero: query.includeZero,
+      balanceSide: query.balanceSide,
     });
   }
 }
