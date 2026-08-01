@@ -10,7 +10,7 @@
 import { Decimal } from "decimal.js";
 import * as bcrypt from "bcrypt";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("receipt voucher posting + reversal (Phase 4B-2)", () => {
   let handle: TestApp;
@@ -43,6 +43,9 @@ describe("receipt voucher posting + reversal (Phase 4B-2)", () => {
     treasuryId = (await handle.prisma.account.create({ data: { code: `RVPT${uniq}`, nameAr: "خزينة", nameEn: "Cash", category: "ASSET", accountType: "CURRENT_ASSET", isLeaf: true, active: true, isCashOrBank: true, treasuryType: "CASH" } })).id;
     arAccountId = (await handle.prisma.account.create({ data: { code: `RVPAR${uniq}`, nameAr: "عملاء", nameEn: "AR", category: "ASSET", accountType: "CURRENT_ASSET", isLeaf: true, active: true, systemRole: "AR_CONTROL" } })).id;
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
   });
 
   afterAll(async () => teardownTestApp(handle));

@@ -15,7 +15,7 @@
  */
 import { Decimal } from "decimal.js";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("purchase invoice cancellation — tax reversal", () => {
   let handle: TestApp;
@@ -62,6 +62,9 @@ describe("purchase invoice cancellation — tax reversal", () => {
     vatAccountId = (await mk("PCT-VAT", "ضريبة القيمة المضافة اختبار", "LIABILITY", "LIABILITY")).id;
 
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
     await handle.prisma.postingProfile.create({
       data: { effectiveFrom: new Date("2026-01-01"), apAccountId, inventoryAccountId, vatInputAccountId: vatAccountId, vatOutputAccountId: vatAccountId, createdBy: handle.ownerId },
     });

@@ -11,7 +11,7 @@
 import { Decimal } from "decimal.js";
 import * as bcrypt from "bcrypt";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("sales representatives", () => {
   let handle: TestApp;
@@ -73,6 +73,9 @@ describe("sales representatives", () => {
       },
     });
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 6, status: "OPEN" } });
 
     // ACCOUNTANT limited to branchB — used to prove API-level branch scoping.

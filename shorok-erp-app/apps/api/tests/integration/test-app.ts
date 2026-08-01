@@ -86,3 +86,25 @@ export async function teardownTestApp(handle: TestApp): Promise<void> {
   await new Promise((r) => setTimeout(r, 50));
   dropSchema(handle.schema);
 }
+
+/**
+ * Opens the CURRENT calendar month's FinancialPeriod (idempotent).
+ *
+ * Why this exists: `ReversalService` defaults `reversalDate` to TODAY
+ * (`new Date().toISOString().slice(0,10)`) and `PostingEngine` requires that
+ * date's period to be OPEN. Fixtures that only opened a hard-coded month (e.g.
+ * 2026-07) therefore broke every reversal/cancel test the moment the wall clock
+ * rolled into the next month — a test-fixture defect, not a product defect.
+ *
+ * This does NOT weaken period validation: the engine still rejects any date
+ * whose period is missing or CLOSED. The deliberate closed-period tests remain
+ * valid because they pass an EXPLICIT date in a month this never opens
+ * (e.g. 2026-03-10, 2025-01-10).
+ */
+export async function openCurrentPeriod(handle: TestApp): Promise<void> {
+  const now = new Date();
+  await handle.prisma.financialPeriod.createMany({
+    data: [{ year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, status: "OPEN" }],
+    skipDuplicates: true,
+  });
+}

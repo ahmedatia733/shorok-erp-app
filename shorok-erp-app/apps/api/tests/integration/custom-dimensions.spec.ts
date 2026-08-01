@@ -11,7 +11,7 @@
 import { Decimal } from "decimal.js";
 import * as bcrypt from "bcrypt";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("custom dimensions — financial meters == inventory meters", () => {
   let handle: TestApp;
@@ -45,6 +45,9 @@ describe("custom dimensions — financial meters == inventory meters", () => {
     invAcc = (await mk(`IN${u}`, "مخزون", "ASSET", "CURRENT_ASSET")).id;
     await handle.prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), arAccountId: ar, apAccountId: ap, revenueAccountId: rev, vatOutputAccountId: vatOut, vatInputAccountId: vatIn, cogsAccountId: cogs, inventoryAccountId: invAcc, createdBy: handle.ownerId } });
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
   });
   afterAll(async () => teardownTestApp(handle));
 

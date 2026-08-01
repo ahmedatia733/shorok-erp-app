@@ -12,7 +12,7 @@
  */
 import { Decimal } from "decimal.js";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("purchase invoices — Phase 1 hotfixes", () => {
   let handle: TestApp;
@@ -65,6 +65,9 @@ describe("purchase invoices — Phase 1 hotfixes", () => {
     // behaviors (engine stock, balanced entry, cancel) are unchanged — they
     // just need the period precondition now.
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
 
     // Accounts now resolve from the PostingProfile (client account IDs are
     // ignored). A complete profile lets the happy-path confirms post.

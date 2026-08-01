@@ -7,7 +7,7 @@
 import { Decimal } from "decimal.js";
 import * as bcrypt from "bcrypt";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("document reversal (Phase 3D)", () => {
   let handle: TestApp;
@@ -53,6 +53,9 @@ describe("document reversal (Phase 3D)", () => {
     customerId = (await handle.prisma.customer.create({ data: { code: `DC${uniq}`, nameAr: "عميل" } })).id;
     supplierId = (await handle.prisma.supplier.create({ data: { nameAr: `مورد ${uniq}`, nameEn: `Sup ${uniq}` } })).id;
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
   });
 
   afterAll(async () => teardownTestApp(handle));

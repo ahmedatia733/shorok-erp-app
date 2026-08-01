@@ -14,7 +14,7 @@
 import { Decimal } from "decimal.js";
 import * as bcrypt from "bcrypt";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("double-entry propagation to statements (Section R)", () => {
   let handle: TestApp;
@@ -123,6 +123,9 @@ describe("double-entry propagation to statements (Section R)", () => {
     supB = (await handle.prisma.supplier.create({ data: { nameAr: `مورد ب ${uniq()}`, nameEn: `Supplier B ${uniq()}` } })).id;
 
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 6, status: "OPEN" } });
 
     // Fund the treasuries so ordinary spends don't trip the negative guard.

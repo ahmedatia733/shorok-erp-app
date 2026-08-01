@@ -6,7 +6,7 @@
  * check that random valid postings keep the trial balance balanced.
  */
 import { Decimal } from "decimal.js";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 import { PostingEngine } from "../../src/modules/posting/posting.engine";
 import { ReversalService } from "../../src/modules/posting/reversal.service";
 import type { AuthenticatedUser } from "../../src/common/types/request-user";
@@ -65,6 +65,9 @@ describe("PostingEngine (Phase 2 foundation)", () => {
     customerId = cust.id;
 
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
   });
 
   afterAll(async () => teardownTestApp(handle));

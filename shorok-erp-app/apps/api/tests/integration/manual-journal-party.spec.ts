@@ -10,7 +10,7 @@
 import { Decimal } from "decimal.js";
 import * as bcrypt from "bcrypt";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("manual journal party + GL synchronization", () => {
   let handle: TestApp;
@@ -55,6 +55,9 @@ describe("manual journal party + GL synchronization", () => {
     parentId = (await acc(`PAR${u}`, "حساب رئيسي", "EXPENSE", "EXPENSE", { leaf: false })).id;
     inactiveId = (await acc(`INA${u}`, "غير نشط", "EXPENSE", "EXPENSE", { active: false })).id;
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
 
     let cseq = 0, sseq = 0;
     mkC = async () => (await handle.prisma.customer.create({ data: { code: `C-${u}-${++cseq}`, nameAr: `عميل ${cseq}` } })).id;

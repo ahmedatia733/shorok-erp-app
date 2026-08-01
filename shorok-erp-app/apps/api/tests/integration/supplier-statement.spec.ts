@@ -7,7 +7,7 @@
 import { Decimal } from "decimal.js";
 import * as bcrypt from "bcrypt";
 import request from "supertest";
-import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
+import { buildTestApp, teardownTestApp, type TestApp, openCurrentPeriod } from "./test-app";
 
 describe("supplier statement — GL-derived (reports endpoint)", () => {
   let handle: TestApp;
@@ -55,6 +55,9 @@ describe("supplier statement — GL-derived (reports endpoint)", () => {
     vatId = (await acc(`VAT${u}`, "ضريبة", "ASSET", "CURRENT_ASSET")).id;
     await handle.prisma.postingProfile.create({ data: { effectiveFrom: new Date("2026-01-01"), apAccountId: apId, inventoryAccountId: inventoryId, vatInputAccountId: vatId, createdBy: handle.ownerId } });
     await handle.prisma.financialPeriod.create({ data: { year: 2026, month: 7, status: "OPEN" } });
+    // Reversal/cancel default to TODAY; open the current month so these tests
+    // stay deterministic across month rollover (see openCurrentPeriod).
+    await openCurrentPeriod(handle);
   });
 
   afterAll(async () => teardownTestApp(handle));
