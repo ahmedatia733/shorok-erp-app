@@ -5,6 +5,12 @@
  * creates 26 sales + 26 purchase invoices (so the oldest is OFF the first page),
  * pre-made returns for deep links, a legacy-ambiguous line, a draft return, and
  * three users: OWNER, ACCOUNTANT, BRANCH_MANAGER.
+ *
+ * REQUIRED SEED — returns fixture (its OWN OWNER, +201555000099):
+ *   DATABASE_URL=<test> npx ts-node --transpile-only tests/e2e-returns-seed.ts
+ * That seed TRUNCATES users, so specs relying on the demo OWNER
+ * (+201000000000) — e.g. return-pdf and the statement suites — must run in a
+ * SEPARATE invocation after re-running prisma/seed.ts.
  */
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";

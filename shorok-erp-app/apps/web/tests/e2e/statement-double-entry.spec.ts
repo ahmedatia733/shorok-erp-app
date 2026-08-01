@@ -24,6 +24,11 @@ interface Ctx {
   cust4: string; sup5: string;
   variantId: string;
   ar: string; ap: string; revenue: string; vatOut: string; vatIn: string; inventory: string; cogs: string;
+  /** Arabic names of the posting accounts actually in force (reused OR created).
+   *  The suite must select by THESE, never by hard-coded fixture names — the
+   *  seed reuses any pre-existing PostingProfile, in which case the E2EPP-*
+   *  accounts are never created. */
+  names: { revenue: string; vatOut: string; vatIn: string; inventory: string; cogs: string };
   fixtureAccounts: string[];
 }
 
@@ -67,25 +72,26 @@ async function seed(page: Page): Promise<Ctx> {
     const stable = async (code: string, nameAr: string, nameEn: string, category: string, accountType: string) =>
       byCode.get(code) ?? (await mkAccount(code, nameAr, nameEn, category, accountType));
 
-    let profile = ((await call("/settings/posting-profiles", token)) as Array<Record<string, string>>)[0];
-    let ar: string, ap: string, revenue: string, vatOut: string, vatIn: string, inventory: string, cogs: string;
-    if (profile) {
-      // Reuse whatever the environment already posts through.
-      ({ arAccountId: ar, apAccountId: ap, revenueAccountId: revenue, vatOutputAccountId: vatOut,
-         vatInputAccountId: vatIn, inventoryAccountId: inventory, cogsAccountId: cogs } = profile as never);
-    } else {
-      ar = await stable("E2EPP-AR", "ذمم عملاء الترحيل", "E2E Posting AR", "ASSET", "CURRENT_ASSET");
-      ap = await stable("E2EPP-AP", "موردون الترحيل", "E2E Posting AP", "LIABILITY", "LIABILITY");
-      revenue = await stable("E2EPP-REV", "إيرادات الترحيل", "E2E Posting Revenue", "REVENUE", "REVENUE");
-      vatOut = await stable("E2EPP-VATO", "ضريبة مبيعات الترحيل", "E2E Posting VAT Output", "LIABILITY", "LIABILITY");
-      vatIn = await stable("E2EPP-VATI", "ضريبة مشتريات الترحيل", "E2E Posting VAT Input", "ASSET", "CURRENT_ASSET");
-      inventory = await stable("E2EPP-INV", "مخزون الترحيل", "E2E Posting Inventory", "ASSET", "CURRENT_ASSET");
-      cogs = await stable("E2EPP-COGS", "تكلفة مبيعات الترحيل", "E2E Posting COGS", "COST_OF_SALES", "COST_OF_SALES");
-      profile = await call("/settings/posting-profiles", token, {
-        effectiveFrom: "2026-01-01", arAccountId: ar, apAccountId: ap, revenueAccountId: revenue,
-        vatOutputAccountId: vatOut, vatInputAccountId: vatIn, inventoryAccountId: inventory, cogsAccountId: cogs,
-      });
-    }
+    // Always post through the suite's OWN stable, well-named accounts.
+    //
+    // Reusing "whatever profile already exists" made this suite order-dependent:
+    // a leftover profile can point at accounts (e.g. "E-INV") whose names do not
+    // match the shared category predicates, so the account never appears in the
+    // statement's category picker and the test timed out looking for it. The
+    // E2EPP-* codes are FIXED, so repeat runs reuse the same rows instead of
+    // piling new accounts into the categories; appending one effective-dated
+    // profile makes it deterministically the one in force.
+    const ar = await stable("E2EPP-AR", "ذمم عملاء الترحيل", "E2E Posting AR", "ASSET", "CURRENT_ASSET");
+    const ap = await stable("E2EPP-AP", "موردون الترحيل", "E2E Posting AP", "LIABILITY", "LIABILITY");
+    const revenue = await stable("E2EPP-REV", "إيرادات الترحيل", "E2E Posting Revenue", "REVENUE", "REVENUE");
+    const vatOut = await stable("E2EPP-VATO", "ضريبة مبيعات الترحيل", "E2E Posting VAT Output", "LIABILITY", "LIABILITY");
+    const vatIn = await stable("E2EPP-VATI", "ضريبة مشتريات الترحيل", "E2E Posting VAT Input", "ASSET", "CURRENT_ASSET");
+    const inventory = await stable("E2EPP-INV", "مخزون الترحيل", "E2E Posting Inventory", "ASSET", "CURRENT_ASSET");
+    const cogs = await stable("E2EPP-COGS", "تكلفة مبيعات الترحيل", "E2E Posting COGS", "COST_OF_SALES", "COST_OF_SALES");
+    await call("/settings/posting-profiles", token, {
+      effectiveFrom: "2026-01-01", arAccountId: ar, apAccountId: ap, revenueAccountId: revenue,
+      vatOutputAccountId: vatOut, vatInputAccountId: vatIn, inventoryAccountId: inventory, cogsAccountId: cogs,
+    });
 
     // ── Per-run fixtures (deactivated afterwards) ────────────────────────────
     const bank1A = await mkAccount(`DEB1A${u}`, `بنك الطرفين أ ${u}`, `DE Bank A ${u}`, "ASSET", "CURRENT_ASSET");
@@ -142,9 +148,16 @@ async function seed(page: Page): Promise<Ctx> {
     });
     await call(`/purchase-invoices/${stockPi.id}/confirm`, token, {});
 
+    // Resolve the ACTUAL names of the posting accounts in force, so the tests
+    // work whether the seed reused an existing profile or created E2EPP-*.
+    const allAccounts = (await call("/accounts", token)) as Array<{ id: string; nameAr: string }>;
+    const nameOf = (id: string) => allAccounts.find((a) => a.id === id)!.nameAr;
+    const names = { revenue: nameOf(revenue), vatOut: nameOf(vatOut), vatIn: nameOf(vatIn),
+                    inventory: nameOf(inventory), cogs: nameOf(cogs) };
+
     return {
       suffix: u, bank1A, bank1B, cust1A, cust1B, pay1, bank2, cust2, cash3, exp3, cust4, sup5,
-      variantId: variant.id, ar, ap, revenue, vatOut, vatIn, inventory, cogs,
+      variantId: variant.id, ar, ap, revenue, vatOut, vatIn, inventory, cogs, names,
       fixtureAccounts: [bank1A, bank1B, bank2, cash3, exp3, funding],
     };
   }, API);
@@ -394,13 +407,13 @@ test.describe.serial("double-entry propagation through the unified statement", (
     expect(custTable).toContain("4,560");
 
     // Every other posted account received its own line from the same invoice.
-    await select(page, "revenue", "إيرادات الترحيل");
+    await select(page, "revenue", ctx.names.revenue);
     expect(await tableText(page)).toContain("4,000");
 
-    await select(page, "tax", "ضريبة مبيعات الترحيل");
+    await select(page, "tax", ctx.names.vatOut);
     expect(await tableText(page)).toContain("560");
 
-    await select(page, "cogs", "تكلفة مبيعات الترحيل");
+    await select(page, "cogs", ctx.names.cogs);
     expect(await tableText(page)).toContain("2,240");
   });
 
@@ -423,10 +436,10 @@ test.describe.serial("double-entry propagation through the unified statement", (
     await select(page, "suppliers", `مورد الفاتورة ${ctx.suffix}`);
     expect(await tableText(page)).toContain("2,553.60");
 
-    await select(page, "inventory", "مخزون الترحيل");
+    await select(page, "inventory", ctx.names.inventory);
     expect(await tableText(page)).toContain("2,240");
 
-    await select(page, "tax", "ضريبة مشتريات الترحيل");
+    await select(page, "tax", ctx.names.vatIn);
     expect(await tableText(page)).toContain("313.60");
   });
 });

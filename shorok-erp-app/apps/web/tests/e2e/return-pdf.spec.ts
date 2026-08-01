@@ -3,6 +3,12 @@
  * purchase, Arabic «حفظ PDF» and English "Download PDF". Seeds real returns
  * through the API; asserts a download fires with the right filename and that the
  * return stays DRAFT (read-only). LOCAL test env only.
+ *
+ * REQUIRED SEED — demo seed (OWNER +201000000000):
+ *   DATABASE_URL=<test> npx ts-node --transpile-only prisma/seed.ts
+ * Do NOT run this spec in the same invocation as returns/treasuries/
+ * journal-searchable: tests/e2e-returns-seed.ts TRUNCATES users and creates a
+ * different OWNER (+201555000099), which makes this spec's login return 401.
  */
 import { test, expect, type Page } from "@playwright/test";
 

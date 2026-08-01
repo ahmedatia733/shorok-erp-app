@@ -193,14 +193,29 @@ test.describe("unified account statement", () => {
     await login(page);
     await page.goto("/ar/accounting/journal");
     await page.getByRole("button", { name: "قيد جديد" }).first().click();
-    // The line's category picker — identified by its placeholder option.
-    const journalCats = (
-      await page.locator("select", { hasText: "— القائمة —" }).first().locator("option").allInnerTexts()
-    ).filter((t) => t !== "— القائمة —");
+    // The line's category picker is a SearchableSelect since 5fc6a2c (it was a
+    // native <select> before). Open its portalled listbox and read the options
+    // from the CURRENT UI rather than from the removed element.
+    await page.getByTestId("je-category-0").click();
+    const listbox = page.getByTestId("je-category-0-listbox");
+    await expect(listbox).toBeVisible();
+    const journalCats = (await listbox.locator("li[role=option]").allInnerTexts())
+      .map((t) => t.trim())
+      .filter(Boolean);
 
     expect(journalCats.length).toBeGreaterThan(5);
-    // Both screens are driven by the same shared category source.
-    for (const c of journalCats) expect(stmtCats).toContain(c);
+
+    // Both screens are driven by the same shared ACCOUNT_CATEGORIES source, so
+    // every statement category must also be offered by the journal.
+    for (const c of stmtCats) expect(journalCats).toContain(c.trim());
+
+    // The journal INTENTIONALLY offers one extra entry the statement does not:
+    // «المناديب» (sales representatives). Reps are a reporting dimension on a
+    // journal line, never a GL account, so they are not an account-statement
+    // category. Assert the difference explicitly rather than hiding it.
+    const JOURNAL_ONLY = ["المناديب"];
+    const extra = journalCats.filter((c) => !stmtCats.map((s) => s.trim()).includes(c));
+    expect(extra).toEqual(JOURNAL_ONLY);
   });
 
   test("Flow 1 — all banks vs one bank", async ({ page }) => {
