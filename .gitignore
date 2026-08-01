@@ -1,0 +1,56 @@
+# Root-level ignore rules for the Elshorok ERP workspace.
+#
+# PURPOSE (C0.5-B / blocker B1): the git root sits ABOVE shorok-erp-app, and
+# shorok-erp-app/.gitignore only applies inside that subdirectory. Without these
+# rules a single `git add -A` from the root would stage production database
+# dumps, customer CSV extracts and private cutover source data.
+#
+# Nothing here deletes or moves existing files; it only stops them being staged.
+
+# ── OS / editor noise ──────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ── Build / tool caches ────────────────────────────────────────────────────
+.turbo/
+node_modules/
+
+# ── Database dumps & backups (NEVER commit — real financial data + password
+#    hashes). The negation keeps Prisma migrations committable: they are
+#    tracked *.sql files and new ones MUST still be stageable.
+*.sql
+*.dump
+*.backup
+*.bak
+!shorok-erp-app/apps/api/prisma/migrations/**/*.sql
+prod-backup-*.sql
+dev-backup-*.sql
+local-backup-*.sql
+shorok-erp-app/dev-backup-*.sql
+
+# ── Spreadsheets / documents used as private data sources ──────────────────
+*.xlsx
+*.xls
+*.pdf
+
+# ── Private cutover / import source data and audit output ──────────────────
+_shorok_private_import_*/
+**/audit-output/
+xcl_data_to_import/
+
+# ── Local data extracts & inspection artifacts ─────────────────────────────
+price-498-audit-*.csv
+shorok-erp-app/apps/api/inspect-results.txt
+
+# ── Quarantined one-off import scripts (NOT part of the application) ───────
+# seed-excel.ts embeds client-identifiable strings and its header instructs
+# `railway run` (i.e. execute against PRODUCTION); it also writes directly via
+# Prisma, bypassing the posting/inventory engines. inspect-excel.ts hard-codes a
+# local absolute path. Both are ignored so they can never be staged by accident.
+# They remain on disk untouched and must be relocated to private storage in a
+# separate, explicitly approved phase (see C0 audit blocker C2).
+shorok-erp-app/apps/api/prisma/seed-excel.ts
+shorok-erp-app/apps/api/inspect-excel.ts
