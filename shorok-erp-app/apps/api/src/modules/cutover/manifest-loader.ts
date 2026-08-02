@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { CUTOVER_ERROR, CutoverRefusal, type CutoverMode } from "./cutover.types";
 import { cutoverManifestSchema, type CutoverManifest } from "./manifest.schema";
 
@@ -57,17 +58,42 @@ export function loadManifestFile(path: string | undefined | null): CutoverManife
  * recorded digests. A changed source means the approval no longer describes the
  * data, so the run is refused rather than re-derived.
  */
+export interface SourceVerification {
+  verified: boolean;
+  hashes: Record<string, string>;
+}
+
+/**
+ * The source files a manifest claims to derive from must still hash to the
+ * recorded digests. A changed workbook or PDF means the approval no longer
+ * describes the data, so the run is refused rather than silently re-derived.
+ *
+ * Mandatory for dry-run and execute: a rehearsal that skipped this check would
+ * not be a rehearsal of the real run. Audit may skip it, and says so.
+ */
 export function verifySourceHashes(
   manifest: CutoverManifest,
-  resolve: (sourceFileId: string) => string | null,
-): void {
+  sourceDir: string | undefined | null,
+  { required }: { required: boolean },
+): SourceVerification {
+  if (!sourceDir || !sourceDir.trim()) {
+    if (required) throw new CutoverRefusal(CUTOVER_ERROR.SOURCE_DIR_REQUIRED);
+    return { verified: false, hashes: {} };
+  }
+
+  const hashes: Record<string, string> = {};
   for (const src of manifest.sourceFiles) {
-    const actual = resolve(src.id);
-    if (actual === null) continue; // not present locally: audit-only usage
+    const path = join(sourceDir, src.id);
+    if (!existsSync(path)) {
+      throw new CutoverRefusal(CUTOVER_ERROR.SOURCE_FILE_NOT_FOUND, { sourceFileId: src.id });
+    }
+    const actual = sha256OfFile(path);
     if (actual.toLowerCase() !== src.sha256.toLowerCase()) {
       throw new CutoverRefusal(CUTOVER_ERROR.SOURCE_HASH_MISMATCH, { sourceFileId: src.id });
     }
+    hashes[src.id] = actual;
   }
+  return { verified: true, hashes };
 }
 
 export function verifyManifestHash(actualHash: string, declaredHash: string | undefined): void {

@@ -74,6 +74,27 @@ export const CUTOVER_ERROR = {
 
   // ── late ────────────────────────────────────────────────────────────────
   RECONCILIATION_FAILED: "RECONCILIATION_FAILED",
+
+  // ── binding (Section 2) ─────────────────────────────────────────────────
+  ACTOR_MISSING: "ACTOR_MISSING",
+  ACTOR_NOT_ACTIVE: "ACTOR_NOT_ACTIVE",
+  ACTOR_NOT_OWNER: "ACTOR_NOT_OWNER",
+  ACTOR_NOT_AUTHORIZED_FOR_BRANCH: "ACTOR_NOT_AUTHORIZED_FOR_BRANCH",
+  ACTOR_IDENTITY_MISMATCH: "ACTOR_IDENTITY_MISMATCH",
+
+  // ── source verification (Section 3) ─────────────────────────────────────
+  SOURCE_DIR_REQUIRED: "SOURCE_DIR_REQUIRED",
+  SOURCE_FILE_NOT_FOUND: "SOURCE_FILE_NOT_FOUND",
+
+  // ── opening journal (Section 5) ─────────────────────────────────────────
+  BALANCING_POLICY_NOT_PERMITTED: "BALANCING_POLICY_NOT_PERMITTED",
+  TEMPORARY_EQUITY_NOT_DECLARED: "TEMPORARY_EQUITY_NOT_DECLARED",
+  TEMPORARY_EQUITY_AMOUNT_MISMATCH: "TEMPORARY_EQUITY_AMOUNT_MISMATCH",
+  POSTING_ACCOUNTS_NOT_DECLARED: "POSTING_ACCOUNTS_NOT_DECLARED",
+
+  // ── fresh-database preparation (Section 1) ──────────────────────────────
+  DB_NOT_FRESH: "DB_NOT_FRESH",
+  DEMO_ROW_HAS_OPERATIONAL_REFERENCES: "DEMO_ROW_HAS_OPERATIONAL_REFERENCES",
 } as const;
 
 export type CutoverErrorCode = (typeof CUTOVER_ERROR)[keyof typeof CUTOVER_ERROR];
@@ -86,6 +107,11 @@ export const CUTOVER_WARNING = {
   PROVISIONAL_LOCAL_VALIDATION_NOT_PRODUCTION_APPROVAL:
     "PROVISIONAL_LOCAL_VALIDATION_NOT_PRODUCTION_APPROVAL",
   SEQUENCES_ADVANCED_DESPITE_ROLLBACK: "SEQUENCES_ADVANCED_DESPITE_ROLLBACK",
+  /** Audit ran without checking the source files against their hashes. */
+  SOURCE_FILES_NOT_VERIFIED: "SOURCE_FILES_NOT_VERIFIED",
+  /** NO_JOURNAL finished: master data and stock only, accounting incomplete. */
+  NOT_ACCOUNTING_COMPLETE: "NOT_ACCOUNTING_COMPLETE",
+  TEMPORARY_OPENING_EQUITY_USED: "TEMPORARY_OPENING_EQUITY_USED",
 } as const;
 
 export type CutoverWarningCode = (typeof CUTOVER_WARNING)[keyof typeof CUTOVER_WARNING];

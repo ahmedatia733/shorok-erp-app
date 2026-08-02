@@ -38,21 +38,31 @@ export const customerRowSchema = rowBase.extend({
   side: z.enum(["DEBIT", "CREDIT"]),
   sourceAmount: MONEY,
   approvedAmount: MONEY.nonnegative(),
-});
+}).strict();
 
 export const productRowSchema = rowBase.extend({
   entity: z.literal("PRODUCT"),
   /** Codes are STRINGS. A numeric-looking code must never be cast to a number. */
   approvedCode: z.string().min(1).max(60),
-  approvedName: z.string().min(1).max(200),
-  /** ProductSku.colorName{Ar,En} are NOT NULL, so a colour is always required. */
+  /**
+   * A product has NO separate name column in this model. `ProductSku` carries
+   * code + colorNameAr/colorNameEn, and the UI renders a product as
+   * `{code} · {colorName}` — so the approved COLOUR *is* the product's name.
+   * Both columns are NOT NULL, so a colour is always required.
+   */
   approvedColorAr: z.string().min(1).max(120),
   approvedColorEn: z.string().min(1).max(120),
+  /**
+   * Descriptive text from the source document, kept as AUDIT EVIDENCE ONLY.
+   * It is deliberately NOT persisted anywhere — there is no column for it —
+   * and the field name says so, rather than implying it was imported.
+   */
+  sourceDescriptiveName: z.string().max(200).optional().default(""),
   approvedCategory: z.enum(["NORMAL", "SPECIAL"]).default("NORMAL"),
   sizeMetersPerBoard: QTY.positive(),
   defaultSalePricePerMeter: MONEY.nonnegative().default(0),
   defaultPurchasePricePerMeter: MONEY.nonnegative().default(0),
-});
+}).strict();
 
 export const inventoryRowSchema = rowBase.extend({
   entity: z.literal("INVENTORY"),
@@ -67,14 +77,14 @@ export const inventoryRowSchema = rowBase.extend({
     .enum(["IMPORT_ZERO_QUANTITY_VARIANT", "EXCLUDE"])
     .optional()
     .default("IMPORT_ZERO_QUANTITY_VARIANT"),
-});
+}).strict();
 
 export const glRowSchema = rowBase.extend({
   entity: z.literal("GL"),
   accountCode: z.string().min(1).max(40),
   debit: MONEY.nonnegative().default(0),
   credit: MONEY.nonnegative().default(0),
-});
+}).strict();
 
 export const expectedTotalsSchema = z.object({
   customerDebitCount: z.number().int().nonnegative(),
@@ -101,9 +111,20 @@ export const cutoverManifestSchema = z
     cutoverDate: ISO_DATE,
     importScope: z.enum(["FULL_OPENING_IMPORT", "MASTER_AND_STOCK_ONLY", "AUDIT_ONLY"]),
 
+    /**
+     * The import binds to ONE approved branch and ONE approved actor. The CLI
+     * must never fall back to "the first active branch" or "the first OWNER" —
+     * that would silently import into whichever row happened to be created
+     * first.
+     */
     branch: z.object({
+      approvedBranchId: z.string().uuid(),
       approvedKey: z.string().min(1).max(160),
       approvedNameAr: z.string().min(1).max(200),
+    }),
+    actor: z.object({
+      approvedUserId: z.string().uuid(),
+      approvedPhone: z.string().min(3).max(30),
     }),
 
     sourceFiles: z.array(z.object({ id: z.string().min(1), sha256: SHA256 })).min(1),
@@ -114,8 +135,26 @@ export const cutoverManifestSchema = z
     datePolicy: z.enum(["SWAP_DAY_MONTH_ON_DATE_CELLS_V1", "NO_CORRECTION"]),
     inventoryValueBasis: z.enum(["PRINTED_PDF_TOTAL", "CANONICAL_RECOMPUTED"]),
     reversalPolicyReference: z.string().max(40).default("A_PLUS_D"),
-    balancingPolicy: z.enum(["REQUIRE_FULL_TRIAL_BALANCE", "TEMPORARY_SUSPENSE", "NO_JOURNAL"]),
-    suspenseAccountCode: z.string().max(40).optional().default(""),
+    balancingPolicy: z.enum([
+      "REQUIRE_FULL_TRIAL_BALANCE",
+      "TEMPORARY_OPENING_EQUITY",
+      "NO_JOURNAL",
+    ]),
+    /**
+     * Only for TEMPORARY_OPENING_EQUITY. Every field is mandatory under that
+     * policy: the balancing line is never calculated or invented — the approver
+     * states the account and the exact amount, and the importer verifies that
+     * the stated amount is the one that actually balances.
+     */
+    temporaryOpeningEquity: z
+      .object({
+        accountCode: z.string().min(1).max(40),
+        approvedAmount: MONEY,
+        side: z.enum(["DEBIT", "CREDIT"]),
+        approver: z.string().min(1).max(120),
+        clearanceDeadline: ISO_DATE,
+      })
+      .optional(),
 
     approver: z.string().max(120),
     approvalDate: z.string().max(40),
@@ -124,6 +163,17 @@ export const cutoverManifestSchema = z
 
     /** Must be 0 for execute. Any non-zero value refuses. */
     unresolvedDecisions: z.number().int().nonnegative(),
+
+    /**
+     * Account codes the opening journal posts to. Resolved against the live
+     * chart of accounts by code; a missing code refuses rather than guessing.
+     */
+    postingAccounts: z
+      .object({
+        arControlCode: z.string().min(1).max(40),
+        inventoryControlCode: z.string().min(1).max(40),
+      })
+      .optional(),
 
     expectedTotals: expectedTotalsSchema,
 

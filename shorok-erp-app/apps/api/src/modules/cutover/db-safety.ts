@@ -17,7 +17,11 @@ import { maskDatabaseUrl } from "./redaction";
  * A name containing "test" proves nothing on its own, so it is never sufficient.
  */
 
-export const LOCAL_DB_ALLOWLIST = ["shorok_erp_test", "shorok_erp_cutover_20260801_local"] as const;
+export const LOCAL_DB_ALLOWLIST = [
+  "shorok_erp_test",
+  "shorok_erp_cutover_20260801_local",
+  "shorok_erp_cutover_20260801_local_v2",
+] as const;
 
 /** Never a write target for the importer, whatever the mode. */
 export const FORBIDDEN_DB_NAMES = ["shorok_erp", "postgres", "template0", "template1"] as const;
