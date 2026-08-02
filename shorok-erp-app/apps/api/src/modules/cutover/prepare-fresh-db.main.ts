@@ -15,19 +15,34 @@
 
 import { PrismaClient } from "@prisma/client";
 import { CutoverRefusal } from "./cutover.types";
-import { assertLocalTargetIsSafe, assertServerIdentityMatches, parseDatabaseUrl } from "./db-safety";
+import { existsSync } from "node:fs";
+import { assertServerIdentityMatches, assertTargetIsSafe, parseDatabaseUrl } from "./db-safety";
 import { prepareFreshDatabase } from "./fresh-db";
 
 interface Args {
   databaseUrl?: string;
   apply: boolean;
+  // Same default-deny production contract as the importer.
+  targetMode?: string;
+  expectedHost?: string;
+  expectedDatabase?: string;
+  approvalFile?: string;
+  productionToken?: string;
 }
 
 function parse(argv: string[]): Args {
   const args: Args = { apply: false };
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === "--database-url") args.databaseUrl = argv[++i];
-    else if (argv[i] === "--apply") args.apply = true;
+    switch (argv[i]) {
+      case "--database-url": args.databaseUrl = argv[++i]; break;
+      case "--apply": args.apply = true; break;
+      case "--target-mode": args.targetMode = argv[++i]; break;
+      case "--expected-host": args.expectedHost = argv[++i]; break;
+      case "--expected-database": args.expectedDatabase = argv[++i]; break;
+      case "--approval-file": args.approvalFile = argv[++i]; break;
+      case "--production-token": args.productionToken = argv[++i]; break;
+      default: break;
+    }
   }
   return args;
 }
@@ -42,8 +57,9 @@ async function main(): Promise<number> {
   const args = parse(process.argv.slice(2));
 
   const target = parseDatabaseUrl(args.databaseUrl);
-  await assertLocalTargetIsSafe(target);
+  const targetMode = await assertTargetIsSafe(target, args, existsSync);
   console.log(`database        : ${target.masked}`);
+  console.log(`target mode     : ${targetMode.toUpperCase()}`);
 
   const prisma = new PrismaClient({ datasources: { db: { url: args.databaseUrl! } } });
   try {

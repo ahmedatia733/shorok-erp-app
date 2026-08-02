@@ -1,5 +1,10 @@
 import { lookup } from "node:dns/promises";
-import { CUTOVER_ERROR, CutoverRefusal } from "./cutover.types";
+import {
+  CUTOVER_ERROR,
+  CutoverRefusal,
+  PRODUCTION_CUTOVER_TOKEN,
+  type TargetMode,
+} from "./cutover.types";
 import { maskDatabaseUrl } from "./redaction";
 
 /**
@@ -150,4 +155,95 @@ export async function assertServerIdentityMatches(
 
 function isLoopbackAddress(address: string): boolean {
   return address.startsWith("127.") || address === "::1";
+}
+
+/**
+ * Production target authorization — DEFAULT DENY.
+ *
+ * The local guards above stay exactly as they are: every mode except an
+ * explicitly authorized production run still refuses a managed/public host. This
+ * function is the ONLY way past them, and it demands six independent things, all
+ * supplied by the operator and none of them inferable:
+ *
+ *   --target-mode production      the intent, stated explicitly
+ *   --database-url                no ambient fallback, ever
+ *   --expected-host               the exact proxy hostname, matched exactly
+ *   --expected-database           the exact database name, matched exactly
+ *   --approval-file               signed approval evidence that must exist
+ *   --production-token            the current cutover token
+ *
+ * Nothing here is hard-coded to a hostname, a password or a Railway credential:
+ * the operator states what they expect and the parsed URL must agree.
+ */
+export interface ProductionTargetArgs {
+  targetMode?: string;
+  databaseUrl?: string;
+  expectedHost?: string;
+  expectedDatabase?: string;
+  approvalFile?: string;
+  productionToken?: string;
+}
+
+export function resolveTargetMode(raw: string | undefined | null): TargetMode {
+  if (raw === undefined || raw === null || raw === "") return "local";
+  if (raw === "local" || raw === "production") return raw;
+  throw new CutoverRefusal(CUTOVER_ERROR.TARGET_MODE_INVALID, { targetMode: String(raw) });
+}
+
+export function assertProductionTargetIsAuthorized(
+  target: ParsedTarget,
+  args: ProductionTargetArgs,
+  fileExists: (path: string) => boolean,
+): void {
+  if (args.targetMode !== "production") {
+    throw new CutoverRefusal(CUTOVER_ERROR.TARGET_MODE_MISSING);
+  }
+  if (!args.productionToken) {
+    throw new CutoverRefusal(CUTOVER_ERROR.PRODUCTION_TOKEN_MISSING);
+  }
+  if (args.productionToken !== PRODUCTION_CUTOVER_TOKEN) {
+    throw new CutoverRefusal(CUTOVER_ERROR.PRODUCTION_TOKEN_INVALID);
+  }
+  if (!args.expectedHost) {
+    throw new CutoverRefusal(CUTOVER_ERROR.EXPECTED_HOST_MISSING);
+  }
+  // Exact equality, not "contains": a substring rule would accept a lookalike
+  // host that merely embeds the expected one.
+  if (args.expectedHost !== target.host) {
+    throw new CutoverRefusal(CUTOVER_ERROR.EXPECTED_HOST_MISMATCH, {
+      expected: args.expectedHost,
+      actual: target.host,
+    });
+  }
+  if (!args.expectedDatabase) {
+    throw new CutoverRefusal(CUTOVER_ERROR.EXPECTED_DATABASE_MISSING);
+  }
+  if (args.expectedDatabase !== target.database) {
+    throw new CutoverRefusal(CUTOVER_ERROR.EXPECTED_DATABASE_MISMATCH, {
+      expected: args.expectedDatabase,
+      actual: target.database,
+    });
+  }
+  if (!args.approvalFile || !fileExists(args.approvalFile)) {
+    throw new CutoverRefusal(CUTOVER_ERROR.PRODUCTION_APPROVAL_FILE_MISSING);
+  }
+}
+
+/**
+ * The single entry point every command uses to decide whether a target may be
+ * written to. `local` keeps the loopback + allowlist rules unchanged.
+ */
+export async function assertTargetIsSafe(
+  target: ParsedTarget,
+  args: ProductionTargetArgs,
+  fileExists: (path: string) => boolean,
+  allowlist: readonly string[] = LOCAL_DB_ALLOWLIST,
+): Promise<TargetMode> {
+  const mode = resolveTargetMode(args.targetMode);
+  if (mode === "local") {
+    await assertLocalTargetIsSafe(target, allowlist);
+    return "local";
+  }
+  assertProductionTargetIsAuthorized(target, args, fileExists);
+  return "production";
 }

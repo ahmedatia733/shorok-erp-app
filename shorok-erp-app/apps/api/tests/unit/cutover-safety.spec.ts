@@ -3,10 +3,15 @@
  * classification. Synthetic data only.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   assertLocalTargetIsSafe,
+  assertProductionTargetIsAuthorized,
   assertServerIdentityMatches,
+  assertTargetIsSafe,
   parseDatabaseUrl,
+  resolveTargetMode,
   LOCAL_DB_ALLOWLIST,
 } from "../../src/modules/cutover/db-safety";
 import { CUTOVER_ERROR, CutoverRefusal } from "../../src/modules/cutover/cutover.types";
@@ -298,5 +303,150 @@ describe("return classification", () => {
     const r = classifyReturnCandidate({ ...base, signalValues: { boards: -2 }, resolvedDate: null });
     expect(r.classification).toBe("DATE_AMBIGUOUS_RETURN");
     expect(r.treatment).toBe("BLOCKED_PENDING_REVIEW");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Production target mode — DEFAULT DENY
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("production target mode", () => {
+  const PROD_URL = "postgresql://u:p@proxy.example-managed.net:37575/railway";
+  const prodTarget = () => parseDatabaseUrl(PROD_URL);
+  const exists = () => true;
+  const full = {
+    targetMode: "production",
+    expectedHost: "proxy.example-managed.net",
+    expectedDatabase: "railway",
+    approvalFile: "/private/approval.md",
+    productionToken: "APPROVE_SHOROK_PRODUCTION_CUTOVER_20260802",
+  };
+
+  function expectCode(fn: () => unknown, code: string) {
+    try {
+      fn();
+    } catch (e) {
+      expect((e as CutoverRefusal).code).toBe(code);
+      return;
+    }
+    throw new Error(`expected refusal ${code}, nothing thrown`);
+  }
+
+  it("authorizes only when every requirement is satisfied", () => {
+    expect(() => assertProductionTargetIsAuthorized(prodTarget(), full, exists)).not.toThrow();
+  });
+
+  it("defaults to local when no target mode is given", () => {
+    expect(resolveTargetMode(undefined)).toBe("local");
+    expect(resolveTargetMode("")).toBe("local");
+  });
+
+  it("rejects an unknown target mode rather than falling back", () => {
+    expectCode(() => resolveTargetMode("staging"), CUTOVER_ERROR.TARGET_MODE_INVALID);
+  });
+
+  it("refuses production without --target-mode production", () => {
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), { ...full, targetMode: "local" }, exists),
+      CUTOVER_ERROR.TARGET_MODE_MISSING,
+    );
+  });
+
+  it("refuses a missing production token", () => {
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), { ...full, productionToken: undefined }, exists),
+      CUTOVER_ERROR.PRODUCTION_TOKEN_MISSING,
+    );
+  });
+
+  it("refuses a wrong production token", () => {
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), { ...full, productionToken: "NOPE" }, exists),
+      CUTOVER_ERROR.PRODUCTION_TOKEN_INVALID,
+    );
+  });
+
+  it("refuses a missing expected host", () => {
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), { ...full, expectedHost: undefined }, exists),
+      CUTOVER_ERROR.EXPECTED_HOST_MISSING,
+    );
+  });
+
+  it("refuses when the expected host is not an EXACT match", () => {
+    // A substring rule would accept this lookalike; exact equality does not.
+    expectCode(
+      () =>
+        assertProductionTargetIsAuthorized(
+          prodTarget(),
+          { ...full, expectedHost: "example-managed.net" },
+          exists,
+        ),
+      CUTOVER_ERROR.EXPECTED_HOST_MISMATCH,
+    );
+  });
+
+  it("refuses a missing or mismatched expected database", () => {
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), { ...full, expectedDatabase: undefined }, exists),
+      CUTOVER_ERROR.EXPECTED_DATABASE_MISSING,
+    );
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), { ...full, expectedDatabase: "other" }, exists),
+      CUTOVER_ERROR.EXPECTED_DATABASE_MISMATCH,
+    );
+  });
+
+  it("refuses when the approval file is missing or absent from disk", () => {
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), { ...full, approvalFile: undefined }, exists),
+      CUTOVER_ERROR.PRODUCTION_APPROVAL_FILE_MISSING,
+    );
+    expectCode(
+      () => assertProductionTargetIsAuthorized(prodTarget(), full, () => false),
+      CUTOVER_ERROR.PRODUCTION_APPROVAL_FILE_MISSING,
+    );
+  });
+
+  it("keeps the local guards intact: a MANAGED host is still refused in local mode", async () => {
+    const managed = parseDatabaseUrl("postgresql://u:p@shard.proxy.rlwy.net:37575/railway");
+    await expect(
+      assertTargetIsSafe(managed, { targetMode: "local" }, exists),
+    ).rejects.toMatchObject({ code: CUTOVER_ERROR.DB_HOST_PUBLIC });
+  });
+
+  it("keeps the local guards intact: no target mode means local rules apply", async () => {
+    // Not a managed-pattern host, so it falls to the loopback rule — still refused.
+    await expect(assertTargetIsSafe(prodTarget(), {}, exists)).rejects.toMatchObject({
+      code: CUTOVER_ERROR.DB_HOST_NOT_LOOPBACK,
+    });
+  });
+
+  it("a MANAGED host is reachable ONLY through full production authorization", async () => {
+    const managed = parseDatabaseUrl("postgresql://u:p@shard.proxy.rlwy.net:37575/railway");
+    await expect(
+      assertTargetIsSafe(
+        managed,
+        { ...full, expectedHost: "shard.proxy.rlwy.net" },
+        exists,
+      ),
+    ).resolves.toBe("production");
+  });
+
+  it("still refuses the dev database in local mode", async () => {
+    await expect(
+      assertTargetIsSafe(parseDatabaseUrl("postgresql://u:p@127.0.0.1:5432/shorok_erp"), {}, exists),
+    ).rejects.toMatchObject({ code: CUTOVER_ERROR.DB_TARGET_FORBIDDEN });
+  });
+
+  it("allows an authorized production target through assertTargetIsSafe", async () => {
+    await expect(assertTargetIsSafe(prodTarget(), full, exists)).resolves.toBe("production");
+  });
+
+  it("carries no hard-coded hostname, password or Railway credential", () => {
+    const source = readFileSync(join(__dirname, "../../src/modules/cutover/db-safety.ts"), "utf8");
+    expect(source).not.toMatch(/rlwy\.net:\d+/);
+    expect(source).not.toMatch(/postgres:[^@\s]{8,}@/);
+    expect(source).not.toMatch(/proxy\.rlwy/);
   });
 });

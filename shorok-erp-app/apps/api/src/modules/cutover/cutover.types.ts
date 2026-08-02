@@ -9,6 +9,16 @@ export const IMPORTER_VERSION = "1.0.0";
 
 export type CutoverMode = "audit" | "dry-run" | "execute";
 
+/**
+ * Which class of database a run may touch. DEFAULT-DENY: `local` is the only
+ * implicit value, and `production` must be requested explicitly and then satisfy
+ * every check in `assertProductionTargetIsAuthorized`.
+ */
+export type TargetMode = "local" | "production";
+
+/** The one token that unlocks production. Rotating it invalidates old scripts. */
+export const PRODUCTION_CUTOVER_TOKEN = "APPROVE_SHOROK_PRODUCTION_CUTOVER_20260802";
+
 /** What a run is allowed to write. Chosen by the manifest, not by a flag. */
 export type ImportScope = "FULL_OPENING_IMPORT" | "MASTER_AND_STOCK_ONLY" | "AUDIT_ONLY";
 
@@ -60,6 +70,7 @@ export const CUTOVER_ERROR = {
   BLOCKED_ROW_MARKED_IMPORTABLE: "BLOCKED_ROW_MARKED_IMPORTABLE",
   COLOR_POLICY_VIOLATION: "COLOR_POLICY_VIOLATION",
   CUSTOMER_CODE_TOO_LONG: "CUSTOMER_CODE_TOO_LONG",
+  MASTER_ONLY_CUSTOMER_HAS_BALANCE: "MASTER_ONLY_CUSTOMER_HAS_BALANCE",
 
   // ── database safety ─────────────────────────────────────────────────────
   DB_URL_MALFORMED: "DB_URL_MALFORMED",
@@ -95,6 +106,22 @@ export const CUTOVER_ERROR = {
   // ── fresh-database preparation (Section 1) ──────────────────────────────
   DB_NOT_FRESH: "DB_NOT_FRESH",
   DEMO_ROW_HAS_OPERATIONAL_REFERENCES: "DEMO_ROW_HAS_OPERATIONAL_REFERENCES",
+
+  // ── production target authorization (default-deny) ──────────────────────
+  TARGET_MODE_MISSING: "TARGET_MODE_MISSING",
+  TARGET_MODE_INVALID: "TARGET_MODE_INVALID",
+  PRODUCTION_TOKEN_MISSING: "PRODUCTION_TOKEN_MISSING",
+  PRODUCTION_TOKEN_INVALID: "PRODUCTION_TOKEN_INVALID",
+  EXPECTED_HOST_MISSING: "EXPECTED_HOST_MISSING",
+  EXPECTED_HOST_MISMATCH: "EXPECTED_HOST_MISMATCH",
+  EXPECTED_DATABASE_MISSING: "EXPECTED_DATABASE_MISSING",
+  EXPECTED_DATABASE_MISMATCH: "EXPECTED_DATABASE_MISMATCH",
+  PRODUCTION_APPROVAL_FILE_MISSING: "PRODUCTION_APPROVAL_FILE_MISSING",
+
+  // ── valuation rounding ──────────────────────────────────────────────────
+  VALUATION_ADJUSTMENT_NOT_APPROVED: "VALUATION_ADJUSTMENT_NOT_APPROVED",
+  VALUATION_ADJUSTMENT_MISMATCH: "VALUATION_ADJUSTMENT_MISMATCH",
+  VALUATION_ADJUSTMENT_TARGET_MISSING: "VALUATION_ADJUSTMENT_TARGET_MISSING",
 } as const;
 
 export type CutoverErrorCode = (typeof CUTOVER_ERROR)[keyof typeof CUTOVER_ERROR];
@@ -112,6 +139,7 @@ export const CUTOVER_WARNING = {
   /** NO_JOURNAL finished: master data and stock only, accounting incomplete. */
   NOT_ACCOUNTING_COMPLETE: "NOT_ACCOUNTING_COMPLETE",
   TEMPORARY_OPENING_EQUITY_USED: "TEMPORARY_OPENING_EQUITY_USED",
+  VALUATION_ROUNDING_APPLIED: "VALUATION_ROUNDING_APPLIED",
 } as const;
 
 export type CutoverWarningCode = (typeof CUTOVER_WARNING)[keyof typeof CUTOVER_WARNING];

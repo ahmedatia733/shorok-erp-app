@@ -20,9 +20,9 @@ import { assertServerIdentityMatches, parseDatabaseUrl } from "./db-safety";
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   const outcome = runManifestGates(args);
-  const maskedDb = await runDatabaseGates(args);
+  const { masked: maskedDb, targetMode } = await runDatabaseGates(args);
 
-  for (const line of formatSummary(outcome, maskedDb)) console.log(line);
+  for (const line of formatSummary(outcome, maskedDb, targetMode)) console.log(line);
 
   if (args.mode === "audit") {
     console.log("result          : AUDIT_OK (no database was contacted)");

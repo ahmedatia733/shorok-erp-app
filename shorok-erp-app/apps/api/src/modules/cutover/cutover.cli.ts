@@ -21,7 +21,9 @@ import {
   verifyManifestHash,
   verifySourceHashes,
 } from "./manifest-loader";
-import { assertLocalTargetIsSafe, parseDatabaseUrl } from "./db-safety";
+import { assertTargetIsSafe, parseDatabaseUrl } from "./db-safety";
+import { existsSync } from "node:fs";
+import type { TargetMode } from "./cutover.types";
 import { hashPrefix, maskDatabaseUrl } from "./redaction";
 
 export const APPROVED_CUTOVER_DATE = "2026-08-01";
@@ -34,6 +36,11 @@ export interface CliArgs {
   sourceDir?: string;
   verbose: boolean;
   dumpPrivate: boolean;
+  // Production authorization — every field must be supplied explicitly.
+  targetMode?: string;
+  expectedHost?: string;
+  expectedDatabase?: string;
+  productionToken?: string;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
@@ -70,6 +77,18 @@ export function parseArgs(argv: string[]): CliArgs {
         break;
       case "--dump-private":
         args.dumpPrivate = true;
+        break;
+      case "--target-mode":
+        args.targetMode = next();
+        break;
+      case "--expected-host":
+        args.expectedHost = next();
+        break;
+      case "--expected-database":
+        args.expectedDatabase = next();
+        break;
+      case "--production-token":
+        args.productionToken = next();
         break;
       default:
         break;
@@ -134,23 +153,35 @@ export function runManifestGates(args: CliArgs): AuditOutcome {
   };
 }
 
-/** Static database gates. The live-identity probe happens in the service. */
-export async function runDatabaseGates(args: CliArgs): Promise<string> {
-  if (args.mode === "audit") return "";
+/**
+ * Static database gates. The live-identity probe happens after connecting.
+ * `local` keeps the loopback/allowlist rules; `production` must satisfy the
+ * default-deny authorization contract.
+ */
+export async function runDatabaseGates(
+  args: CliArgs,
+): Promise<{ masked: string; targetMode: TargetMode }> {
+  if (args.mode === "audit") return { masked: "", targetMode: "local" };
   const target = parseDatabaseUrl(args.databaseUrl);
-  await assertLocalTargetIsSafe(target);
-  return target.masked;
+  const targetMode = await assertTargetIsSafe(target, args, existsSync);
+  return { masked: target.masked, targetMode };
 }
 
 /** Report lines are redaction-safe by construction: no names, no per-row money. */
-export function formatSummary(outcome: AuditOutcome, maskedDb: string): string[] {
+export function formatSummary(
+  outcome: AuditOutcome,
+  maskedDb: string,
+  targetMode: TargetMode = "local",
+): string[] {
   const r = outcome.plan.reconciliation;
   return [
     `manifest        : ${outcome.plan.manifestId} (sha256 ${outcome.manifestHashPrefix}…)`,
     `scope           : ${outcome.plan.scope}`,
     `cutover date    : ${outcome.plan.cutoverDate}`,
     `database        : ${maskedDb || "(none — audit mode)"}`,
-    `customers       : ${r.customerDebitCount} debit / ${r.customerCreditCount} credit`,
+    `target mode     : ${targetMode.toUpperCase()}`,
+    `customers       : ${r.customerDebitCount} debit / ${r.customerCreditCount} credit` +
+      ` (+${r.masterOnlyCustomerCount} preserved master-only at zero balance)`,
     `customer totals : Dr ${r.customerDebitTotal} / Cr ${r.customerCreditTotal} / net ${r.customerNetAr}`,
     `inventory rows  : ${r.inventoryImportRowCount} (zero-qty ${r.zeroQuantityVariants})`,
     `inventory qty   : ${r.inventoryBoards} boards / ${r.inventoryMeters} meters`,
