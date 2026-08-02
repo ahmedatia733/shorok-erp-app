@@ -47,7 +47,8 @@ export interface PlannedVariant {
   sourceKey: string;
   approvedKey: string;
   code: string;
-  nameAr: string;
+  /** Evidence only — the model has no product-name column. Never persisted. */
+  sourceDescriptiveName: string;
   colorAr: string;
   colorEn: string;
   category: "NORMAL" | "SPECIAL";
@@ -101,6 +102,16 @@ export interface CutoverPlan {
   cutoverDate: string;
   scope: CutoverManifest["importScope"];
   branchKey: string;
+  approvedBranchId: string;
+  approvedActorUserId: string;
+  approvedActorPhone: string;
+  operator: string;
+  approver: string;
+  approvalDate: string;
+  balancingPolicy: CutoverManifest["balancingPolicy"];
+  arControlCode: string;
+  inventoryControlCode: string;
+  accountingComplete: boolean;
   customers: PlannedCustomer[];
   variants: PlannedVariant[];
   stock: PlannedStock[];
@@ -225,7 +236,7 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
       sourceKey: row.sourceKey,
       approvedKey: key,
       code: row.approvedCode,
-      nameAr: row.approvedName,
+      sourceDescriptiveName: row.sourceDescriptiveName,
       colorAr: row.approvedColorAr,
       colorEn: row.approvedColorEn,
       category: row.approvedCategory,
@@ -317,23 +328,36 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
   const journalMustPost = expected.journalMustPost && manifest.importScope === "FULL_OPENING_IMPORT";
 
   if (journalMustPost) {
+    if (!manifest.postingAccounts) {
+      // The journal posts to real accounts resolved by code. Guessing which
+      // account is "the AR control" is exactly the kind of silent choice this
+      // importer must never make.
+      throw new CutoverRefusal(CUTOVER_ERROR.POSTING_ACCOUNTS_NOT_DECLARED);
+    }
+    const arCode = manifest.postingAccounts.arControlCode;
+    const invCode = manifest.postingAccounts.inventoryControlCode;
+
+    // One AR line per customer, each carrying its own party dimension, so a
+    // customer statement shows that customer's own opening balance rather than
+    // one lump sum on the control account.
     for (const c of customers) {
       if (c.amount === 0) continue;
       journalLines.push({
-        accountCode: "AR_CONTROL",
+        accountCode: arCode,
         debit: c.side === "DEBIT" ? c.amount : 0,
         credit: c.side === "CREDIT" ? c.amount : 0,
         partyType: "CUSTOMER",
         partyRef: c.approvedKey,
       });
     }
+
     const inventoryDebit = money(
       manifest.inventoryValueBasis === "PRINTED_PDF_TOTAL"
         ? expected.inventoryValue
         : inventoryValue,
     );
     if (inventoryDebit > 0) {
-      journalLines.push({ accountCode: "INVENTORY_CONTROL", debit: inventoryDebit, credit: 0 });
+      journalLines.push({ accountCode: invCode, debit: inventoryDebit, credit: 0 });
     }
     for (const gl of manifest.openingGlRows) {
       journalLines.push({
@@ -343,15 +367,69 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
       });
     }
 
-    const dr = sumMoney(journalLines.map((l) => l.debit));
-    const cr = sumMoney(journalLines.map((l) => l.credit));
-    if (dr !== cr) {
-      // No suspense line is ever invented to close the gap.
-      throw new CutoverRefusal(CUTOVER_ERROR.JOURNAL_UNBALANCED, { debit: dr, credit: cr });
+    let dr = sumMoney(journalLines.map((l) => l.debit));
+    let cr = sumMoney(journalLines.map((l) => l.credit));
+
+    switch (manifest.balancingPolicy) {
+      case "REQUIRE_FULL_TRIAL_BALANCE":
+        if (dr !== cr) {
+          // No balancing line is ever invented to close the gap.
+          throw new CutoverRefusal(CUTOVER_ERROR.JOURNAL_UNBALANCED, { debit: dr, credit: cr });
+        }
+        break;
+
+      case "TEMPORARY_OPENING_EQUITY": {
+        const eq = manifest.temporaryOpeningEquity;
+        if (!eq) throw new CutoverRefusal(CUTOVER_ERROR.TEMPORARY_EQUITY_NOT_DECLARED);
+        // The approver states the amount; the importer only VERIFIES that the
+        // stated amount is the one that actually balances. It never computes it.
+        const residual = money(dr - cr);
+        const stated = money(eq.approvedAmount);
+        const statedSigned = eq.side === "CREDIT" ? stated : -stated;
+        if (residual !== statedSigned) {
+          throw new CutoverRefusal(CUTOVER_ERROR.TEMPORARY_EQUITY_AMOUNT_MISMATCH, {
+            residual,
+            stated,
+            side: eq.side,
+          });
+        }
+        journalLines.push({
+          accountCode: eq.accountCode,
+          debit: eq.side === "DEBIT" ? stated : 0,
+          credit: eq.side === "CREDIT" ? stated : 0,
+        });
+        warnings.push({
+          code: CUTOVER_WARNING.TEMPORARY_OPENING_EQUITY_USED,
+          decisionId: "MANIFEST",
+          note: `temporary account ${eq.accountCode}, clearance by ${eq.clearanceDeadline}, approved by ${eq.approver}`,
+        });
+        dr = sumMoney(journalLines.map((l) => l.debit));
+        cr = sumMoney(journalLines.map((l) => l.credit));
+        if (dr !== cr) {
+          throw new CutoverRefusal(CUTOVER_ERROR.JOURNAL_UNBALANCED, { debit: dr, credit: cr });
+        }
+        break;
+      }
+
+      case "NO_JOURNAL":
+        // A manifest cannot both demand a journal and forbid one.
+        throw new CutoverRefusal(CUTOVER_ERROR.BALANCING_POLICY_NOT_PERMITTED, {
+          policy: manifest.balancingPolicy,
+          reason: "journalMustPost_is_true",
+        });
     }
-    if (journalLines.some((l) => l.accountCode === "AR_CONTROL" && !l.partyRef)) {
+
+    if (journalLines.some((l) => l.accountCode === arCode && !l.partyRef)) {
       throw new CutoverRefusal(CUTOVER_ERROR.AR_PARTY_DIMENSION_MISSING);
     }
+  } else {
+    // Master data and stock only. This is a legitimate scope, but it is NOT a
+    // complete accounting cutover and the result says so.
+    warnings.push({
+      code: CUTOVER_WARNING.NOT_ACCOUNTING_COMPLETE,
+      decisionId: "MANIFEST",
+      note: "no opening journal posted; customer AR and inventory value are not in the ledger",
+    });
   }
 
   const openingDebitTotal = sumMoney([
@@ -373,6 +451,16 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
     cutoverDate: manifest.cutoverDate,
     scope: manifest.importScope,
     branchKey: manifest.branch.approvedKey,
+    approvedBranchId: manifest.branch.approvedBranchId,
+    approvedActorUserId: manifest.actor.approvedUserId,
+    approvedActorPhone: manifest.actor.approvedPhone,
+    operator: manifest.operator,
+    approver: manifest.approver,
+    approvalDate: manifest.approvalDate,
+    balancingPolicy: manifest.balancingPolicy,
+    arControlCode: manifest.postingAccounts?.arControlCode ?? "",
+    inventoryControlCode: manifest.postingAccounts?.inventoryControlCode ?? "",
+    accountingComplete: journalMustPost,
     customers,
     variants,
     stock,

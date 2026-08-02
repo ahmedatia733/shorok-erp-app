@@ -12,12 +12,10 @@
 import { NestFactory } from "@nestjs/core";
 import { PrismaClient } from "@prisma/client";
 import { AppModule } from "../../app.module";
-import { PrismaService } from "../../prisma/prisma.service";
 import { CutoverService } from "./cutover.service";
 import { CutoverRefusal } from "./cutover.types";
 import { formatSummary, parseArgs, runDatabaseGates, runManifestGates } from "./cutover.cli";
 import { assertServerIdentityMatches, parseDatabaseUrl } from "./db-safety";
-import type { AuthenticatedUser } from "../../common/types/request-user";
 
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
@@ -48,35 +46,22 @@ async function main(): Promise<number> {
   const app = await NestFactory.createApplicationContext(AppModule, { logger: false });
   try {
     const service = app.get(CutoverService);
-    const prisma = app.get(PrismaService);
-
-    const branch = await prisma.branch.findFirst({ where: { active: true } });
-    if (!branch) throw new CutoverRefusal("BRANCH_MISSING" as never, {});
-    const actor = await prisma.user.findFirst({ where: { role: "OWNER", status: "ACTIVE" } });
-    if (!actor) throw new CutoverRefusal("BRANCH_MISSING" as never, { reason: "no_owner" });
 
     const before = await service.businessRowCounts();
+    // Branch, actor, operator, approver and approval date all come from the
+    // approved manifest via the plan. Nothing is chosen here.
     const result = await service.run({
       mode: args.mode === "execute" ? "execute" : "dry-run",
       plan: outcome.plan,
-      branchId: branch.id,
-      actor: {
-        id: actor.id,
-        name: actor.name,
-        phone: actor.phone,
-        email: null,
-        role: "OWNER",
-        status: "ACTIVE",
-        allowedBranches: [branch.id],
-      } satisfies AuthenticatedUser,
-      manifestSourceHashes: {},
-      operator: "cli",
-      approver: "cli",
-      approvalDate: outcome.plan.cutoverDate,
+      verifiedSourceHashes: outcome.verifiedSourceHashes,
+      codeRevision: process.env.GIT_REVISION ?? undefined,
     });
     const after = await service.businessRowCounts();
 
     console.log(`batch           : ${result.batchId ?? "(none)"}`);
+    console.log(`bound branch    : ${result.branchId}`);
+    console.log(`bound actor     : ${result.actorUserId}`);
+    console.log(`journal entry   : ${result.journalEntryId ?? "(none)"}`);
     console.log(`customers       : +${result.createdCustomers}`);
     console.log(`skus/variants   : +${result.createdSkus}/+${result.createdVariants}`);
     console.log(`stock movements : ${result.stockMovements} (zero-qty skipped ${result.zeroQuantitySkipped})`);

@@ -10,14 +10,13 @@
  * "whatever happens to be configured".
  */
 
-import { CUTOVER_ERROR, CutoverRefusal, type CutoverMode } from "./cutover.types";
+import { CUTOVER_ERROR, CUTOVER_WARNING, CutoverRefusal, type CutoverMode } from "./cutover.types";
 import { planCutover, computeManifestHash, type CutoverPlan } from "./cutover-planner";
 import {
   assertCutoverDate,
   assertExecutePreconditions,
   assertOpeningScopeOnly,
   loadManifestFile,
-  sha256OfFile,
   verifyApprovalFile,
   verifyManifestHash,
   verifySourceHashes,
@@ -87,6 +86,9 @@ export interface AuditOutcome {
   plan: CutoverPlan;
   manifestHashPrefix: string;
   warnings: CutoverPlan["warnings"];
+  /** Whether the source files were actually hashed and matched this run. */
+  sourceVerified: boolean;
+  verifiedSourceHashes: Record<string, string>;
 }
 
 /**
@@ -100,15 +102,11 @@ export function runManifestGates(args: CliArgs): AuditOutcome {
   assertCutoverDate(manifest, APPROVED_CUTOVER_DATE);
   assertOpeningScopeOnly(manifest);
 
-  if (args.sourceDir) {
-    verifySourceHashes(manifest, (id) => {
-      try {
-        return sha256OfFile(`${args.sourceDir}/${id}`);
-      } catch {
-        return null;
-      }
-    });
-  }
+  // Source verification is MANDATORY for anything that opens a transaction.
+  // A dry-run is meant to be a rehearsal of the real run, so it cannot skip a
+  // check the real run performs. Audit may skip it, and the report says so.
+  const sourceRequired = args.mode === "execute" || args.mode === "dry-run";
+  const verification = verifySourceHashes(manifest, args.sourceDir, { required: sourceRequired });
 
   const hash = computeManifestHash(manifest);
   verifyManifestHash(hash, undefined);
@@ -119,7 +117,21 @@ export function runManifestGates(args: CliArgs): AuditOutcome {
   }
 
   const plan = planCutover(manifest);
-  return { plan, manifestHashPrefix: hashPrefix(plan.manifestHash), warnings: plan.warnings };
+  const warnings = [...plan.warnings];
+  if (!verification.verified) {
+    warnings.push({
+      code: CUTOVER_WARNING.SOURCE_FILES_NOT_VERIFIED,
+      decisionId: "MANIFEST",
+      note: "structural audit only — source files were not hashed against the manifest",
+    });
+  }
+  return {
+    plan,
+    manifestHashPrefix: hashPrefix(plan.manifestHash),
+    warnings,
+    sourceVerified: verification.verified,
+    verifiedSourceHashes: verification.hashes,
+  };
 }
 
 /** Static database gates. The live-identity probe happens in the service. */
@@ -145,6 +157,12 @@ export function formatSummary(outcome: AuditOutcome, maskedDb: string): string[]
     `inventory value : ${r.inventoryValue}`,
     `opening Dr/Cr   : ${r.openingDebitTotal} / ${r.openingCreditTotal} (gap ${r.openingGap})`,
     `journal posts   : ${outcome.plan.journalMustPost ? "YES" : "NO"}`,
+    `balancing policy: ${outcome.plan.balancingPolicy}`,
+    `source verified : ${outcome.sourceVerified ? "YES" : "NO — SOURCE_FILES_NOT_VERIFIED"}`,
+    `accounting      : ${outcome.plan.accountingComplete ? "COMPLETE" : "NOT_ACCOUNTING_COMPLETE"}`,
+    `approved branch : ${outcome.plan.approvedBranchId}`,
+    `approved actor  : ${outcome.plan.approvedActorUserId}`,
+    `operator/approver: ${outcome.plan.operator} / ${outcome.plan.approver}`,
     ...outcome.warnings.map((w) => `warning         : ${w.code} [${w.decisionId}] ${w.note}`),
   ];
 }

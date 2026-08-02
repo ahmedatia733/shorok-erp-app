@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { InventoryModule } from "../inventory/inventory.module";
+import { PostingModule } from "../posting/posting.module";
 import { CutoverService } from "./cutover.service";
 
 /**
@@ -8,7 +9,7 @@ import { CutoverService } from "./cutover.service";
  * target, never over HTTP against whatever database the API happens to serve.
  */
 @Module({
-  imports: [InventoryModule],
+  imports: [InventoryModule, PostingModule],
   providers: [CutoverService],
   exports: [CutoverService],
 })
