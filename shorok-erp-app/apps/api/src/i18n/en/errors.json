@@ -27,5 +27,7 @@
   "http_403": "Forbidden.",
   "http_404": "Not found.",
   "http_409": "Conflict.",
-  "http_500": "Internal error."
+  "http_500": "Internal error.",
+  "period_not_open": "The financial period for {month}/{year} is not open. Nothing can be posted or reversed on this date. Open it under Settings → Financial Periods, then try again.",
+  "period_closed": "The financial period for {month}/{year} is closed. Posting and reversal are not allowed in a closed period. Reopen it under Settings → Financial Periods if permitted, then try again."
 }

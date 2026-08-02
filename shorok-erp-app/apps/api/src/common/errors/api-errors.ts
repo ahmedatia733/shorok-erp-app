@@ -121,6 +121,36 @@ export class ValidationError extends ApiError {
 }
 
 /**
+ * Reversal policy A + D: the accounting date semantics are unchanged (a
+ * reversal still posts at today's date and the period guard is still enforced),
+ * but the failure is no longer a generic validation error. It names the month
+ * and tells the user where to open the period.
+ *
+ * Deliberately keeps ERROR_CODES.VALIDATION_FAILED, HTTP 409 and
+ * `details.reason`, so every existing client and test that switches on those
+ * keeps working — only the localized message changes.
+ */
+export class PeriodNotOpenError extends ApiError {
+  constructor(year: number, month: number) {
+    super(ERROR_CODES.VALIDATION_FAILED, 409, "errors.period_not_open", {
+      reason: "period_not_open",
+      year,
+      month,
+    });
+  }
+}
+
+export class PeriodClosedError extends ApiError {
+  constructor(year: number, month: number) {
+    super(ERROR_CODES.VALIDATION_FAILED, 409, "errors.period_closed", {
+      reason: "period_closed",
+      year,
+      month,
+    });
+  }
+}
+
+/**
  * Warning (HTTP 409) that a posting would drive a treasury/bank account below
  * zero. Policy is warn-only: the client re-sends with acknowledgeNegativeBalance
  * to proceed. Distinct code so the web can open the confirmation modal rather

@@ -4,7 +4,7 @@ import type { PostingRequest, PostingResult } from "@shorok/shared";
 import { AuditService } from "../audit/audit.service";
 import { TreasuryGuardService } from "./treasury-guard.service";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
-import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
+import { NotFoundError, PeriodClosedError, PeriodNotOpenError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 
 export interface PostInput extends PostingRequest {
@@ -105,10 +105,10 @@ export class PostingEngine {
       select: { id: true, status: true },
     });
     if (!period) {
-      throw new ValidationError({ reason: "period_not_open", year, month });
+      throw new PeriodNotOpenError(year, month);
     }
     if (period.status !== "OPEN") {
-      throw new ValidationError({ reason: "period_closed", year, month });
+      throw new PeriodClosedError(year, month);
     }
 
     // ── 4. Accounts: leaf + active; party required on AR/AP control ──────────
