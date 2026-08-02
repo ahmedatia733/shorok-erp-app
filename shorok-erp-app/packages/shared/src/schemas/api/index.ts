@@ -7,6 +7,7 @@ export * from "./customers";
 export * from "./expenses";
 export * from "./factory-ledger";
 export * from "./fixed-assets";
+export * from "./historical-returns";
 export * from "./import";
 export * from "./inventory";
 export * from "./journal";

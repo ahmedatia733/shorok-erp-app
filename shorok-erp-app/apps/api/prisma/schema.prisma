@@ -273,6 +273,8 @@ model User {
   transfersConfirmed       TreasuryTransfer[]    @relation("TransferConfirmedBy")
   transfersCancelled       TreasuryTransfer[]    @relation("TransferCancelledBy")
 
+  historicalReturnArchivesImported HistoricalSalesReturnArchive[] @relation("HistoricalArchiveImportedBy")
+
   @@map("users")
 }
 
@@ -405,6 +407,8 @@ model ProductVariant {
   salesInvoiceLines    SalesInvoiceLine[]
   salesReturnLines     SalesReturnLine[]        @relation("SalesReturnLineVariant")
   purchaseReturnLines  PurchaseReturnLine[]     @relation("PurchaseReturnLineVariant")
+
+  historicalReturnArchiveLines HistoricalSalesReturnArchiveLine[] @relation("HistoricalArchiveLineVariant")
 
   @@unique([skuId, sizeMetersPerBoard])
   @@index([skuId])
@@ -912,6 +916,8 @@ model Customer {
   salesInvoices   SalesInvoice[]
   receiptVouchers ReceiptVoucher[]
   salesReturns    SalesReturn[]         @relation("SalesReturnCustomer")
+
+  historicalReturnArchives HistoricalSalesReturnArchive[] @relation("HistoricalArchiveCustomer")
 
   @@map("customers")
 }
@@ -1643,4 +1649,106 @@ model CutoverImportRow {
   @@unique([batchId, sourceKey])
   @@index([entityType, entityId])
   @@map("cutover_import_rows")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HISTORICAL SALES-RETURN ARCHIVE — pre-cutover (July 2026) paper returns.
+//
+// These are NOT documents. They are a faithful record of what six July source
+// rows said, kept so the business can see its return history in the Returns
+// screen. Their financial and stock effect is ALREADY inside the approved
+// 2026-08-01 opening balances and the 2026-08-01 physical count, so posting
+// them again would double-count the customer balance and the inventory.
+//
+// The contract is the ABSENCE of posting: there is deliberately no
+// journalEntryId, no customerTransactionId, no inventory linkage, no status
+// lifecycle and no confirm/cancel. The module that serves these tables imports
+// neither PostingModule nor InventoryModule, and a test asserts that.
+//
+// Rows are written once by a one-time importer and never change: there is no
+// updatedAt and no write API. A repeat import is refused by sourceFingerprint.
+// ─────────────────────────────────────────────────────────────────────────────
+model HistoricalReturnImportBatch {
+  id              String    @id @default(uuid()) @db.Uuid
+  batchKey        String    @unique @map("batch_key") @db.VarChar(120)
+  sourceSystem    String    @map("source_system") @db.VarChar(120)
+  sourceFileHash  String    @map("source_file_hash") @db.VarChar(64)
+  sourceSheet     String    @map("source_sheet") @db.VarChar(120)
+  expectedRows    Int       @map("expected_rows")
+  importedRows    Int       @default(0) @map("imported_rows")
+  status          String    @db.VarChar(20) // RUNNING | COMPLETED | FAILED
+  operator        String    @db.VarChar(120)
+  approver        String    @db.VarChar(120)
+  approvalDate    DateTime  @map("approval_date") @db.Date
+  reconciliation  Json?
+  codeRevision    String?   @map("code_revision") @db.VarChar(60)
+  importerVersion String    @map("importer_version") @db.VarChar(20)
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  archives HistoricalSalesReturnArchive[]
+
+  @@index([status])
+  @@map("historical_return_import_batches")
+}
+
+model HistoricalSalesReturnArchive {
+  id                       String   @id @default(uuid()) @db.Uuid
+  archiveNumber            BigInt   @unique @default(autoincrement()) @map("archive_number")
+  /// sha256 of the canonical source row. The duplicate gate: a second import
+  /// of the same row is refused by this constraint, not by application luck.
+  sourceFingerprint        String   @unique @map("source_fingerprint") @db.VarChar(64)
+  importBatchId            String   @map("import_batch_id") @db.Uuid
+  sourceSystem             String   @map("source_system") @db.VarChar(120)
+  sourceFileHash           String   @map("source_file_hash") @db.VarChar(64)
+  sourceSheet              String   @map("source_sheet") @db.VarChar(120)
+  sourceRow                Int      @map("source_row")
+  sourceReference          String   @map("source_reference") @db.VarChar(160)
+  documentDate             DateTime @map("document_date") @db.Date
+  /// Set only when the source name resolves to exactly one customer. Left null
+  /// rather than guessed — the snapshot below always carries what the source said.
+  customerId               String?  @map("customer_id") @db.Uuid
+  customerSourceReference  String   @map("customer_source_reference") @db.VarChar(200)
+  /// The July invoice number as written on the paper, when the source had one.
+  /// Never invented: the source recorded no invoice number for these six rows.
+  originalInvoiceReference String?  @map("original_invoice_reference") @db.VarChar(120)
+  grossValue               Decimal  @map("gross_value") @db.Decimal(14, 2)
+  notes                    String?  @db.VarChar(1000)
+  immutable                Boolean  @default(true)
+  importedBy               String   @map("imported_by") @db.Uuid
+  importedAt               DateTime @default(now()) @map("imported_at") @db.Timestamptz(6)
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch    HistoricalReturnImportBatch        @relation(fields: [importBatchId], references: [id], onDelete: Restrict)
+  customer Customer?                          @relation("HistoricalArchiveCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  importer User                               @relation("HistoricalArchiveImportedBy", fields: [importedBy], references: [id], onDelete: Restrict)
+  lines    HistoricalSalesReturnArchiveLine[]
+
+  @@index([importBatchId])
+  @@index([customerId])
+  @@index([documentDate(sort: Desc)])
+  @@map("historical_sales_return_archives")
+}
+
+model HistoricalSalesReturnArchiveLine {
+  id                 String   @id @default(uuid()) @db.Uuid
+  historicalReturnId String   @map("historical_return_id") @db.Uuid
+  lineNumber         Int      @map("line_number")
+  /// Set only on an exact code + exact board-size match; never a partial code.
+  productVariantId   String?  @map("product_variant_id") @db.Uuid
+  productSourceCode  String   @map("product_source_code") @db.VarChar(60)
+  boards             Decimal  @db.Decimal(14, 4)
+  /// boards x board size — the same canonical rule the rest of the system uses.
+  canonicalMeters    Decimal  @map("canonical_meters") @db.Decimal(14, 4)
+  unitPrice          Decimal? @map("unit_price") @db.Decimal(14, 2)
+  lineValue          Decimal  @map("line_value") @db.Decimal(14, 2)
+  sourceReference    String   @map("source_reference") @db.VarChar(160)
+
+  archive        HistoricalSalesReturnArchive @relation(fields: [historicalReturnId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant?              @relation("HistoricalArchiveLineVariant", fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@unique([historicalReturnId, lineNumber])
+  @@index([historicalReturnId])
+  @@index([productVariantId])
+  @@map("historical_sales_return_archive_lines")
 }
