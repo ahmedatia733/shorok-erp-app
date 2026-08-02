@@ -317,8 +317,14 @@ export class CutoverService {
         decisionId: s.decisionId,
         entityType: "INVENTORY_OPENING",
         entityId: variantId,
-        action: "CREATED",
-        sourceReference: s.sourceKey,
+        action: s.valuationAdjustmentApplied !== 0 ? "CREATED_VALUATION_ADJUSTED" : "CREATED",
+        // Provenance keeps the source price, the original computed value, the
+        // adjustment and the final value, so the 0.30 is auditable per row.
+        sourceReference:
+          s.valuationAdjustmentApplied !== 0
+            ? `${s.sourceKey}|price=${s.pricePerMeter}|srcValue=${s.sourceRowValue}` +
+              `|adj=${s.valuationAdjustmentApplied}|finalValue=${s.rowValue}`
+            : s.sourceKey,
         approvedKey: s.approvedKey,
       });
     }

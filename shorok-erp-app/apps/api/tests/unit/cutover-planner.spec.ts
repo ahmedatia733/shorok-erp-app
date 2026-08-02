@@ -727,3 +727,161 @@ describe("C6 — opening journal policies", () => {
     expect(ar[0].partyRef).toBe("SYNTHETIC ALPHA");
   });
 });
+
+describe("approved valuation rounding", () => {
+  // Two stocked rows: 5 boards x 2m x 8 = 80, and 3 boards x 2m x 10 = 60.
+  const twoRows = (over: Partial<CutoverManifest> = {}) =>
+    manifest({
+      productRows: [
+        product(),
+        product({ decisionId: "SYN-P2", sourceKey: "syn/prod/2", approvedCode: "SYN8" }),
+      ] as never,
+      inventoryRows: [
+        stock(),
+        stock({
+          decisionId: "SYN-I2", sourceKey: "syn/inv/2", approvedCode: "SYN8",
+          boards: 3, canonicalMeters: 6, pricePerMeter: 10, rowValue: 60,
+        }),
+      ] as never,
+      expectedTotals: {
+        ...manifest().expectedTotals,
+        inventoryImportRowCount: 2, inventoryBoards: 8, inventoryMeters: 16,
+        inventoryValue: 140,
+      },
+      ...over,
+    });
+
+  const adjustment = (amount: number) => ({
+    amount,
+    reason: "PRINTED_PDF_TOTAL_ROUNDING",
+    approvedBy: "OTONOM — Business Owner",
+    approvedAt: "2026-08-02",
+  });
+
+  it("applies the approved adjustment to the HIGHEST-value positive row only", () => {
+    // 80 + 60 = 140; approved total 139.7 ⇒ adjustment −0.30.
+    const plan = planCutover(
+      twoRows({
+        valuationRoundingAdjustment: adjustment(-0.3),
+        expectedTotals: { ...twoRows().expectedTotals, inventoryValue: 139.7 },
+      }),
+    );
+    const adjusted = plan.stock.filter((s) => s.valuationAdjustmentApplied !== 0);
+    expect(adjusted).toHaveLength(1);
+    expect(adjusted[0].code).toBe("SYN9");        // the 80 row, not the 60 row
+    expect(adjusted[0].sourceRowValue).toBe(80);
+    expect(adjusted[0].valuationAdjustmentApplied).toBe(-0.3);
+    expect(adjusted[0].rowValue).toBe(79.7);
+    // The subledger now equals the approved total exactly.
+    expect(plan.reconciliation.inventoryValue).toBe(139.7);
+    // Quantities are untouched.
+    expect(plan.reconciliation.inventoryBoards).toBe(8);
+    expect(plan.reconciliation.inventoryMeters).toBe(16);
+  });
+
+  it("is deterministic and idempotent — same manifest, same row, same result", () => {
+    const m = twoRows({
+      valuationRoundingAdjustment: adjustment(-0.3),
+      expectedTotals: { ...twoRows().expectedTotals, inventoryValue: 139.7 },
+    });
+    const a = planCutover(m);
+    const b = planCutover(m);
+    expect(a.stock.map((s) => [s.code, s.rowValue, s.valuationAdjustmentApplied]))
+      .toEqual(b.stock.map((s) => [s.code, s.rowValue, s.valuationAdjustmentApplied]));
+    expect(a.manifestHash).toBe(b.manifestHash);
+  });
+
+  it("refuses an adjustment that does not actually reconcile", () => {
+    expectRefusal(
+      () =>
+        planCutover(
+          twoRows({
+            valuationRoundingAdjustment: adjustment(-0.5),
+            expectedTotals: { ...twoRows().expectedTotals, inventoryValue: 139.7 },
+          }),
+        ),
+      CUTOVER_ERROR.VALUATION_ADJUSTMENT_MISMATCH,
+    );
+  });
+
+  it("refuses when there is no positive-quantity row to carry the adjustment", () => {
+    expectRefusal(
+      () =>
+        planCutover(
+          manifest({
+            inventoryRows: [
+              stock({ boards: 0, canonicalMeters: 0, pricePerMeter: 0, rowValue: 0 }),
+            ] as never,
+            valuationRoundingAdjustment: adjustment(-0.3),
+            expectedTotals: {
+              ...manifest().expectedTotals,
+              inventoryBoards: 0, inventoryMeters: 0, inventoryValue: -0.3,
+            },
+          }),
+        ),
+      CUTOVER_ERROR.VALUATION_ADJUSTMENT_TARGET_MISSING,
+    );
+  });
+
+  it("leaves every row untouched when no adjustment is declared", () => {
+    const plan = planCutover(twoRows());
+    expect(plan.stock.every((s) => s.valuationAdjustmentApplied === 0)).toBe(true);
+    expect(plan.stock.every((s) => s.rowValue === s.sourceRowValue)).toBe(true);
+  });
+});
+
+describe("master-only customers (legacy records with no approved replacement)", () => {
+  const withMasterOnly = (over: Record<string, unknown> = {}) =>
+    manifest({
+      customerRows: [
+        customer(),
+        customer({
+          decisionId: "LEG-1", sourceKey: "legacy/cust/1",
+          normalizedApprovedKey: "LEGACY|L001", approvedCode: "L001",
+          approvedAmount: 0, sourceAmount: 0,
+          openingBalanceScope: "MASTER_ONLY", ...over,
+        }),
+      ] as never,
+    });
+
+  it("preserves them without changing the approved opening totals", () => {
+    const plan = planCutover(withMasterOnly());
+    expect(plan.customers).toHaveLength(2);
+    expect(plan.reconciliation.masterOnlyCustomerCount).toBe(1);
+    // The approved totals are untouched by preserving a customer.
+    expect(plan.reconciliation.customerDebitCount).toBe(1);
+    expect(plan.reconciliation.customerDebitTotal).toBe(1000);
+    expect(plan.reconciliation.customerNetAr).toBe(1000);
+  });
+
+  it("refuses a master-only customer that carries a balance", () => {
+    expectRefusal(
+      () => planCutover(withMasterOnly({ approvedAmount: 500 })),
+      CUTOVER_ERROR.MASTER_ONLY_CUSTOMER_HAS_BALANCE,
+    );
+  });
+
+  it("gives a master-only customer no journal line", () => {
+    const gl = {
+      entity: "GL", decisionId: "SYN-G1", sourceFileId: "synthetic.xlsx",
+      sourceSheetOrPage: "gl", sourceRow: 1, sourceKey: "syn/gl/1",
+      normalizedApprovedKey: "EQUITY", approvalStatus: "APPROVED",
+      accountCode: "SYN-EQ", debit: 0, credit: 1080,
+    };
+    const base = withMasterOnly();
+    const plan = planCutover(
+      manifest({
+        customerRows: base.customerRows as never,
+        importScope: "FULL_OPENING_IMPORT",
+        balancingPolicy: "REQUIRE_FULL_TRIAL_BALANCE",
+        openingGlRows: [gl] as never,
+        expectedTotals: { ...manifest().expectedTotals, journalMustPost: true },
+      }),
+    );
+    // Only the opening customer gets an AR line; the preserved one gets none.
+    const ar = plan.journalLines.filter((l) => l.accountCode === "SYN-AR");
+    expect(ar).toHaveLength(1);
+    expect(ar[0].partyRef).toBe("SYNTHETIC ALPHA");
+    expect(plan.reconciliation.journalBalanced).toBe(true);
+  });
+});

@@ -38,6 +38,20 @@ export const customerRowSchema = rowBase.extend({
   side: z.enum(["DEBIT", "CREDIT"]),
   sourceAmount: MONEY,
   approvedAmount: MONEY.nonnegative(),
+  /**
+   * `OPENING_BALANCE` rows come from the approved opening source and carry a
+   * real balance; they are what the expected customer totals reconcile against.
+   *
+   * `MASTER_ONLY` rows are genuine legacy customers with no approved
+   * replacement. They are preserved as customer records at **zero** balance so
+   * no history is lost, and they are deliberately excluded from the opening
+   * totals — otherwise preserving a customer would silently change the AR
+   * figures the owner approved.
+   */
+  openingBalanceScope: z
+    .enum(["OPENING_BALANCE", "MASTER_ONLY"])
+    .optional()
+    .default("OPENING_BALANCE"),
 }).strict();
 
 export const productRowSchema = rowBase.extend({
@@ -163,6 +177,21 @@ export const cutoverManifestSchema = z
 
     /** Must be 0 for execute. Any non-zero value refuses. */
     unresolvedDecisions: z.number().int().nonnegative(),
+
+    /**
+     * The printed PDF grand total is authoritative, but the sum of the
+     * per-row valuations can differ from it by a rounding remainder. That
+     * remainder is never silently absorbed: it is declared here, approved, and
+     * applied to exactly one deterministically chosen row.
+     */
+    valuationRoundingAdjustment: z
+      .object({
+        amount: MONEY,
+        reason: z.string().min(1).max(120),
+        approvedBy: z.string().min(1).max(120),
+        approvedAt: ISO_DATE,
+      })
+      .optional(),
 
     /**
      * Account codes the opening journal posts to. Resolved against the live

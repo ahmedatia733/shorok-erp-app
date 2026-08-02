@@ -40,6 +40,8 @@ export interface PlannedCustomer {
   nameAr: string;
   side: "DEBIT" | "CREDIT";
   amount: number;
+  /** MASTER_ONLY rows are preserved at zero balance and excluded from totals. */
+  masterOnly: boolean;
 }
 
 export interface PlannedVariant {
@@ -67,6 +69,10 @@ export interface PlannedStock {
   canonicalMeters: number;
   pricePerMeter: number;
   rowValue: number;
+  /** Row value as computed from the source price, before any adjustment. */
+  sourceRowValue: number;
+  /** Approved rounding applied to THIS row (0 on every other row). */
+  valuationAdjustmentApplied: number;
   /** True when boards and meters are both zero: master data only, no movement. */
   zeroQuantity: boolean;
 }
@@ -80,6 +86,8 @@ export interface PlannedJournalLine {
 }
 
 export interface Reconciliation {
+  /** Legacy customers preserved as master records at zero balance. */
+  masterOnlyCustomerCount: number;
   customerDebitCount: number;
   customerDebitTotal: number;
   customerCreditCount: number;
@@ -203,6 +211,12 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
     if (row.approvedCode.length > 20) {
       throw new CutoverRefusal(CUTOVER_ERROR.CUSTOMER_CODE_TOO_LONG, { decisionId: row.decisionId });
     }
+    if (row.openingBalanceScope === "MASTER_ONLY" && money(row.approvedAmount) !== 0) {
+      // A preserved legacy customer must not smuggle in an old balance.
+      throw new CutoverRefusal(CUTOVER_ERROR.MASTER_ONLY_CUSTOMER_HAS_BALANCE, {
+        decisionId: row.decisionId,
+      });
+    }
     return {
       decisionId: row.decisionId,
       sourceKey: row.sourceKey,
@@ -211,6 +225,7 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
       nameAr: row.approvedName,
       side: row.side,
       amount: money(row.approvedAmount),
+      masterOnly: row.openingBalanceScope === "MASTER_ONLY",
     };
   });
 
@@ -283,13 +298,53 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
       canonicalMeters: canonical,
       pricePerMeter: money(row.pricePerMeter),
       rowValue: money(row.rowValue),
+      sourceRowValue: money(row.rowValue),
+      valuationAdjustmentApplied: 0,
       zeroQuantity,
     };
   });
 
+  // ── approved valuation rounding ─────────────────────────────────────────
+  // The printed PDF total is authoritative. Where the per-row valuations sum to
+  // something different, the remainder is applied to ONE row chosen
+  // deterministically — the highest-value positive-quantity row, ties broken by
+  // approved key — so the same manifest always adjusts the same row.
+  const adj = manifest.valuationRoundingAdjustment;
+  if (adj) {
+    const amount = money(adj.amount);
+    const target = stock
+      .filter((s) => !s.zeroQuantity && s.rowValue > 0)
+      .sort((a, b) => b.rowValue - a.rowValue || (a.approvedKey < b.approvedKey ? -1 : 1))[0];
+    if (!target) {
+      throw new CutoverRefusal(CUTOVER_ERROR.VALUATION_ADJUSTMENT_TARGET_MISSING);
+    }
+    const before = sumMoney(stock.map((s) => s.rowValue));
+    const expectedValue = money(expected.inventoryValue);
+    if (money(before + amount) !== expectedValue) {
+      // The declared adjustment must be exactly the one that reconciles the
+      // subledger to the approved total — never a number that merely looks close.
+      throw new CutoverRefusal(CUTOVER_ERROR.VALUATION_ADJUSTMENT_MISMATCH, {
+        sumBefore: before,
+        declared: amount,
+        expected: expectedValue,
+      });
+    }
+    target.rowValue = money(target.rowValue + amount);
+    target.valuationAdjustmentApplied = amount;
+    warnings.push({
+      code: CUTOVER_WARNING.VALUATION_ROUNDING_APPLIED,
+      decisionId: target.decisionId,
+      note: `${adj.reason}: ${amount} applied to the highest-value row; approved by ${adj.approvedBy} on ${adj.approvedAt}`,
+    });
+  }
+
   // ── reconciliation against the manifest's own approved expectations ──────
-  const debit = customers.filter((c) => c.side === "DEBIT");
-  const credit = customers.filter((c) => c.side === "CREDIT");
+  // Only opening-balance rows count towards the approved totals; preserved
+  // master-only customers are reported separately.
+  const opening = customers.filter((c) => !c.masterOnly);
+  const masterOnly = customers.filter((c) => c.masterOnly);
+  const debit = opening.filter((c) => c.side === "DEBIT");
+  const credit = opening.filter((c) => c.side === "CREDIT");
   const debitTotal = sumMoney(debit.map((c) => c.amount));
   const creditTotal = sumMoney(credit.map((c) => c.amount));
   const boards = sumQty(stock.map((s) => s.boards));
@@ -468,6 +523,7 @@ export function planCutover(manifest: CutoverManifest): CutoverPlan {
     journalMustPost,
     warnings,
     reconciliation: {
+      masterOnlyCustomerCount: masterOnly.length,
       customerDebitCount: debit.length,
       customerDebitTotal: debitTotal,
       customerCreditCount: credit.length,
