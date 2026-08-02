@@ -88,6 +88,19 @@ describe("no shipped form can leak a password into a URL", () => {
     // Both defences must remain: no pre-hydration submit, and no GET fallback.
     expect(source).toMatch(/<form[^>]*method="post"/);
     expect(source).toMatch(/disabled=\{submitting \|\| !hydrated\}/);
-    expect(source).toMatch(/useEffect\(\(\) => setHydrated\(true\), \[\]\)/);
+    expect(source).toMatch(/setHydrated\(true\)/);
+  });
+
+  it("the login form adopts input typed before hydration instead of dropping it", () => {
+    const source = readFileSync(
+      join(APP_ROOT, "app/[locale]/(auth)/login/page.tsx"),
+      "utf8",
+    );
+    // Without this the controlled inputs submit empty strings and the user is
+    // told their credentials are invalid while they are visible on screen.
+    expect(source).toMatch(/formRef/);
+    expect(source).toMatch(/elements\.namedItem/);
+    expect(source).toMatch(/if \(typedPhone\) setPhone\(typedPhone\)/);
+    expect(source).toMatch(/if \(typedPassword\) setPassword\(typedPassword\)/);
   });
 });

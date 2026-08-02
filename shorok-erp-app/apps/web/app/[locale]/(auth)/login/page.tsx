@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import type { AppLocale } from "../../../../i18n";
@@ -45,7 +45,25 @@ export default function LoginPage() {
   // submission ever does escape (an Enter key in an older browser, a future
   // refactor) the credentials travel in a request body rather than a URL.
   const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    // Anything typed before this point exists only in the DOM. These are
+    // controlled inputs, so React's state is still empty, and submitting would
+    // send two blank strings — the server answers 400 and the user is told
+    // their input is invalid while looking straight at it. Adopt what they
+    // already typed rather than discarding it.
+    const form = formRef.current;
+    if (form) {
+      const typed = (name: string) =>
+        (form.elements.namedItem(name) as HTMLInputElement | null)?.value ?? "";
+      const typedPhone = typed("phone");
+      const typedPassword = typed("password");
+      if (typedPhone) setPhone(typedPhone);
+      if (typedPassword) setPassword(typedPassword);
+    }
+    setHydrated(true);
+  }, []);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -84,7 +102,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={onSubmit} method="post" className="space-y-4" noValidate>
+        <form ref={formRef} onSubmit={onSubmit} method="post" className="space-y-4" noValidate>
           <div>
             <Label htmlFor="phone">{t("phoneLabel")}</Label>
             <Input
