@@ -5,6 +5,7 @@ import { LoggerModule } from "nestjs-pino";
 import { AcceptLanguageResolver, I18nModule, QueryResolver } from "nestjs-i18n";
 import * as path from "node:path";
 import { loadEnv } from "./config/env";
+import { LOG_REDACT_OPTIONS } from "./common/logging/log-redaction";
 import { ApiErrorFilter } from "./common/filters/api-error.filter";
 import { BranchScopeGuard } from "./common/guards/branch-scope.guard";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
@@ -60,6 +61,9 @@ import { AccountingStatementsModule } from "./modules/accounting-statements/acco
             : { target: "pino-pretty", options: { colorize: true } },
         customProps: (req) => ({ requestId: (req as { id?: string }).id }),
         autoLogging: { ignore: (req) => req.url === "/health" },
+        // Without this pino serialises whole headers, so every authenticated
+        // request logged a replayable bearer token.
+        redact: LOG_REDACT_OPTIONS,
       },
     }),
     I18nModule.forRoot({
