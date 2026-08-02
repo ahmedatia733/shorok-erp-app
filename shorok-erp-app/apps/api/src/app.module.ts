@@ -38,12 +38,14 @@ import { SalesRepresentativesModule } from "./modules/sales-representatives/sale
 import { ReceiptVouchersModule } from "./modules/receipt-vouchers/receipt-vouchers.module";
 import { TreasuriesModule } from "./modules/treasuries/treasuries.module";
 import { PostingModule } from "./modules/posting/posting.module";
+import { CutoverModule } from "./modules/cutover/cutover.module";
 import { PeriodsModule } from "./modules/periods/periods.module";
 import { ConfigurationModule } from "./modules/configuration/configuration.module";
 import { AccountingStatementsModule } from "./modules/accounting-statements/accounting-statements.module";
 
 @Module({
   imports: [
+    CutoverModule,
     ConfigModule.forRoot({
       isGlobal: true,
       validate: loadEnv,
