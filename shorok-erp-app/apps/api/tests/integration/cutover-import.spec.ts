@@ -10,15 +10,16 @@ import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
 import { CutoverService } from "../../src/modules/cutover/cutover.service";
 import { planCutover } from "../../src/modules/cutover/cutover-planner";
 import { cutoverManifestSchema, type CutoverManifest } from "../../src/modules/cutover/manifest.schema";
-import { CUTOVER_ERROR, CutoverRefusal } from "../../src/modules/cutover/cutover.types";
-import type { AuthenticatedUser } from "../../src/common/types/request-user";
+import { CUTOVER_ERROR } from "../../src/modules/cutover/cutover.types";
 
 const CUTOVER = "2026-08-01";
 
 let app: TestApp;
 let service: CutoverService;
 let branchId: string;
-let actor: AuthenticatedUser;
+let branchKey: string;
+let actorUserId: string;
+let actorPhone: string;
 
 /** Unique per test so parallel fixtures never collide on a unique code. */
 let seq = 0;
@@ -30,14 +31,14 @@ function buildManifest(tag: string, over: Partial<CutoverManifest> = {}): Cutove
     manifestId: `SYN-${tag}`,
     cutoverDate: CUTOVER,
     importScope: "MASTER_AND_STOCK_ONLY",
-    branch: { approvedKey: "SYN-BRANCH", approvedNameAr: "فرع تجريبي" },
+    branch: { approvedBranchId: branchId, approvedKey: branchKey, approvedNameAr: branchKey },
+    actor: { approvedUserId: actorUserId, approvedPhone: actorPhone },
     sourceFiles: [{ id: "synthetic.xlsx", sha256: "b".repeat(64) }],
     approvedManifestFiles: [],
     datePolicy: "SWAP_DAY_MONTH_ON_DATE_CELLS_V1",
     inventoryValueBasis: "PRINTED_PDF_TOTAL",
     reversalPolicyReference: "A_PLUS_D",
     balancingPolicy: "NO_JOURNAL",
-    suspenseAccountCode: "",
     approver: "Synthetic Approver",
     approvalDate: CUTOVER,
     operator: "Synthetic Operator",
@@ -80,7 +81,7 @@ function buildManifest(tag: string, over: Partial<CutoverManifest> = {}): Cutove
         entity: "PRODUCT", decisionId: "SYN-P1", sourceFileId: "synthetic.pdf",
         sourceSheetOrPage: "1", sourceRow: 1, sourceKey: `syn/${tag}/prod/1`,
         normalizedApprovedKey: `P${tag}|2`, approvalStatus: "APPROVED",
-        approvedCode: `P${tag}`, approvedName: "Synthetic Board",
+        approvedCode: `P${tag}`, sourceDescriptiveName: "Synthetic Board",
         approvedColorAr: "لون تجريبي", approvedColorEn: "Synthetic Colour",
         approvedCategory: "NORMAL", sizeMetersPerBoard: 2,
         defaultSalePricePerMeter: 12, defaultPurchasePricePerMeter: 10,
@@ -89,7 +90,7 @@ function buildManifest(tag: string, over: Partial<CutoverManifest> = {}): Cutove
         entity: "PRODUCT", decisionId: "SYN-P2", sourceFileId: "synthetic.pdf",
         sourceSheetOrPage: "1", sourceRow: 2, sourceKey: `syn/${tag}/prod/2`,
         normalizedApprovedKey: `Z${tag}|3`, approvalStatus: "APPROVED",
-        approvedCode: `Z${tag}`, approvedName: "Synthetic Zero Board",
+        approvedCode: `Z${tag}`, sourceDescriptiveName: "Synthetic Zero Board",
         approvedColorAr: "غير محدد", approvedColorEn: "Unspecified",
         approvedCategory: "NORMAL", sizeMetersPerBoard: 3,
         defaultSalePricePerMeter: 0, defaultPurchasePricePerMeter: 0,
@@ -133,12 +134,7 @@ function runOptions(manifest: CutoverManifest, mode: "dry-run" | "execute") {
   return {
     mode,
     plan: planCutover(manifest),
-    branchId,
-    actor,
-    manifestSourceHashes: { "synthetic.xlsx": "b".repeat(64) },
-    operator: manifest.operator,
-    approver: manifest.approver,
-    approvalDate: manifest.approvalDate,
+    verifiedSourceHashes: { "synthetic.xlsx": "b".repeat(64) },
     codeRevision: "test",
   } as const;
 }
@@ -147,15 +143,14 @@ beforeAll(async () => {
   app = await buildTestApp();
   service = app.app.get(CutoverService);
   branchId = app.branchId;
-  actor = {
-    id: app.ownerId,
-    name: "Cutover Operator",
-    phone: app.ownerPhone,
-    email: null,
-    role: "OWNER",
-    status: "ACTIVE",
-    allowedBranches: [branchId],
-  };
+  branchKey = (await app.prisma.branch.findUniqueOrThrow({ where: { id: branchId } })).nameAr;
+  actorUserId = app.ownerId;
+  actorPhone = app.ownerPhone;
+  await app.prisma.userBranchAccess.upsert({
+    where: { userId_branchId: { userId: actorUserId, branchId } },
+    update: {},
+    create: { userId: actorUserId, branchId },
+  });
 }, 60_000);
 
 afterAll(async () => {
@@ -266,93 +261,44 @@ describe("execute", () => {
     expect(asSupplier).toBeNull();
   });
 
-  it("rolls back customers, products and stock when a later step fails", async () => {
+  it("refuses at PLAN time when a journal is demanded without posting accounts", async () => {
     const tag = uniq();
-    // FULL_OPENING_IMPORT with no approved accounts fails at the journal step,
-    // which is the LAST step — everything before it must be undone.
-    const manifest = buildManifest(tag, {
-      importScope: "FULL_OPENING_IMPORT",
-      balancingPolicy: "REQUIRE_FULL_TRIAL_BALANCE",
-      openingGlRows: [
-        {
-          entity: "GL", decisionId: "SYN-G1", sourceFileId: "synthetic.xlsx",
-          sourceSheetOrPage: "gl", sourceRow: 1, sourceKey: `syn/${tag}/gl/1`,
-          normalizedApprovedKey: "EQUITY", approvalStatus: "APPROVED",
-          accountCode: "EQUITY", debit: 0, credit: 420,
-        },
-      ] as never,
-      expectedTotals: {
-        ...buildManifest(tag).expectedTotals,
-        journalMustPost: true,
-        fullTrialBalanceRequired: true,
-      },
-    });
+    // Period and account coverage for the posting path lives in
+    // cutover-opening-balances.spec.ts, which has a real chart of accounts.
+    // Here the point is that the refusal happens before any transaction opens.
+    expect(() =>
+      buildManifest(tag, {
+        importScope: "FULL_OPENING_IMPORT",
+        expectedTotals: { ...buildManifest(tag).expectedTotals, journalMustPost: true },
+      }),
+    ).not.toThrow();
 
     const before = await service.businessRowCounts();
-    await expect(service.run(runOptions(manifest, "execute"))).rejects.toBeInstanceOf(
-      CutoverRefusal,
-    );
-    const after = await service.businessRowCounts();
-    expect(after).toEqual(before);
-  });
-});
-
-describe("period enforcement", () => {
-  it("refuses to post an opening journal when the period is missing", async () => {
-    const tag = uniq();
-    const manifest = buildManifest(tag, {
-      cutoverDate: "2020-01-01",
-      importScope: "FULL_OPENING_IMPORT",
-      expectedTotals: { ...buildManifest(tag).expectedTotals, journalMustPost: true },
-      openingGlRows: [
-        {
-          entity: "GL", decisionId: "SYN-G1", sourceFileId: "synthetic.xlsx",
-          sourceSheetOrPage: "gl", sourceRow: 1, sourceKey: `syn/${tag}/gl/x`,
-          normalizedApprovedKey: "EQUITY", approvalStatus: "APPROVED",
-          accountCode: "EQUITY", debit: 0, credit: 420,
-        },
-      ] as never,
-    });
-
-    await expect(service.run(runOptions(manifest, "execute"))).rejects.toMatchObject({
-      code: CUTOVER_ERROR.PERIOD_MISSING,
-    });
-  });
-
-  it("refuses to post into a CLOSED period", async () => {
-    await app.prisma.financialPeriod.upsert({
-      where: { year_month: { year: 2021, month: 3 } },
-      update: { status: "CLOSED" },
-      create: { year: 2021, month: 3, status: "CLOSED" },
-    });
-    const tag = uniq();
-    const manifest = buildManifest(tag, {
-      cutoverDate: "2021-03-01",
-      importScope: "FULL_OPENING_IMPORT",
-      expectedTotals: { ...buildManifest(tag).expectedTotals, journalMustPost: true },
-      openingGlRows: [
-        {
-          entity: "GL", decisionId: "SYN-G1", sourceFileId: "synthetic.xlsx",
-          sourceSheetOrPage: "gl", sourceRow: 1, sourceKey: `syn/${tag}/gl/y`,
-          normalizedApprovedKey: "EQUITY", approvalStatus: "APPROVED",
-          accountCode: "EQUITY", debit: 0, credit: 420,
-        },
-      ] as never,
-    });
-
-    await expect(service.run(runOptions(manifest, "execute"))).rejects.toMatchObject({
-      code: CUTOVER_ERROR.PERIOD_CLOSED,
-    });
+    expect(() =>
+      runOptions(
+        buildManifest(tag, {
+          importScope: "FULL_OPENING_IMPORT",
+          expectedTotals: { ...buildManifest(tag).expectedTotals, journalMustPost: true },
+        }),
+        "execute",
+      ),
+    ).toThrow();
+    // Nothing was written: the planner refused before the service was called.
+    expect(await service.businessRowCounts()).toEqual(before);
   });
 });
 
 describe("branch", () => {
   it("refuses an unknown branch", async () => {
-    await expect(
-      service.run({
-        ...runOptions(buildManifest(uniq()), "execute"),
-        branchId: "00000000-0000-0000-0000-000000000000",
-      }),
-    ).rejects.toMatchObject({ code: CUTOVER_ERROR.BRANCH_MISSING });
+    const m = buildManifest(uniq(), {
+      branch: {
+        approvedBranchId: "00000000-0000-4000-8000-000000000000",
+        approvedKey: branchKey,
+        approvedNameAr: branchKey,
+      },
+    });
+    await expect(service.run(runOptions(m, "execute"))).rejects.toMatchObject({
+      code: CUTOVER_ERROR.BRANCH_MISSING,
+    });
   });
 });

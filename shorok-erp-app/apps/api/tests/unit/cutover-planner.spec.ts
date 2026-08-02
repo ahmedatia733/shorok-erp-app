@@ -48,7 +48,7 @@ function product(over: Partial<Record<string, unknown>> = {}) {
     normalizedApprovedKey: "SYN9|2",
     approvalStatus: "APPROVED",
     approvedCode: "SYN9",
-    approvedName: "Synthetic Board",
+    sourceDescriptiveName: "Synthetic Board",
     approvedColorAr: "لون تجريبي",
     approvedColorEn: "Synthetic Colour",
     approvedCategory: "NORMAL",
@@ -86,14 +86,22 @@ function manifest(over: Partial<CutoverManifest> = {}): CutoverManifest {
     manifestId: "SYN-MANIFEST-1",
     cutoverDate: CUTOVER,
     importScope: "MASTER_AND_STOCK_ONLY",
-    branch: { approvedKey: "SYN-BRANCH", approvedNameAr: "فرع تجريبي" },
+    branch: {
+      approvedBranchId: "11111111-1111-4111-8111-111111111111",
+      approvedKey: "SYN-BRANCH",
+      approvedNameAr: "فرع تجريبي",
+    },
+    actor: {
+      approvedUserId: "22222222-2222-4222-8222-222222222222",
+      approvedPhone: "+201555000001",
+    },
+    postingAccounts: { arControlCode: "SYN-AR", inventoryControlCode: "SYN-INV" },
     sourceFiles: [{ id: "synthetic.xlsx", sha256: "a".repeat(64) }],
     approvedManifestFiles: [],
     datePolicy: "SWAP_DAY_MONTH_ON_DATE_CELLS_V1",
     inventoryValueBasis: "PRINTED_PDF_TOTAL",
     reversalPolicyReference: "A_PLUS_D",
     balancingPolicy: "NO_JOURNAL",
-    suspenseAccountCode: "",
     approver: "Synthetic Approver",
     approvalDate: "2026-08-01",
     operator: "Synthetic Operator",
@@ -454,7 +462,7 @@ describe("opening journal", () => {
     const plan = planCutover(withJournal([gl()]));
     expect(plan.journalMustPost).toBe(true);
     expect(plan.reconciliation.journalBalanced).toBe(true);
-    const arLines = plan.journalLines.filter((l) => l.accountCode === "AR_CONTROL");
+    const arLines = plan.journalLines.filter((l) => l.accountCode === "SYN-AR");
     expect(arLines).toHaveLength(1);
     expect(arLines[0].partyType).toBe("CUSTOMER");
     expect(arLines[0].partyRef).toBeTruthy();
@@ -530,5 +538,192 @@ describe("CLI argument handling", () => {
       () => runManifestGates({ mode: "audit", verbose: false, dumpPrivate: false }),
       CUTOVER_ERROR.MANIFEST_MISSING,
     );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C6 — production-readiness corrections
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("C6 — approved branch and actor are bound in the plan", () => {
+  it("carries the approved branch id, actor id and phone through to the plan", () => {
+    const plan = planCutover(manifest());
+    expect(plan.approvedBranchId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(plan.approvedActorUserId).toBe("22222222-2222-4222-8222-222222222222");
+    expect(plan.approvedActorPhone).toBe("+201555000001");
+  });
+
+  it("carries the real operator, approver and approval date — never a placeholder", () => {
+    const plan = planCutover(manifest());
+    expect(plan.operator).toBe("Synthetic Operator");
+    expect(plan.approver).toBe("Synthetic Approver");
+    expect(plan.approvalDate).toBe("2026-08-01");
+    expect(plan.operator).not.toBe("cli");
+    expect(plan.approver).not.toBe("cli");
+  });
+
+  it("refuses a manifest with no branch id at all", () => {
+    expect(() =>
+      manifest({ branch: { approvedKey: "X", approvedNameAr: "Y" } as never }),
+    ).toThrow();
+  });
+
+  it("refuses a manifest with no actor block", () => {
+    expect(() => manifest({ actor: undefined as never })).toThrow();
+  });
+});
+
+describe("C6 — product name is the colour, and nothing is silently discarded", () => {
+  it("never persists a separate product name — the colour is the name", () => {
+    const plan = planCutover(manifest());
+    const v = plan.variants[0];
+    expect(v.colorAr).toBe("لون تجريبي");
+    expect(v.colorEn).toBe("Synthetic Colour");
+    // The descriptive text survives as evidence but is explicitly not a name.
+    expect(v.sourceDescriptiveName).toBe("Synthetic Board");
+    expect(Object.keys(v)).not.toContain("nameAr");
+  });
+
+  it("rejects an unknown `approvedName` key rather than ignoring it", () => {
+    // The schema is strict, so an approver who fills the old field is told,
+    // instead of having their value silently dropped.
+    expect(() =>
+      manifest({ productRows: [{ ...product(), approvedName: "X" }] as never }),
+    ).toThrow();
+  });
+});
+
+describe("C6 — opening journal policies", () => {
+  const glLine = (over: Record<string, unknown> = {}) => ({
+    entity: "GL",
+    decisionId: "SYN-G1",
+    sourceFileId: "synthetic.xlsx",
+    sourceSheetOrPage: "gl",
+    sourceRow: 1,
+    sourceKey: "syn/gl/1",
+    normalizedApprovedKey: "EQUITY",
+    approvalStatus: "APPROVED",
+    accountCode: "SYN-EQ",
+    debit: 0,
+    credit: 0,
+    ...over,
+  });
+
+  const posting = (over: Partial<CutoverManifest> = {}) =>
+    manifest({
+      importScope: "FULL_OPENING_IMPORT",
+      expectedTotals: { ...manifest().expectedTotals, journalMustPost: true },
+      ...over,
+    });
+
+  it("refuses to post when the posting accounts are not declared", () => {
+    expectRefusal(
+      () =>
+        planCutover(
+          posting({
+            balancingPolicy: "REQUIRE_FULL_TRIAL_BALANCE",
+            postingAccounts: undefined,
+            openingGlRows: [glLine({ credit: 1080 })] as never,
+          }),
+        ),
+      CUTOVER_ERROR.POSTING_ACCOUNTS_NOT_DECLARED,
+    );
+  });
+
+  it("REQUIRE_FULL_TRIAL_BALANCE refuses an unbalanced journal", () => {
+    expectRefusal(
+      () =>
+        planCutover(
+          posting({
+            balancingPolicy: "REQUIRE_FULL_TRIAL_BALANCE",
+            openingGlRows: [glLine({ credit: 1 })] as never,
+          }),
+        ),
+      CUTOVER_ERROR.JOURNAL_UNBALANCED,
+    );
+  });
+
+  it("NO_JOURNAL cannot be combined with a manifest that demands a journal", () => {
+    expectRefusal(
+      () => planCutover(posting({ balancingPolicy: "NO_JOURNAL" })),
+      CUTOVER_ERROR.BALANCING_POLICY_NOT_PERMITTED,
+    );
+  });
+
+  it("TEMPORARY_OPENING_EQUITY refuses when the equity block is not declared", () => {
+    expectRefusal(
+      () => planCutover(posting({ balancingPolicy: "TEMPORARY_OPENING_EQUITY" })),
+      CUTOVER_ERROR.TEMPORARY_EQUITY_NOT_DECLARED,
+    );
+  });
+
+  it("TEMPORARY_OPENING_EQUITY refuses an amount that does not actually balance", () => {
+    expectRefusal(
+      () =>
+        planCutover(
+          posting({
+            balancingPolicy: "TEMPORARY_OPENING_EQUITY",
+            temporaryOpeningEquity: {
+              accountCode: "SYN-EQ",
+              approvedAmount: 999,
+              side: "CREDIT",
+              approver: "Synthetic Approver",
+              clearanceDeadline: "2026-12-31",
+            },
+          }),
+        ),
+      CUTOVER_ERROR.TEMPORARY_EQUITY_AMOUNT_MISMATCH,
+    );
+  });
+
+  it("TEMPORARY_OPENING_EQUITY posts only the exact approved amount", () => {
+    // Dr AR 1000 + Dr inventory 80 = 1080, so the approved credit must be 1080.
+    const plan = planCutover(
+      posting({
+        balancingPolicy: "TEMPORARY_OPENING_EQUITY",
+        temporaryOpeningEquity: {
+          accountCode: "SYN-EQ",
+          approvedAmount: 1080,
+          side: "CREDIT",
+          approver: "Synthetic Approver",
+          clearanceDeadline: "2026-12-31",
+        },
+      }),
+    );
+    const eq = plan.journalLines.filter((l) => l.accountCode === "SYN-EQ");
+    expect(eq).toHaveLength(1);
+    expect(eq[0].credit).toBe(1080);
+    expect(plan.reconciliation.journalBalanced).toBe(true);
+    expect(plan.warnings.some((w) => w.code === "TEMPORARY_OPENING_EQUITY_USED")).toBe(true);
+  });
+
+  it("labels a MASTER_AND_STOCK_ONLY run as NOT_ACCOUNTING_COMPLETE", () => {
+    const plan = planCutover(manifest());
+    expect(plan.accountingComplete).toBe(false);
+    expect(plan.warnings.some((w) => w.code === "NOT_ACCOUNTING_COMPLETE")).toBe(true);
+  });
+
+  it("marks a posting run as accounting-complete", () => {
+    const plan = planCutover(
+      posting({
+        balancingPolicy: "REQUIRE_FULL_TRIAL_BALANCE",
+        openingGlRows: [glLine({ credit: 1080 })] as never,
+      }),
+    );
+    expect(plan.accountingComplete).toBe(true);
+    expect(plan.warnings.some((w) => w.code === "NOT_ACCOUNTING_COMPLETE")).toBe(false);
+  });
+
+  it("gives every AR line its own customer party reference", () => {
+    const plan = planCutover(
+      posting({
+        balancingPolicy: "REQUIRE_FULL_TRIAL_BALANCE",
+        openingGlRows: [glLine({ credit: 1080 })] as never,
+      }),
+    );
+    const ar = plan.journalLines.filter((l) => l.accountCode === "SYN-AR");
+    expect(ar).toHaveLength(1);
+    expect(ar[0].partyType).toBe("CUSTOMER");
+    expect(ar[0].partyRef).toBe("SYNTHETIC ALPHA");
   });
 });
