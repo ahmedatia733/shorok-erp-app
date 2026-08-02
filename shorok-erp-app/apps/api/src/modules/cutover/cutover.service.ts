@@ -1,5 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { MovementType, Prisma } from "@prisma/client";
+// Value imports, not `import type`: Nest reads these classes from the emitted
+// decorator metadata to resolve the constructor, and a type-only import is
+// erased at compile time.
 import { PrismaService } from "../../prisma/prisma.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
 import type { AuthenticatedUser } from "../../common/types/request-user";
@@ -59,7 +62,7 @@ export class CutoverService {
   ) {}
 
   async run(options: ExecuteOptions): Promise<ExecuteResult> {
-    const { plan, mode } = options;
+    const { mode } = options;
 
     try {
       return await this.prisma.runInTransaction(
@@ -275,7 +278,7 @@ export class CutoverService {
     // Posting is intentionally NOT implemented as a raw insert. When the
     // accountant supplies the missing credit balances the manifest becomes
     // balanced and this branch posts through PostingEngine with the outer tx.
-    let journalEntryId: string | null = null;
+    const journalEntryId: string | null = null;
     if (plan.journalMustPost) {
       if (plan.journalLines.length === 0) {
         throw new CutoverRefusal(CUTOVER_ERROR.JOURNAL_UNBALANCED, { reason: "no_lines" });

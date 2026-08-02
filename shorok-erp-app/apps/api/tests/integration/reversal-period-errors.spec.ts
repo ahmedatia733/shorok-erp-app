@@ -12,7 +12,7 @@
 import { I18nService } from "nestjs-i18n";
 import { buildTestApp, teardownTestApp, type TestApp } from "./test-app";
 import { PostingEngine } from "../../src/modules/posting/posting.engine";
-import { ApiError } from "../../src/common/errors/api-errors";
+import type { ApiError } from "../../src/common/errors/api-errors";
 import type { AuthenticatedUser } from "../../src/common/types/request-user";
 
 let app: TestApp;
