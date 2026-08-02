@@ -39,15 +39,15 @@ async function leafAccount(code: string, nameAr: string) {
 function postAt(entryDate: string) {
   return posting.post({
     actor,
-    branchId: app.branchId,
     entryDate,
     entryType: "MANUAL",
     sourceType: "MANUAL",
     description: "period guard probe",
     idempotencyKey: `period-probe:${entryDate}:${Math.random()}`,
+    // branchId is a per-LINE dimension, not a request-level field.
     lines: [
-      { accountId: debitAccountId, debit: "10.00", credit: "0.00" },
-      { accountId: creditAccountId, debit: "0.00", credit: "10.00" },
+      { accountId: debitAccountId, debit: "10.00", credit: "0.00", branchId: app.branchId },
+      { accountId: creditAccountId, debit: "0.00", credit: "10.00", branchId: app.branchId },
     ],
   });
 }
@@ -56,7 +56,15 @@ beforeAll(async () => {
   app = await buildTestApp();
   posting = app.app.get(PostingEngine);
   i18n = app.app.get(I18nService);
-  actor = { id: app.ownerId, role: "OWNER", branchIds: [app.branchId] } as AuthenticatedUser;
+  actor = {
+    id: app.ownerId,
+    name: "Period Probe",
+    phone: app.ownerPhone,
+    email: null,
+    role: "OWNER",
+    status: "ACTIVE",
+    allowedBranches: [app.branchId],
+  };
   const suffix = Date.now().toString(36);
   debitAccountId = (await leafAccount(`PGD-${suffix}`, "حساب اختبار مدين")).id;
   creditAccountId = (await leafAccount(`PGC-${suffix}`, "حساب اختبار دائن")).id;

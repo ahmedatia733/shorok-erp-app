@@ -147,7 +147,15 @@ beforeAll(async () => {
   app = await buildTestApp();
   service = app.app.get(CutoverService);
   branchId = app.branchId;
-  actor = { id: app.ownerId, role: "OWNER", branchIds: [branchId] } as AuthenticatedUser;
+  actor = {
+    id: app.ownerId,
+    name: "Cutover Operator",
+    phone: app.ownerPhone,
+    email: null,
+    role: "OWNER",
+    status: "ACTIVE",
+    allowedBranches: [branchId],
+  };
 }, 60_000);
 
 afterAll(async () => {
