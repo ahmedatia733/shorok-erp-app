@@ -15,7 +15,11 @@ import { AppModule } from "../../app.module";
 import { CutoverService } from "./cutover.service";
 import { CutoverRefusal } from "./cutover.types";
 import { formatSummary, parseArgs, runDatabaseGates, runManifestGates } from "./cutover.cli";
-import { assertServerIdentityMatches, parseDatabaseUrl } from "./db-safety";
+import {
+  assertRuntimeIdentityMatches,
+  assertServerIdentityMatches,
+  parseDatabaseUrl,
+} from "./db-safety";
 
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
@@ -31,9 +35,24 @@ async function main(): Promise<number> {
 
   // The importer connects ONLY to the URL it was handed, never to an ambient one.
   const target = parseDatabaseUrl(args.databaseUrl);
+  if (targetMode === "production") {
+    assertRuntimeIdentityMatches(process.env, {
+      expectedProjectId: String(process.env.CUTOVER_TARGET_PROJECT_ID ?? ""),
+      expectedEnvironmentId: String(process.env.CUTOVER_TARGET_ENVIRONMENT_ID ?? ""),
+      expectedDatabaseServiceName: String(process.env.CUTOVER_TARGET_SERVICE_NAME ?? ""),
+    });
+    console.log(
+      `runtime identity: project=${process.env.RAILWAY_PROJECT_ID} ` +
+        `env=${process.env.RAILWAY_ENVIRONMENT_ID} dbService=${process.env.CUTOVER_TARGET_SERVICE_NAME}`,
+    );
+  }
   const probe = new PrismaClient({ datasources: { db: { url: args.databaseUrl! } } });
   try {
-    const identity = await assertServerIdentityMatches(target, (sql) => probe.$queryRawUnsafe(sql));
+    const identity = await assertServerIdentityMatches(
+      target,
+      (sql) => probe.$queryRawUnsafe(sql),
+      targetMode,
+    );
     console.log(
       `server identity : db=${identity.currentDatabase} user=${identity.currentUser} ` +
         `addr=${identity.serverAddress ?? "socket"} pg=${identity.version.split(" ")[1] ?? "?"}`,

@@ -16,7 +16,12 @@
 import { PrismaClient } from "@prisma/client";
 import { CutoverRefusal } from "./cutover.types";
 import { existsSync } from "node:fs";
-import { assertServerIdentityMatches, assertTargetIsSafe, parseDatabaseUrl } from "./db-safety";
+import {
+  assertRuntimeIdentityMatches,
+  assertServerIdentityMatches,
+  assertTargetIsSafe,
+  parseDatabaseUrl,
+} from "./db-safety";
 import { prepareFreshDatabase } from "./fresh-db";
 
 interface Args {
@@ -61,9 +66,26 @@ async function main(): Promise<number> {
   console.log(`database        : ${target.masked}`);
   console.log(`target mode     : ${targetMode.toUpperCase()}`);
 
+  if (targetMode === "production") {
+    // Inside the private network the runtime's own identity is the proof.
+    assertRuntimeIdentityMatches(process.env, {
+      expectedProjectId: String(process.env.CUTOVER_TARGET_PROJECT_ID ?? ""),
+      expectedEnvironmentId: String(process.env.CUTOVER_TARGET_ENVIRONMENT_ID ?? ""),
+      expectedDatabaseServiceName: String(process.env.CUTOVER_TARGET_SERVICE_NAME ?? ""),
+    });
+    console.log(
+      `runtime identity: project=${process.env.RAILWAY_PROJECT_ID} ` +
+        `env=${process.env.RAILWAY_ENVIRONMENT_ID} dbService=${process.env.CUTOVER_TARGET_SERVICE_NAME}`,
+    );
+  }
+
   const prisma = new PrismaClient({ datasources: { db: { url: args.databaseUrl! } } });
   try {
-    const identity = await assertServerIdentityMatches(target, (sql) => prisma.$queryRawUnsafe(sql));
+    const identity = await assertServerIdentityMatches(
+      target,
+      (sql) => prisma.$queryRawUnsafe(sql),
+      targetMode,
+    );
     console.log(
       `server identity : db=${identity.currentDatabase} user=${identity.currentUser} ` +
         `addr=${identity.serverAddress ?? "socket"} pg=${identity.version.split(" ")[1] ?? "?"}`,

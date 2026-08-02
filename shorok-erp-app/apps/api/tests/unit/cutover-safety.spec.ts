@@ -8,6 +8,7 @@ import { join } from "node:path";
 import {
   assertLocalTargetIsSafe,
   assertProductionTargetIsAuthorized,
+  assertRuntimeIdentityMatches,
   assertServerIdentityMatches,
   assertTargetIsSafe,
   parseDatabaseUrl,
@@ -448,5 +449,107 @@ describe("production target mode", () => {
     expect(source).not.toMatch(/rlwy\.net:\d+/);
     expect(source).not.toMatch(/postgres:[^@\s]{8,}@/);
     expect(source).not.toMatch(/proxy\.rlwy/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Private-network transport: runtime identity replaces the loopback rule
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("mode-aware server identity probe", () => {
+  const target = parseDatabaseUrl("postgresql://u:p@db.internal:5432/railway");
+  // Railway's private network answers from a private IPv6 address.
+  const privateNetwork = async () => [
+    { db: "railway", usr: "postgres", addr: "fd12:7651:2772:1::7", port: 5432, ver: "PostgreSQL 18.4" },
+  ];
+
+  it("LOCAL mode still refuses a non-loopback server address", async () => {
+    await expect(
+      assertServerIdentityMatches(target, privateNetwork, "local"),
+    ).rejects.toMatchObject({ code: CUTOVER_ERROR.DB_HOST_NOT_LOOPBACK });
+  });
+
+  it("PRODUCTION mode accepts a private-network address", async () => {
+    const id = await assertServerIdentityMatches(target, privateNetwork, "production");
+    expect(id.currentDatabase).toBe("railway");
+    expect(id.serverAddress).toBe("fd12:7651:2772:1::7");
+  });
+
+  it("defaults to LOCAL when no mode is passed", async () => {
+    await expect(assertServerIdentityMatches(target, privateNetwork)).rejects.toMatchObject({
+      code: CUTOVER_ERROR.DB_HOST_NOT_LOOPBACK,
+    });
+  });
+
+  it("BOTH modes still refuse a database-name mismatch", async () => {
+    const wrongDb = async () => [
+      { db: "some_other_db", usr: "postgres", addr: "127.0.0.1", port: 5432, ver: "PostgreSQL 18.4" },
+    ];
+    await expect(assertServerIdentityMatches(target, wrongDb, "local")).rejects.toMatchObject({
+      code: CUTOVER_ERROR.DB_IDENTITY_MISMATCH,
+    });
+    await expect(assertServerIdentityMatches(target, wrongDb, "production")).rejects.toMatchObject({
+      code: CUTOVER_ERROR.DB_IDENTITY_MISMATCH,
+    });
+  });
+});
+
+describe("runtime identity guard", () => {
+  const expectation = {
+    expectedProjectId: "proj-1",
+    expectedEnvironmentId: "env-1",
+    expectedDatabaseServiceName: "Postgres-J7au",
+  };
+  const goodEnv = {
+    RAILWAY_PROJECT_ID: "proj-1",
+    RAILWAY_ENVIRONMENT_ID: "env-1",
+    CUTOVER_TARGET_SERVICE_NAME: "Postgres-J7au",
+  } as NodeJS.ProcessEnv;
+
+  function expectCode(fn: () => unknown, code: string) {
+    try {
+      fn();
+    } catch (e) {
+      expect((e as CutoverRefusal).code).toBe(code);
+      return;
+    }
+    throw new Error(`expected refusal ${code}, nothing thrown`);
+  }
+
+  it("passes when project, environment and database service all match", () => {
+    expect(() => assertRuntimeIdentityMatches(goodEnv, expectation)).not.toThrow();
+  });
+
+  it("refuses when the runtime carries no Railway identity at all", () => {
+    expectCode(
+      () => assertRuntimeIdentityMatches({} as NodeJS.ProcessEnv, expectation),
+      CUTOVER_ERROR.RUNTIME_IDENTITY_UNAVAILABLE,
+    );
+  });
+
+  it("refuses a runner deployed into the wrong project", () => {
+    expectCode(
+      () => assertRuntimeIdentityMatches({ ...goodEnv, RAILWAY_PROJECT_ID: "other" }, expectation),
+      CUTOVER_ERROR.RUNTIME_PROJECT_MISMATCH,
+    );
+  });
+
+  it("refuses a runner deployed into the wrong environment", () => {
+    expectCode(
+      () => assertRuntimeIdentityMatches({ ...goodEnv, RAILWAY_ENVIRONMENT_ID: "staging" }, expectation),
+      CUTOVER_ERROR.RUNTIME_ENVIRONMENT_MISMATCH,
+    );
+  });
+
+  it("refuses when the target database service name differs", () => {
+    expectCode(
+      () => assertRuntimeIdentityMatches({ ...goodEnv, CUTOVER_TARGET_SERVICE_NAME: "Postgres" }, expectation),
+      CUTOVER_ERROR.RUNTIME_SERVICE_NAME_MISMATCH,
+    );
+    // Missing entirely is refused too, not treated as "no opinion".
+    expectCode(
+      () => assertRuntimeIdentityMatches({ ...goodEnv, CUTOVER_TARGET_SERVICE_NAME: undefined }, expectation),
+      CUTOVER_ERROR.RUNTIME_SERVICE_NAME_MISMATCH,
+    );
   });
 });

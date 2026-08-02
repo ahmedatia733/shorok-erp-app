@@ -121,6 +121,7 @@ type IdentityQuery = (sql: string) => Promise<Array<Record<string, unknown>>>;
 export async function assertServerIdentityMatches(
   target: ParsedTarget,
   query: IdentityQuery,
+  targetMode: TargetMode = "local",
 ): Promise<ServerIdentity> {
   const rows = await query(
     "SELECT current_database() AS db, current_user AS usr, " +
@@ -136,6 +137,7 @@ export async function assertServerIdentityMatches(
     version: String(row.ver ?? ""),
   };
 
+  // Applies in BOTH modes: the live server must be the database that was named.
   if (identity.currentDatabase !== target.database) {
     throw new CutoverRefusal(CUTOVER_ERROR.DB_IDENTITY_MISMATCH, {
       expected: target.database,
@@ -143,14 +145,62 @@ export async function assertServerIdentityMatches(
     });
   }
 
-  // A unix-socket connection reports no address; that is loopback by definition.
-  if (identity.serverAddress && !isLoopbackAddress(identity.serverAddress)) {
-    throw new CutoverRefusal(CUTOVER_ERROR.DB_HOST_NOT_LOOPBACK, {
-      actualServerAddress: identity.serverAddress,
-    });
+  // The loopback rule is a LOCAL-mode protection: locally, a database that
+  // answers from a non-loopback address is not the local database it claimed to
+  // be. Inside a provider's private network the server legitimately answers from
+  // a private address (Railway uses private IPv6), so requiring loopback there
+  // would be meaningless. It is not skipped silently: production mode replaces
+  // it with the stronger runtime-identity checks in
+  // `assertRuntimeIdentityMatches`, which pin the exact project, environment and
+  // service rather than merely the shape of an address.
+  if (targetMode === "local") {
+    // A unix-socket connection reports no address; that is loopback by definition.
+    if (identity.serverAddress && !isLoopbackAddress(identity.serverAddress)) {
+      throw new CutoverRefusal(CUTOVER_ERROR.DB_HOST_NOT_LOOPBACK, {
+        actualServerAddress: identity.serverAddress,
+      });
+    }
   }
 
   return identity;
+}
+
+/**
+ * Production runs execute from inside the provider's private network, where the
+ * proof of "am I pointed at the right database" is not an IP shape but the
+ * runtime's own identity. Every field is compared against a value the operator
+ * declared up front, so a runner deployed into the wrong project, the wrong
+ * environment or under the wrong name cannot proceed.
+ */
+export interface RuntimeIdentityExpectation {
+  expectedProjectId: string;
+  expectedEnvironmentId: string;
+  expectedDatabaseServiceName: string;
+}
+
+export function assertRuntimeIdentityMatches(
+  env: NodeJS.ProcessEnv,
+  expectation: RuntimeIdentityExpectation,
+): void {
+  const projectId = env.RAILWAY_PROJECT_ID;
+  const environmentId = env.RAILWAY_ENVIRONMENT_ID;
+  if (!projectId || !environmentId) {
+    throw new CutoverRefusal(CUTOVER_ERROR.RUNTIME_IDENTITY_UNAVAILABLE);
+  }
+  if (projectId !== expectation.expectedProjectId) {
+    throw new CutoverRefusal(CUTOVER_ERROR.RUNTIME_PROJECT_MISMATCH, { actual: projectId });
+  }
+  if (environmentId !== expectation.expectedEnvironmentId) {
+    throw new CutoverRefusal(CUTOVER_ERROR.RUNTIME_ENVIRONMENT_MISMATCH, {
+      actual: environmentId,
+    });
+  }
+  const dbServiceName = env.CUTOVER_TARGET_SERVICE_NAME;
+  if (dbServiceName !== expectation.expectedDatabaseServiceName) {
+    throw new CutoverRefusal(CUTOVER_ERROR.RUNTIME_SERVICE_NAME_MISMATCH, {
+      actual: String(dbServiceName ?? ""),
+    });
+  }
 }
 
 function isLoopbackAddress(address: string): boolean {
