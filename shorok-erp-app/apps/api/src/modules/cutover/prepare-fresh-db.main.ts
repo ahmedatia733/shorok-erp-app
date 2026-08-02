@@ -82,7 +82,17 @@ async function main(): Promise<number> {
         report.after.productVariants === 0 &&
         report.after.suppliers === 0;
       console.log(`demo rows zero  : ${clean ? "YES" : "NO"}`);
-      console.log(`system config   : ${report.retained.systemRoleAccounts > 0 ? "RETAINED" : "MISSING"}`);
+      // A count of 0 is a real finding, not a failure of this command: the
+      // migrations create the chart of accounts but assign no system_role, so
+      // AR_CONTROL and friends still have to be configured before an opening
+      // journal can post.
+      console.log(
+        `chart of accounts: ${report.retained.accounts} retained, ` +
+          `${report.retained.systemRoleAccounts} with a system role` +
+          (report.retained.systemRoleAccounts === 0
+            ? " (system roles not yet assigned — configure before posting)"
+            : ""),
+      );
       return clean ? 0 : 1;
     }
     return 0;
