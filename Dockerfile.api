@@ -33,4 +33,11 @@ ENV CHROME_PATH=/usr/bin/chromium
 EXPOSE 3001
 # Run migrations then start the API.
 # PORT is injected by Railway; main.ts reads process.env.PORT.
-CMD ["sh", "-c", "pnpm --filter @shorok/api exec prisma migrate deploy && pnpm --filter @shorok/api exec prisma db seed && node apps/api/dist/main"]
+#
+# `prisma db seed` is deliberately NOT run here. The seed creates demo data —
+# RED-01/BLU-01/GRN-01 products, a demo branch and supplier, and an OWNER whose
+# password is a literal in prisma/seed.ts. Running it on container start meant
+# every deploy re-injected that demo data into production, including a live
+# administrator account with a password that is public in this repository.
+# Seeding is a local development action; run it explicitly with `pnpm seed`.
+CMD ["sh", "-c", "pnpm --filter @shorok/api exec prisma migrate deploy && node apps/api/dist/main"]
