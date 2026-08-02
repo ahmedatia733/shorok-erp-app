@@ -114,7 +114,10 @@ export default function SettingsUsersPage() {
               {success}
             </Alert>
           ) : null}
-          <form onSubmit={onCreate} className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {/* method="post" so that a submission landing before React hydrates
+              sends the new user's password in a request body — never in the URL,
+              where it would persist in history, Referer headers and access logs. */}
+          <form onSubmit={onCreate} method="post" className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <Label htmlFor="name">{t("name")}</Label>
               <Input

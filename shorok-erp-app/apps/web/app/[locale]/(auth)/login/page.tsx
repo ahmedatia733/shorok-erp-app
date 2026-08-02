@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import type { AppLocale } from "../../../../i18n";
@@ -34,6 +34,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
+
+  // The markup is server-rendered, so the form is on screen and clickable before
+  // React attaches `onSubmit`. A click in that window used to trigger the
+  // browser's own submission, which for a method-less form is a GET — putting
+  // the password in the URL, and from there into browser history, the Referer
+  // header of every following request, and the web server's access logs.
+  // Blocking submission until hydration removes that window entirely; the
+  // `method="post"` on the form is the second line of defence, so that if a
+  // submission ever does escape (an Enter key in an older browser, a future
+  // refactor) the credentials travel in a request body rather than a URL.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -72,7 +84,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="space-y-4" noValidate>
+        <form onSubmit={onSubmit} method="post" className="space-y-4" noValidate>
           <div>
             <Label htmlFor="phone">{t("phoneLabel")}</Label>
             <Input
@@ -107,7 +119,7 @@ export default function LoginPage() {
           </div>
 
           <div className="flex items-center justify-between gap-3 pt-2">
-            <Button type="submit" disabled={submitting} className="grow">
+            <Button type="submit" disabled={submitting || !hydrated} className="grow">
               {submitting ? t("submitting") : t("submit")}
             </Button>
             <LanguageSwitcher />
