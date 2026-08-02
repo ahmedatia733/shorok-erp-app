@@ -220,6 +220,8 @@ model Branch {
   purchaseReturns    PurchaseReturn[]         @relation("PurchaseReturnBranch")
   treasuries         Treasury[]
 
+  cutoverImportBatches CutoverImportBatch[]
+
   @@map("branches")
 }
 
@@ -1586,4 +1588,59 @@ model TreasuryTransfer {
   @@index([destinationTreasuryId])
   @@index([status])
   @@map("treasury_transfers")
+}
+
+// ====================== Cutover import provenance =====================
+// Additive-only. Records WHAT an opening-data import run did, so a repeated
+// execute can be refused and every created row traced back to its approved
+// source row. Never stores source documents, customer names or balances.
+
+model CutoverImportBatch {
+  id              String    @id @default(uuid()) @db.Uuid
+  manifestId      String    @map("manifest_id") @db.VarChar(120)
+  manifestHash    String    @map("manifest_hash") @db.VarChar(64)
+  sourceHashes    Json      @map("source_hashes")
+  mode            String    @db.VarChar(20) // AUDIT | DRY_RUN | EXECUTE
+  scope           String    @db.VarChar(40) // FULL_OPENING_IMPORT | MASTER_AND_STOCK_ONLY | AUDIT_ONLY
+  status          String    @db.VarChar(20) // RUNNING | COMPLETED | FAILED
+  operator        String    @db.VarChar(120)
+  approver        String    @db.VarChar(120)
+  approvalDate    DateTime  @map("approval_date") @db.Date
+  cutoverDate     DateTime  @map("cutover_date") @db.Date
+  branchId        String    @map("branch_id") @db.Uuid
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(6)
+  failureCode     String?   @map("failure_code") @db.VarChar(80)
+  failureReason   String?   @map("failure_reason") @db.VarChar(500)
+  reconciliation  Json?
+  codeRevision    String?   @map("code_revision") @db.VarChar(60)
+  importerVersion String    @map("importer_version") @db.VarChar(20)
+
+  branch Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  rows   CutoverImportRow[]
+
+  // One committed EXECUTE per manifest hash + scope. DRY_RUN never commits, so
+  // it can never occupy this slot.
+  @@unique([manifestHash, scope, mode])
+  @@index([status])
+  @@map("cutover_import_batches")
+}
+
+model CutoverImportRow {
+  id              String   @id @default(uuid()) @db.Uuid
+  batchId         String   @map("batch_id") @db.Uuid
+  sourceKey       String   @map("source_key") @db.VarChar(160)
+  decisionId      String   @map("decision_id") @db.VarChar(60)
+  entityType      String   @map("entity_type") @db.VarChar(40)
+  entityId        String?  @map("entity_id") @db.Uuid
+  action          String   @db.VarChar(30) // CREATED | REUSED | SKIPPED_ZERO_QTY | EXCLUDED
+  sourceReference String   @map("source_reference") @db.VarChar(160)
+  approvedKey     String   @map("approved_key") @db.VarChar(160)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch CutoverImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, sourceKey])
+  @@index([entityType, entityId])
+  @@map("cutover_import_rows")
 }
