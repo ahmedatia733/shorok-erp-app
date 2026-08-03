@@ -133,7 +133,13 @@ async function main(): Promise<void> {
     if (!b.times(new Decimal(l.size)).equals(m)) {
       throw new Error(`${l.lineKey}: ${l.boards} x ${l.size} != ${l.metres}`);
     }
-    if (!m.times(c).equals(v)) throw new Error(`${l.lineKey}: ${l.metres} x ${l.costPerMetre} != ${l.value}`);
+    // A weighted-average cost carries 4 decimals, so metres x cost rarely lands
+    // exactly on 2. Money is 2 decimals, so the line value is the rounded figure
+    // and the check must compare against that — demanding exact equality would
+    // reject every genuine WAC that is not a round number.
+    if (!m.times(c).toDecimalPlaces(2).equals(v)) {
+      throw new Error(`${l.lineKey}: ${l.metres} x ${l.costPerMetre} rounds to ${m.times(c).toDecimalPlaces(2)}, not ${l.value}`);
+    }
     boards = boards.plus(b);
     metres = metres.plus(m);
     value = value.plus(v);

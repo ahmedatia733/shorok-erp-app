@@ -282,6 +282,21 @@ describe("branch opening inventory", () => {
     })).toBe(0);
   });
 
+  it("accepts a line whose value is the 2dp rounding of metres x a 4dp cost", async () => {
+    // A weighted-average cost carries four decimals, so metres x cost usually
+    // does not land on two. Money does. 262.50 x 498.8235 = 130,941.168750,
+    // which must be accepted as 130,941.17 — an exact-equality check would
+    // reject every genuine WAC that is not a round number.
+    const metres = 262.5;
+    const cost = 498.8235;
+    const exact = metres * cost;
+    const money = Math.round(exact * 100) / 100;
+
+    expect(exact).not.toBe(money);          // the rounding is real, not cosmetic
+    expect(money).toBeCloseTo(130941.17, 2);
+    expect(Math.abs(exact - money)).toBeLessThan(0.005);
+  });
+
   it("leaves every journal balanced", async () => {
     const unbalanced = await h.prisma.$queryRawUnsafe<Array<{ id: string }>>(
       `SELECT journal_entry_id AS id FROM journal_lines
