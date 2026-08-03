@@ -18,7 +18,8 @@
     "cutover:import": "ts-node --transpile-only src/modules/cutover/cutover.main.ts",
     "cutover:prepare-fresh-db": "ts-node --transpile-only src/modules/cutover/prepare-fresh-db.main.ts",
     "archive:import": "ts-node --transpile-only scripts/import-historical-returns.ts",
-    "deposit:post": "ts-node --transpile-only scripts/post-capital-funded-deposit.ts"
+    "deposit:post": "ts-node --transpile-only scripts/post-capital-funded-deposit.ts",
+    "catalogue:create": "ts-node --transpile-only scripts/create-catalogue-products.ts"
   },
   "prisma": {
     "seed": "ts-node --transpile-only prisma/seed.ts"
