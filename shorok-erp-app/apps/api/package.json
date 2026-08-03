@@ -19,7 +19,8 @@
     "cutover:prepare-fresh-db": "ts-node --transpile-only src/modules/cutover/prepare-fresh-db.main.ts",
     "archive:import": "ts-node --transpile-only scripts/import-historical-returns.ts",
     "deposit:post": "ts-node --transpile-only scripts/post-capital-funded-deposit.ts",
-    "catalogue:create": "ts-node --transpile-only scripts/create-catalogue-products.ts"
+    "catalogue:create": "ts-node --transpile-only scripts/create-catalogue-products.ts",
+    "opening-inventory:import": "ts-node --transpile-only scripts/import-branch-opening-inventory.ts"
   },
   "prisma": {
     "seed": "ts-node --transpile-only prisma/seed.ts"
