@@ -54,3 +54,8 @@ shorok-erp-app/apps/api/inspect-results.txt
 # separate, explicitly approved phase (see C0 audit blocker C2).
 shorok-erp-app/apps/api/prisma/seed-excel.ts
 shorok-erp-app/apps/api/inspect-excel.ts
+
+# One-time historical importer, kept locally as a reference and never part of
+# the deployed tree. It is ignored so a broad `git add` cannot sweep it into a
+# commit or a deployment archive again.
+shorok-erp-app/apps/api/prisma/seed-legacy.ts
