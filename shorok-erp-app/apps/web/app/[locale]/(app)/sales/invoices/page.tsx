@@ -44,6 +44,7 @@ import { RepresentativeFormModal } from "../../../../../components/sales-represe
 import { apiCall, ApiClientError } from "../../../../../lib/api-client";
 import { formatDate, formatCurrency } from "../../../../../lib/format";
 import { AP_COLORS, apColorMap } from "../../../../../lib/ap-colors";
+import { revisionBadgeAr } from "../../../../../lib/invoice-revisions-client";
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -1353,7 +1354,14 @@ export default function SalesInvoicesPage() {
                         <TD>{formatDate(inv.invoiceDate, locale)}</TD>
                         <TD>{inv.dueDate ? formatDate(inv.dueDate, locale) : "—"}</TD>
                         <TD>{inv.customer?.code} — {inv.customer?.nameAr}</TD>
-                        <TD><StatusBadge status={inv.status} /></TD>
+                        <TD>
+                          <StatusBadge status={inv.status} />
+                          {revisionBadgeAr(inv.revisionNumber ?? 1) && (
+                            <span className="ms-1 inline-flex rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
+                              {revisionBadgeAr(inv.revisionNumber ?? 1)}
+                            </span>
+                          )}
+                        </TD>
                         <TD className="font-medium text-green-700">{formatCurrency(inv.grandTotal, locale)}</TD>
                         <TD>
                           {totalCost > 0 ? (

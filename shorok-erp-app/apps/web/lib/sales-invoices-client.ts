@@ -30,6 +30,9 @@ export interface SalesInvoiceRow {
   salesRepresentativeId: string | null;
   salesRepresentative: { id: string; code: string; nameAr: string } | null;
   status: "DRAFT" | "CONFIRMED" | "CANCELLED" | "PAID";
+  /** Confirmed-invoice revision: 1 = the original confirmation, never revised. */
+  revisionNumber: number;
+  lastRevisedAt: string | null;
   notes: string | null;
   subtotal: string;
   discountAmount: string;

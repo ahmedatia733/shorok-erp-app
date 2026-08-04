@@ -22,6 +22,15 @@ import { ApiClientError } from "../../../../../../lib/api-client";
 import { confirmErrorMessageAr } from "../../../../../../lib/purchase-confirm-error";
 import { isPostingConfigError } from "../../../../../../lib/posting-config";
 import { formatDate, formatCurrency } from "../../../../../../lib/format";
+import { listBranches, listVariants } from "../../../../../../lib/inventory-client";
+import { listSuppliers } from "../../../../../../lib/suppliers-client";
+import {
+  getPurchaseRevision,
+  listPurchaseRevisions,
+  revisionBadgeAr,
+} from "../../../../../../lib/invoice-revisions-client";
+import { PurchaseRevisionModal } from "../../../../../../components/invoice-revision/purchase-revision-modal";
+import { RevisionHistory } from "../../../../../../components/invoice-revision/revision-history";
 
 function autoSelectId(accounts: Awaited<ReturnType<typeof listAccounts>>, ...kws: string[]) {
   const lower = kws.map((k) => k.toLowerCase());
@@ -66,6 +75,35 @@ export default function PurchaseInvoiceDetailPage() {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmConfigError, setConfirmConfigError] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
+  // Confirmed-invoice revision — option lists load only when the form opens.
+  const [showRevision, setShowRevision] = useState(false);
+  const [revisionOptions, setRevisionOptions] = useState<{
+    suppliers: Array<{ id: string; label: string }>;
+    branches: Array<{ id: string; label: string }>;
+    variants: Array<{ id: string; label: string }>;
+  } | null>(null);
+  const [revisionBanner, setRevisionBanner] = useState<string | null>(null);
+  const [historyKey, setHistoryKey] = useState(0);
+
+  async function openRevision() {
+    setError(null);
+    try {
+      if (!revisionOptions) {
+        const [ss, bs, vs] = await Promise.all([listSuppliers(), listBranches(), listVariants()]);
+        setRevisionOptions({
+          suppliers: ss.map((x) => ({ id: x.id, label: x.nameAr })),
+          branches: bs.filter((b) => b.active).map((b) => ({ id: b.id, label: b.nameAr })),
+          variants: vs.map((v) => ({
+            id: v.id,
+            label: `${v.sku.code} — ${v.sku.colorNameAr} — ${v.sizeMetersPerBoard}`,
+          })),
+        });
+      }
+      setShowRevision(true);
+    } catch {
+      setError("تعذّر تحميل بيانات التعديل");
+    }
+  }
 
   async function handleExportPdf() {
     if (!invoice || pdfLoading) return;
@@ -138,12 +176,21 @@ export default function PurchaseInvoiceDetailPage() {
         </Button>
         <h1 className="text-xl font-bold">{invoice.invoiceNumber}</h1>
         <StatusBadge status={invoice.status} t={t} />
+        {revisionBadgeAr(invoice.revisionNumber ?? 1) && (
+          <span className="inline-flex rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
+            {revisionBadgeAr(invoice.revisionNumber ?? 1)}
+          </span>
+        )}
+        {invoice.status === "CONFIRMED" && isOwner && (
+          <Button variant="secondary" size="sm" onClick={() => void openRevision()}>تعديل الفاتورة المؤكدة</Button>
+        )}
         <Button variant="ghost" size="sm" className="ms-auto" onClick={() => void handleExportPdf()} disabled={pdfLoading}>
           {pdfLoading ? "جارِ التصدير..." : "تصدير PDF"}
         </Button>
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
+      {revisionBanner && <Alert variant="success">{revisionBanner}</Alert>}
 
       {/* Header info */}
       <Card>
@@ -301,7 +348,35 @@ export default function PurchaseInvoiceDetailPage() {
           </div>
         </Modal>
       )}
+      {invoice.status === "CONFIRMED" && (
+        <Card>
+          <CardHeader><CardTitle>سجل التعديلات</CardTitle></CardHeader>
+          <CardBody>
+            <RevisionHistory
+              key={historyKey}
+              load={() => listPurchaseRevisions(invoice.id)}
+              loadOne={(n) => getPurchaseRevision(invoice.id, n)}
+            />
+          </CardBody>
+        </Card>
+      )}
+
+      {showRevision && revisionOptions && (
+        <PurchaseRevisionModal
+          invoice={invoice}
+          suppliers={revisionOptions.suppliers}
+          branches={revisionOptions.branches}
+          variants={revisionOptions.variants}
+          onClose={() => setShowRevision(false)}
+          onRevised={(n) => {
+            setShowRevision(false);
+            setRevisionBanner(`تم اعتماد التعديل بنجاح — الفاتورة الآن النسخة ${n}. تم عكس القيود والمخزون السابق وإعادة الترحيل.`);
+            setHistoryKey((k) => k + 1);
+            void getPurchaseInvoice(invoice.id).then(setInvoice).catch(() => setError("تم التعديل، لكن تعذّر تحديث العرض"));
+          }}
+        />
+      )}
+
     </div>
   );
 }
-

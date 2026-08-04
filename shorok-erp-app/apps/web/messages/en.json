@@ -941,5 +941,47 @@
       "sourceFileHash": "File fingerprint",
       "importBatch": "Import batch"
     }
+  },
+  "invoiceRevision": {
+    "action": "Revise confirmed invoice",
+    "titleSales": "Revise confirmed sales invoice",
+    "titlePurchase": "Revise confirmed purchase invoice",
+    "historyTitle": "Revision history",
+    "versionLabel": "Revised — version {n}",
+    "badgeOnce": "revised once",
+    "badgeTwice": "revised twice",
+    "badgeMany": "revised {n} times",
+    "currentRevision": "Current version",
+    "reviewButton": "Review the revision",
+    "executeButton": "Approve and repost the invoice",
+    "backToEdit": "Back to editing",
+    "reasonLabel": "Reason for the revision",
+    "reasonRequired": "A reason is required (at least 3 characters).",
+    "blockedTitle": "This revision cannot be approved",
+    "warningsTitle": "Warnings you must acknowledge",
+    "noRevisions": "This invoice has never been revised — original version only.",
+    "sections": {
+      "header": "1. Invoice details",
+      "lines": "2. Items",
+      "stock": "3. Effect on stock",
+      "accounting": "4. Accounting effect",
+      "account": "5. Account",
+      "returns": "6. Returns",
+      "reason": "7. Reason"
+    },
+    "journal": {
+      "REVERSAL": "Reversal of the current version",
+      "REVERSAL_COGS": "Reversal of cost of sales",
+      "REPLACEMENT": "Replacement posting",
+      "REPLACEMENT_COGS": "New cost-of-sales entry",
+      "VALUATION_ADJUSTMENT": "Valuation adjustment"
+    },
+    "change": {
+      "ADDED": "added",
+      "REMOVED": "removed",
+      "CHANGED": "changed",
+      "UNCHANGED": "unchanged"
+    },
+    "success": "Revision approved — the invoice is now version {n}. The previous entries and stock were reversed and reposted."
   }
 }

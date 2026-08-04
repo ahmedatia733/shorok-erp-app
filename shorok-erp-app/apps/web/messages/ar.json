@@ -941,5 +941,47 @@
       "sourceFileHash": "بصمة الملف",
       "importBatch": "دفعة الاستيراد"
     }
+  },
+  "invoiceRevision": {
+    "action": "تعديل الفاتورة المؤكدة",
+    "titleSales": "تعديل فاتورة المبيعات المؤكدة",
+    "titlePurchase": "تعديل فاتورة المشتريات المؤكدة",
+    "historyTitle": "سجل التعديلات",
+    "versionLabel": "تم التعديل — النسخة {n}",
+    "badgeOnce": "معدلة مرة",
+    "badgeTwice": "معدلة مرتين",
+    "badgeMany": "معدلة {n} مرات",
+    "currentRevision": "النسخة الحالية",
+    "reviewButton": "مراجعة التعديل",
+    "executeButton": "اعتماد التعديل وإعادة ترحيل الفاتورة",
+    "backToEdit": "رجوع للتحرير",
+    "reasonLabel": "سبب التعديل",
+    "reasonRequired": "سبب التعديل مطلوب (٣ أحرف على الأقل).",
+    "blockedTitle": "لا يمكن اعتماد هذا التعديل",
+    "warningsTitle": "تنبيهات تحتاج إقرارك",
+    "noRevisions": "لم يتم تعديل هذه الفاتورة — النسخة الأصلية فقط.",
+    "sections": {
+      "header": "١. بيانات الفاتورة",
+      "lines": "٢. الأصناف",
+      "stock": "٣. التأثير على المخزون",
+      "accounting": "٤. التأثير المحاسبي",
+      "account": "٥. الحساب",
+      "returns": "٦. المرتجعات",
+      "reason": "٧. السبب"
+    },
+    "journal": {
+      "REVERSAL": "قيد عكس النسخة الحالية",
+      "REVERSAL_COGS": "قيد عكس تكلفة المبيعات",
+      "REPLACEMENT": "قيد إعادة الترحيل",
+      "REPLACEMENT_COGS": "قيد تكلفة المبيعات الجديد",
+      "VALUATION_ADJUSTMENT": "قيد تسوية التقييم"
+    },
+    "change": {
+      "ADDED": "بند مضاف",
+      "REMOVED": "بند محذوف",
+      "CHANGED": "تم تعديله",
+      "UNCHANGED": "بدون تغيير"
+    },
+    "success": "تم اعتماد التعديل بنجاح — الفاتورة الآن النسخة {n}. تم عكس القيود والمخزون السابق وإعادة الترحيل."
   }
 }

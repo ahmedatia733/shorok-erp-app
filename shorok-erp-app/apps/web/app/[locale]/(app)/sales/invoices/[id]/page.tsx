@@ -18,6 +18,16 @@ import {
   type SalesInvoiceDetail,
 } from "../../../../../../lib/sales-invoices-client";
 import { listAccounts, type AccountRow } from "../../../../../../lib/accounts-client";
+import { listCustomers } from "../../../../../../lib/customers-client";
+import { listBranches, listVariants } from "../../../../../../lib/inventory-client";
+import { listRepresentatives } from "../../../../../../lib/sales-representatives-client";
+import {
+  getSalesRevision,
+  listSalesRevisions,
+  revisionBadgeAr,
+} from "../../../../../../lib/invoice-revisions-client";
+import { SalesRevisionModal } from "../../../../../../components/invoice-revision/sales-revision-modal";
+import { RevisionHistory } from "../../../../../../components/invoice-revision/revision-history";
 import { downloadInvoicePdf } from "../../../../../../lib/invoice-pdf-client";
 import { ApiClientError } from "../../../../../../lib/api-client";
 import { formatDate, formatCurrency } from "../../../../../../lib/format";
@@ -306,6 +316,41 @@ export default function SalesInvoiceDetailPage() {
     })();
   }, [params.id]);
 
+  // Revision state. The option lists are only fetched when the owner actually
+  // opens the revision form, so an ordinary invoice view costs nothing extra.
+  const [showRevision, setShowRevision] = useState(false);
+  const [revisionOptions, setRevisionOptions] = useState<{
+    customers: Array<{ id: string; label: string }>;
+    branches: Array<{ id: string; label: string }>;
+    representatives: Array<{ id: string; label: string }>;
+    variants: Array<{ id: string; label: string }>;
+  } | null>(null);
+  const [revisionBanner, setRevisionBanner] = useState<string | null>(null);
+  const [historyKey, setHistoryKey] = useState(0);
+
+  async function openRevision() {
+    setError(null);
+    try {
+      if (!revisionOptions) {
+        const [cs, bs, reps, vs] = await Promise.all([
+          listCustomers(), listBranches(), listRepresentatives({ status: "active" }), listVariants(),
+        ]);
+        setRevisionOptions({
+          customers: cs.map((c) => ({ id: c.id, label: `${c.code} — ${c.nameAr}` })),
+          branches: bs.filter((b) => b.active).map((b) => ({ id: b.id, label: b.nameAr })),
+          representatives: reps.map((r) => ({ id: r.id, label: `${r.code} — ${r.nameAr}` })),
+          variants: vs.map((v) => ({
+            id: v.id,
+            label: `${v.sku.code} — ${v.sku.colorNameAr} — ${v.sizeMetersPerBoard}`,
+          })),
+        });
+      }
+      setShowRevision(true);
+    } catch {
+      setError("تعذّر تحميل بيانات التعديل");
+    }
+  }
+
   async function handleCancel() {
     if (!invoice) return;
     setCancelling(true);
@@ -355,10 +400,18 @@ export default function SalesInvoiceDetailPage() {
           </button>
           <h1 className="text-xl font-bold">SI-{invoice.invoiceNumber}</h1>
           <StatusBadge status={invoice.status} />
+          {revisionBadgeAr(invoice.revisionNumber ?? 1) && (
+            <span className="inline-flex rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800">
+              {revisionBadgeAr(invoice.revisionNumber ?? 1)}
+            </span>
+          )}
         </div>
         <div className="flex gap-2">
           {invoice.status === "DRAFT" && (isOwner || canRecord) && (
             <Button onClick={() => setShowConfirm(true)}>تأكيد الفاتورة</Button>
+          )}
+          {invoice.status === "CONFIRMED" && isOwner && (
+            <Button variant="secondary" onClick={() => void openRevision()}>تعديل الفاتورة المؤكدة</Button>
           )}
           {(invoice.status === "DRAFT" || invoice.status === "CONFIRMED") && isOwner && (
             <Button variant="ghost" onClick={() => setCancelModal(true)}>إلغاء</Button>
@@ -371,6 +424,7 @@ export default function SalesInvoiceDetailPage() {
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
+      {revisionBanner && <Alert variant="success">{revisionBanner}</Alert>}
 
       {/* Invoice header info */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -396,6 +450,15 @@ export default function SalesInvoiceDetailPage() {
                 <dt className="text-textSecondary">الحالة</dt>
                 <dd><StatusBadge status={invoice.status} /></dd>
               </div>
+              {(invoice.revisionNumber ?? 1) > 1 && (
+                <div className="flex justify-between">
+                  <dt className="text-textSecondary">النسخة</dt>
+                  <dd className="font-medium text-amber-700">
+                    تم التعديل — النسخة {invoice.revisionNumber}
+                    {invoice.lastRevisedAt ? ` (${formatDate(invoice.lastRevisedAt, locale)})` : ""}
+                  </dd>
+                </div>
+              )}
               {invoice.notes && (
                 <div className="flex justify-between">
                   <dt className="text-textSecondary">ملاحظات</dt>
@@ -563,6 +626,40 @@ export default function SalesInvoiceDetailPage() {
             </div>
           </CardBody>
         </Card>
+      )}
+
+      {/* Revision history */}
+      {invoice.status === "CONFIRMED" && (
+        <Card>
+          <CardHeader><CardTitle>سجل التعديلات</CardTitle></CardHeader>
+          <CardBody>
+            <RevisionHistory
+              key={historyKey}
+              load={() => listSalesRevisions(invoice.id)}
+              loadOne={(n) => getSalesRevision(invoice.id, n)}
+            />
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Confirmed-invoice revision */}
+      {showRevision && revisionOptions && (
+        <SalesRevisionModal
+          invoice={invoice}
+          customers={revisionOptions.customers}
+          branches={revisionOptions.branches}
+          representatives={revisionOptions.representatives}
+          variants={revisionOptions.variants}
+          onClose={() => setShowRevision(false)}
+          onRevised={(n) => {
+            setShowRevision(false);
+            setRevisionBanner(`تم اعتماد التعديل بنجاح — الفاتورة الآن النسخة ${n}. تم عكس القيود والمخزون السابق وإعادة الترحيل.`);
+            // Re-read everything from the server rather than patching state, so
+            // stock, totals and the ledger links shown are the committed ones.
+            setHistoryKey((k) => k + 1);
+            void getSalesInvoice(invoice.id).then(setInvoice).catch(() => setError("تم التعديل، لكن تعذّر تحديث العرض"));
+          }}
+        />
       )}
 
       {/* Confirm modal */}

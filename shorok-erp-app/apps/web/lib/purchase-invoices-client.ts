@@ -37,6 +37,9 @@ export interface PurchaseInvoiceRow {
   customsNumber: string | null;
   notes: string | null;
   status: "DRAFT" | "CONFIRMED" | "CANCELLED";
+  /** Confirmed-invoice revision: 1 = the original confirmation, never revised. */
+  revisionNumber: number;
+  lastRevisedAt: string | null;
   subtotal: string;
   taxAmount: string;
   grandTotal: string;
@@ -85,8 +88,11 @@ export const listPurchaseInvoices = (params: {
   return apiCall<PurchaseInvoicePage>(`/purchase-invoices?${p.toString()}`);
 };
 
+/** The detail endpoint returns the same shape as a list row, lines included. */
+export type PurchaseInvoiceDetail = PurchaseInvoiceRow;
+
 export const getPurchaseInvoice = (id: string) =>
-  apiCall<PurchaseInvoiceRow>(`/purchase-invoices/${id}`);
+  apiCall<PurchaseInvoiceDetail>(`/purchase-invoices/${id}`);
 
 export const createPurchaseInvoice = (body: {
   invoiceDate: string;
