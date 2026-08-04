@@ -173,6 +173,16 @@ describe("confirmed-invoice revision — cross-cutting guarantees", () => {
       .toBe(jSeqBefore[0]!.last_value);
   });
 
+  it("a preview answers 200, not 201 — nothing was created", async () => {
+    const { variantId } = await stocked();
+    const inv = await sell(variantId);
+    const p = await payloadFrom(inv);
+    p.lines[0]!.unitPrice = "805.00";
+    const pv = await previewFor(inv, p);
+    expect(pv.status).toBe(200);
+    expect(pv.body.committedChanges).toBe(0);
+  });
+
   it("the same preview run twice returns the same fingerprint", async () => {
     const { variantId } = await stocked();
     const inv = await sell(variantId);

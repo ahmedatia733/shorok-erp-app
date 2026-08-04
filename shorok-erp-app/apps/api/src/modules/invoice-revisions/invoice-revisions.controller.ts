@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post } from "@nestjs/common";
 import {
   ExecutePurchaseInvoiceRevisionSchema,
   ExecuteSalesInvoiceRevisionSchema,
@@ -38,8 +38,15 @@ import { PurchaseInvoiceRevisionService } from "./purchase-invoice-revision.serv
 export class SalesInvoiceRevisionsController {
   constructor(private readonly service: SalesInvoiceRevisionService) {}
 
-  /** Full calculation, zero writes. Returns the fingerprint execution requires. */
+  /**
+   * Full calculation, zero writes. Returns the fingerprint execution requires.
+   *
+   * 200, not Nest's default 201: nothing is created. A client that reads status
+   * codes must not be told a resource appeared when the whole point of this
+   * route is that none did.
+   */
   @Post(":id/revisions/preview")
+  @HttpCode(200)
   @Roles("OWNER")
   async preview(
     @Param("id") id: string,
@@ -80,7 +87,9 @@ export class SalesInvoiceRevisionsController {
 export class PurchaseInvoiceRevisionsController {
   constructor(private readonly service: PurchaseInvoiceRevisionService) {}
 
+  /** Full calculation, zero writes — 200 for the same reason as the sales route. */
   @Post(":id/revisions/preview")
+  @HttpCode(200)
   @Roles("OWNER")
   async preview(
     @Param("id") id: string,
