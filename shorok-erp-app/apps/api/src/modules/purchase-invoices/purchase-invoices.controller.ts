@@ -55,6 +55,9 @@ export class PurchaseInvoicesController {
       customsNumber: inv.customsNumber ?? null,
       notes: inv.notes ?? null,
       status: inv.status,
+      // Confirmed-invoice revision (additive): 1 = the original confirmation.
+      revisionNumber: inv.revisionNumber ?? 1,
+      lastRevisedAt: inv.lastRevisedAt ?? null,
       subtotal: inv.subtotal.toFixed(2),
       taxAmount: inv.taxAmount.toFixed(2),
       grandTotal: inv.grandTotal.toFixed(2),

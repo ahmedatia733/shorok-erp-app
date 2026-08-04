@@ -38,6 +38,7 @@ import { InvoicePdfService } from "../invoice-pdf/invoice-pdf.service";
 import { salesInvoiceToPdfData } from "../invoice-pdf/invoice-pdf.mapper";
 import { SalesRepresentativesService } from "../sales-representatives/sales-representatives.service";
 import { lineCogs } from "./sales-cogs";
+import { computeSalesLineTotals } from "./sales-line-math";
 
 @Controller("sales-invoices")
 export class SalesInvoicesController {
@@ -103,6 +104,11 @@ export class SalesInvoicesController {
         ? { id: inv.salesRepresentative.id, code: inv.salesRepresentative.code, nameAr: inv.salesRepresentative.nameAr }
         : null,
       status: inv.status,
+      // Confirmed-invoice revision (additive): 1 = the original confirmation.
+      // The list and the detail both carry it so the UI can badge a revised
+      // invoice without a second request.
+      revisionNumber: inv.revisionNumber ?? 1,
+      lastRevisedAt: inv.lastRevisedAt ?? null,
       notes: inv.notes ?? null,
       subtotal: inv.subtotal.toFixed(2),
       discountAmount: inv.discountAmount.toFixed(2),
@@ -134,59 +140,16 @@ export class SalesInvoicesController {
   }
 
   /**
-   * Per-METER sales line maths (authoritative — the client-submitted line total
-   * is never trusted). The line `quantity` is the number of BOARDS; the backend
-   * independently derives the metres from the variant's stored area per board:
-   *
-   *   totalMeters   = boards × sizeMetersPerBoard
-   *   grossLineSale = totalMeters × unitPrice(per metre)
-   *   discountAmt   = grossLineSale × discountPct/100
-   *   lineTotal     = grossLineSale − discountAmt
-   *   lineCost      = totalMeters × costPrice(per metre)
-   *
-   * `sizes` maps productVariantId → sizeMetersPerBoard (Decimal), read from the
-   * DB by the caller. All arithmetic is Decimal-safe.
+   * Per-METER sales line maths. The implementation now lives in
+   * `sales-line-math.ts` so that creation, draft editing and confirmed-invoice
+   * revision price a line through exactly one function; the behaviour and the
+   * rules it documents are unchanged.
    */
   private computeLineTotals(
     lines: CreateSalesInvoice["lines"],
     sizes: Map<string, Decimal>,
   ) {
-    return lines.map((line) => {
-      const boards = new Decimal(line.quantity);
-      const variantSize = sizes.get(line.productVariantId) ?? new Decimal(0);
-      // Effective board area (same rule as PurchaseInvoiceLine):
-      //   custom طول×عرض → lengthM×widthM;  كبير/صغير → lengthM (5.25 / 4);
-      //   omitted → the variant's stored size. Never trust a client total.
-      const lengthM = line.lengthM ? new Decimal(line.lengthM) : null;
-      const widthM = line.widthM ? new Decimal(line.widthM) : null;
-      const meters = lengthM
-        ? boards.mul(lengthM).mul(widthM ?? new Decimal(1))
-        : boards.mul(variantSize);
-      const unitPrice = new Decimal(line.unitPrice);
-      const costPrice = new Decimal(line.costPrice ?? "0");
-      const discountPct = new Decimal(line.discountPct ?? "0");
-
-      const grossLineSale = meters.mul(unitPrice);
-      const discountAmt = grossLineSale.mul(discountPct.div(100));
-      const lineTotal = grossLineSale.minus(discountAmt);
-      const lineCost = meters.mul(costPrice);
-
-      return {
-        productVariantId: line.productVariantId,
-        quantity: boards,          // boards (the user's entry)
-        lengthM,                   // persisted chosen dimensions (nullable)
-        widthM,
-        meters,                    // authoritative total metres (boards × effective area)
-        unitLabel: line.unitLabel ?? "متر",
-        unitPrice,
-        costPrice,
-        discountPct,
-        discountAmt,
-        lineTotal,
-        lineCost,
-        note: line.note ?? null,
-      };
-    });
+    return computeSalesLineTotals(lines, sizes);
   }
 
   // ─── GET /sales-invoices ──────────────────────────────────────────────

@@ -241,37 +241,39 @@ model User {
 
   branchAccesses           UserBranchAccess[]
   refreshTokens            RefreshToken[]
-  inventoryWrites          InventoryMovement[]   @relation("InventoryMovementCreatedBy")
-  ordersCreated            CustomerOrder[]       @relation("CustomerOrderCreatedBy")
-  pricesApproved           CustomerOrder[]       @relation("CustomerOrderPriceApprovedBy")
+  inventoryWrites          InventoryMovement[]       @relation("InventoryMovementCreatedBy")
+  ordersCreated            CustomerOrder[]           @relation("CustomerOrderCreatedBy")
+  pricesApproved           CustomerOrder[]           @relation("CustomerOrderPriceApprovedBy")
   collectionsCreated       OrderCollection[]
   expensesCreated          Expense[]
   factoryEntries           FactoryLedgerEntry[]
   auditLogs                AuditLog[]
-  journalEntries           JournalEntry[]        @relation("JournalEntryCreatedBy")
-  purchaseInvoicesCreated  PurchaseInvoice[]     @relation("PurchaseInvoiceCreatedBy")
-  salesInvoicesCreated     SalesInvoice[]        @relation("SalesInvoiceCreatedBy")
+  journalEntries           JournalEntry[]            @relation("JournalEntryCreatedBy")
+  purchaseInvoicesCreated  PurchaseInvoice[]         @relation("PurchaseInvoiceCreatedBy")
+  salesInvoicesCreated     SalesInvoice[]            @relation("SalesInvoiceCreatedBy")
+  salesInvoiceRevisions    SalesInvoiceRevision[]    @relation("SalesInvoiceRevisionActor")
+  purchaseInvoiceRevisions PurchaseInvoiceRevision[] @relation("PurchaseInvoiceRevisionActor")
   payments                 Payment[]
   journalTemplates         JournalTemplate[]
   customerTransactions     CustomerTransaction[]
-  fixedAssets              FixedAsset[]          @relation("FixedAssetCreatedBy")
-  depreciationEntries      DepreciationEntry[]   @relation("DepreciationEntryCreatedBy")
-  receiptVouchersCreated   ReceiptVoucher[]      @relation("ReceiptVoucherCreatedBy")
-  receiptVouchersPosted    ReceiptVoucher[]      @relation("ReceiptVoucherPostedBy")
-  receiptVouchersReversed  ReceiptVoucher[]      @relation("ReceiptVoucherReversedBy")
-  paymentVouchersCreated   PaymentVoucher[]      @relation("PaymentVoucherCreatedBy")
-  paymentVouchersPosted    PaymentVoucher[]      @relation("PaymentVoucherPostedBy")
-  paymentVouchersReversed  PaymentVoucher[]      @relation("PaymentVoucherReversedBy")
-  salesReturnsCreated      SalesReturn[]         @relation("SalesReturnCreatedBy")
-  salesReturnsConfirmed    SalesReturn[]         @relation("SalesReturnConfirmedBy")
-  salesReturnsCancelled    SalesReturn[]         @relation("SalesReturnCancelledBy")
-  purchaseReturnsCreated   PurchaseReturn[]      @relation("PurchaseReturnCreatedBy")
-  purchaseReturnsConfirmed PurchaseReturn[]      @relation("PurchaseReturnConfirmedBy")
-  purchaseReturnsCancelled PurchaseReturn[]      @relation("PurchaseReturnCancelledBy")
-  treasuriesCreated        Treasury[]            @relation("TreasuryCreatedBy")
-  transfersCreated         TreasuryTransfer[]    @relation("TransferCreatedBy")
-  transfersConfirmed       TreasuryTransfer[]    @relation("TransferConfirmedBy")
-  transfersCancelled       TreasuryTransfer[]    @relation("TransferCancelledBy")
+  fixedAssets              FixedAsset[]              @relation("FixedAssetCreatedBy")
+  depreciationEntries      DepreciationEntry[]       @relation("DepreciationEntryCreatedBy")
+  receiptVouchersCreated   ReceiptVoucher[]          @relation("ReceiptVoucherCreatedBy")
+  receiptVouchersPosted    ReceiptVoucher[]          @relation("ReceiptVoucherPostedBy")
+  receiptVouchersReversed  ReceiptVoucher[]          @relation("ReceiptVoucherReversedBy")
+  paymentVouchersCreated   PaymentVoucher[]          @relation("PaymentVoucherCreatedBy")
+  paymentVouchersPosted    PaymentVoucher[]          @relation("PaymentVoucherPostedBy")
+  paymentVouchersReversed  PaymentVoucher[]          @relation("PaymentVoucherReversedBy")
+  salesReturnsCreated      SalesReturn[]             @relation("SalesReturnCreatedBy")
+  salesReturnsConfirmed    SalesReturn[]             @relation("SalesReturnConfirmedBy")
+  salesReturnsCancelled    SalesReturn[]             @relation("SalesReturnCancelledBy")
+  purchaseReturnsCreated   PurchaseReturn[]          @relation("PurchaseReturnCreatedBy")
+  purchaseReturnsConfirmed PurchaseReturn[]          @relation("PurchaseReturnConfirmedBy")
+  purchaseReturnsCancelled PurchaseReturn[]          @relation("PurchaseReturnCancelledBy")
+  treasuriesCreated        Treasury[]                @relation("TreasuryCreatedBy")
+  transfersCreated         TreasuryTransfer[]        @relation("TransferCreatedBy")
+  transfersConfirmed       TreasuryTransfer[]        @relation("TransferConfirmedBy")
+  transfersCancelled       TreasuryTransfer[]        @relation("TransferCancelledBy")
 
   historicalReturnArchivesImported HistoricalSalesReturnArchive[] @relation("HistoricalArchiveImportedBy")
 
@@ -820,6 +822,10 @@ model PurchaseInvoice {
   taxAccountId         String?               @map("tax_account_id") @db.Uuid
   inventoryAccountId   String?               @map("inventory_account_id") @db.Uuid
   journalEntryId       String?               @map("journal_entry_id") @db.Uuid
+  // Confirmed-invoice revision (additive) — see SalesInvoice for the convention.
+  revisionNumber       Int                   @default(1) @map("revision_number")
+  lastRevisedAt        DateTime?             @map("last_revised_at") @db.Timestamptz(6)
+  lastRevisedBy        String?               @map("last_revised_by") @db.Uuid
   createdBy            String                @map("created_by") @db.Uuid
   createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -831,6 +837,7 @@ model PurchaseInvoice {
   lines              PurchaseInvoiceLine[]
   paymentAllocations PaymentVoucherAllocation[]
   purchaseReturns    PurchaseReturn[]           @relation("PurchaseReturnOriginalInvoice")
+  revisions          PurchaseInvoiceRevision[]  @relation("PurchaseInvoiceRevisionInvoice")
 
   @@index([supplierId])
   @@index([branchId])
@@ -1023,6 +1030,12 @@ model SalesInvoice {
   cogsJournalEntryId    String?   @map("cogs_journal_entry_id") @db.Uuid
   customerTxId          String?   @map("customer_tx_id") @db.Uuid
   salesRepresentativeId String?   @map("sales_representative_id") @db.Uuid
+  // Confirmed-invoice revision (additive). 1 = the original confirmation; each
+  // posted revision increments it. lastRevisedBy is an unconstrained UUID, the
+  // same convention this model already uses for customerTxId / journalEntryId.
+  revisionNumber        Int       @default(1) @map("revision_number")
+  lastRevisedAt         DateTime? @map("last_revised_at") @db.Timestamptz(6)
+  lastRevisedBy         String?   @map("last_revised_by") @db.Uuid
   createdBy             String    @map("created_by") @db.Uuid
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1035,6 +1048,7 @@ model SalesInvoice {
   orders              CustomerOrder[]            @relation("OrderSalesInvoice")
   receiptAllocations  ReceiptVoucherAllocation[]
   salesReturns        SalesReturn[]              @relation("SalesReturnOriginalInvoice")
+  revisions           SalesInvoiceRevision[]     @relation("SalesInvoiceRevisionInvoice")
 
   @@index([customerId])
   @@index([invoiceDate(sort: Desc)])
@@ -1751,4 +1765,124 @@ model HistoricalSalesReturnArchiveLine {
   @@index([historicalReturnId])
   @@index([productVariantId])
   @@map("historical_sales_return_archive_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Confirmed-invoice revision (P7) — additive, backwards compatible.
+//
+// A confirmed invoice stays a posted accounting document. It is NEVER edited
+// in place accounting-wise: a revision REVERSES the currently effective
+// version, REPOSTS the revised one, and keeps an immutable record of both.
+// The invoice number never changes and the status stays CONFIRMED; only
+// revision_number advances (1 = the original confirmation).
+//
+// Every original journal, movement and party transaction is retained. The
+// revision row is the audit spine linking the reversal effects, the
+// replacement effects and, for purchases, the valuation-adjustment journals.
+// ═══════════════════════════════════════════════════════════════════
+
+enum InvoiceRevisionStatus {
+  /// Calculated but never written — a preview commits nothing, so this value
+  /// exists for the response contract and never appears in the table.
+  PREVIEWED
+  /// The only status a persisted row can hold: the whole revision committed.
+  POSTED
+  /// A failed revision rolls its transaction back, so this never persists
+  /// either; it is kept so a future durable-attempt log has a home.
+  FAILED
+}
+
+model SalesInvoiceRevision {
+  id                            String                @id @default(uuid()) @db.Uuid
+  salesInvoiceId                String                @map("sales_invoice_id") @db.Uuid
+  /// The revision this row PRODUCED (2, 3, …). Revision 1 is the original.
+  revisionNumber                Int                   @map("revision_number")
+  /// Optimistic-concurrency anchor: the revision the actor believed was current.
+  previousRevisionNumber        Int                   @map("previous_revision_number")
+  reason                        String                @db.VarChar(500)
+  status                        InvoiceRevisionStatus @default(POSTED)
+  originalInvoiceStatus         String                @map("original_invoice_status") @db.VarChar(20)
+  resultingInvoiceStatus        String                @map("resulting_invoice_status") @db.VarChar(20)
+  /// Commercial dates, preserved exactly as the documents carry them …
+  previousDocumentDate          DateTime              @map("previous_document_date") @db.Date
+  documentDate                  DateTime              @map("document_date") @db.Date
+  /// … and the accounting date the reversal/replacement actually posted on,
+  /// which differs whenever the document date falls in a closed/absent period.
+  postingDate                   DateTime              @map("posting_date") @db.Date
+  crossesClosedPeriod           Boolean               @default(false) @map("crosses_closed_period")
+  /// Structured, Decimal-safe snapshots — enough to rebuild and display the
+  /// exact version. Never contains credentials, tokens or unrelated user data.
+  beforeSnapshot                Json                  @map("before_snapshot")
+  afterSnapshot                 Json                  @map("after_snapshot")
+  /// Calculated effects: line diff, stock diff, party impact, journals, replay.
+  delta                         Json
+  beforeFingerprint             String                @map("before_fingerprint") @db.VarChar(64)
+  afterFingerprint              String                @map("after_fingerprint") @db.VarChar(64)
+  previewFingerprint            String                @map("preview_fingerprint") @db.VarChar(64)
+  idempotencyKey                String                @map("idempotency_key") @db.VarChar(120)
+  reversalJournalEntryId        String?               @map("reversal_journal_entry_id") @db.Uuid
+  reversalCogsJournalEntryId    String?               @map("reversal_cogs_journal_entry_id") @db.Uuid
+  replacementJournalEntryId     String?               @map("replacement_journal_entry_id") @db.Uuid
+  replacementCogsJournalEntryId String?               @map("replacement_cogs_journal_entry_id") @db.Uuid
+  /// String[] of journal ids; empty when the revision needed no revaluation.
+  valuationJournalEntryIds      Json                  @map("valuation_journal_entry_ids")
+  reversalMovementIds           Json                  @map("reversal_movement_ids")
+  replacementMovementIds        Json                  @map("replacement_movement_ids")
+  reversalPartyTxIds            Json                  @map("reversal_party_tx_ids")
+  replacementPartyTxIds         Json                  @map("replacement_party_tx_ids")
+  revisedBy                     String                @map("revised_by") @db.Uuid
+  createdAt                     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice SalesInvoice @relation("SalesInvoiceRevisionInvoice", fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  actor   User         @relation("SalesInvoiceRevisionActor", fields: [revisedBy], references: [id], onDelete: Restrict)
+
+  @@unique([salesInvoiceId, revisionNumber])
+  @@unique([salesInvoiceId, idempotencyKey])
+  @@unique([idempotencyKey])
+  @@index([salesInvoiceId])
+  @@index([status])
+  @@index([revisedBy, createdAt(sort: Desc)])
+  @@map("sales_invoice_revisions")
+}
+
+model PurchaseInvoiceRevision {
+  id                        String                @id @default(uuid()) @db.Uuid
+  purchaseInvoiceId         String                @map("purchase_invoice_id") @db.Uuid
+  revisionNumber            Int                   @map("revision_number")
+  previousRevisionNumber    Int                   @map("previous_revision_number")
+  reason                    String                @db.VarChar(500)
+  status                    InvoiceRevisionStatus @default(POSTED)
+  originalInvoiceStatus     String                @map("original_invoice_status") @db.VarChar(20)
+  resultingInvoiceStatus    String                @map("resulting_invoice_status") @db.VarChar(20)
+  previousDocumentDate      DateTime              @map("previous_document_date") @db.Date
+  documentDate              DateTime              @map("document_date") @db.Date
+  postingDate               DateTime              @map("posting_date") @db.Date
+  crossesClosedPeriod       Boolean               @default(false) @map("crosses_closed_period")
+  beforeSnapshot            Json                  @map("before_snapshot")
+  afterSnapshot             Json                  @map("after_snapshot")
+  delta                     Json
+  beforeFingerprint         String                @map("before_fingerprint") @db.VarChar(64)
+  afterFingerprint          String                @map("after_fingerprint") @db.VarChar(64)
+  previewFingerprint        String                @map("preview_fingerprint") @db.VarChar(64)
+  idempotencyKey            String                @map("idempotency_key") @db.VarChar(120)
+  reversalJournalEntryId    String?               @map("reversal_journal_entry_id") @db.Uuid
+  replacementJournalEntryId String?               @map("replacement_journal_entry_id") @db.Uuid
+  valuationJournalEntryIds  Json                  @map("valuation_journal_entry_ids")
+  reversalMovementIds       Json                  @map("reversal_movement_ids")
+  replacementMovementIds    Json                  @map("replacement_movement_ids")
+  reversalPartyTxIds        Json                  @map("reversal_party_tx_ids")
+  replacementPartyTxIds     Json                  @map("replacement_party_tx_ids")
+  revisedBy                 String                @map("revised_by") @db.Uuid
+  createdAt                 DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  invoice PurchaseInvoice @relation("PurchaseInvoiceRevisionInvoice", fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
+  actor   User            @relation("PurchaseInvoiceRevisionActor", fields: [revisedBy], references: [id], onDelete: Restrict)
+
+  @@unique([purchaseInvoiceId, revisionNumber])
+  @@unique([purchaseInvoiceId, idempotencyKey])
+  @@unique([idempotencyKey])
+  @@index([purchaseInvoiceId])
+  @@index([status])
+  @@index([revisedBy, createdAt(sort: Desc)])
+  @@map("purchase_invoice_revisions")
 }
