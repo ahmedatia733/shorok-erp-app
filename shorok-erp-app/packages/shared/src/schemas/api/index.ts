@@ -10,6 +10,7 @@ export * from "./fixed-assets";
 export * from "./historical-returns";
 export * from "./import";
 export * from "./inventory";
+export * from "./inventory-transfers";
 export * from "./invoice-revisions";
 export * from "./journal";
 export * from "./journal-templates";

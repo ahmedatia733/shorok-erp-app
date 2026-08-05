@@ -45,6 +45,7 @@ import { CutoverModule } from "./modules/cutover/cutover.module";
 import { PeriodsModule } from "./modules/periods/periods.module";
 import { ConfigurationModule } from "./modules/configuration/configuration.module";
 import { AccountingStatementsModule } from "./modules/accounting-statements/accounting-statements.module";
+import { InventoryTransfersModule } from "./modules/inventory-transfers/inventory-transfers.module";
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { AccountingStatementsModule } from "./modules/accounting-statements/acco
     SuppliersModule,
     SystemSettingsModule,
     InventoryModule,
+    InventoryTransfersModule,
     OrdersModule,
     ExpensesModule,
     FactoryLedgerModule,

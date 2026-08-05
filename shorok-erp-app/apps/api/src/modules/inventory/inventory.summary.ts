@@ -66,6 +66,15 @@ export class InventorySummaryBuilder {
         return isPositive ? "RECEIPT" : "SALE";
       case "PURCHASE_RETURN":
         return isPositive ? "RECEIPT" : "SALE";
+      // Transfers always hand InventoryEngine.apply their own pre-localized
+      // text naming the other branch, so these keys are a fallback only. They
+      // are still real transfer wording rather than a borrowed "sold"/"received"
+      // message, because a fallback that misdescribes the movement is worse
+      // than no fallback.
+      case "TRANSFER_IN":
+        return "TRANSFER_IN";
+      case "TRANSFER_OUT":
+        return "TRANSFER_OUT";
     }
   }
 

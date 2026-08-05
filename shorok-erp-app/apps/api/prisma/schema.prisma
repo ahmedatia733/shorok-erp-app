@@ -43,6 +43,13 @@ enum MovementType {
   COUNT_CORRECTION
   SALE_RETURN
   PURCHASE_RETURN
+  /// Stock left this branch on an internal transfer. A cancellation reuses the
+  /// same pair in the opposite direction, distinguished by reference_type, which
+  /// is the convention returns already follow (sales_return vs
+  /// sales_return_cancel) — so no separate CANCEL member is needed.
+  TRANSFER_OUT
+  /// Stock arrived at this branch on an internal transfer.
+  TRANSFER_IN
 }
 
 enum OrderStatus {
@@ -219,6 +226,8 @@ model Branch {
   salesReturns       SalesReturn[]            @relation("SalesReturnBranch")
   purchaseReturns    PurchaseReturn[]         @relation("PurchaseReturnBranch")
   treasuries         Treasury[]
+  transfersOutgoing  InventoryTransfer[]      @relation("InventoryTransferSource")
+  transfersIncoming  InventoryTransfer[]      @relation("InventoryTransferDestination")
 
   cutoverImportBatches CutoverImportBatch[]
 
@@ -239,41 +248,45 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  branchAccesses           UserBranchAccess[]
-  refreshTokens            RefreshToken[]
-  inventoryWrites          InventoryMovement[]       @relation("InventoryMovementCreatedBy")
-  ordersCreated            CustomerOrder[]           @relation("CustomerOrderCreatedBy")
-  pricesApproved           CustomerOrder[]           @relation("CustomerOrderPriceApprovedBy")
-  collectionsCreated       OrderCollection[]
-  expensesCreated          Expense[]
-  factoryEntries           FactoryLedgerEntry[]
-  auditLogs                AuditLog[]
-  journalEntries           JournalEntry[]            @relation("JournalEntryCreatedBy")
-  purchaseInvoicesCreated  PurchaseInvoice[]         @relation("PurchaseInvoiceCreatedBy")
-  salesInvoicesCreated     SalesInvoice[]            @relation("SalesInvoiceCreatedBy")
-  salesInvoiceRevisions    SalesInvoiceRevision[]    @relation("SalesInvoiceRevisionActor")
-  purchaseInvoiceRevisions PurchaseInvoiceRevision[] @relation("PurchaseInvoiceRevisionActor")
-  payments                 Payment[]
-  journalTemplates         JournalTemplate[]
-  customerTransactions     CustomerTransaction[]
-  fixedAssets              FixedAsset[]              @relation("FixedAssetCreatedBy")
-  depreciationEntries      DepreciationEntry[]       @relation("DepreciationEntryCreatedBy")
-  receiptVouchersCreated   ReceiptVoucher[]          @relation("ReceiptVoucherCreatedBy")
-  receiptVouchersPosted    ReceiptVoucher[]          @relation("ReceiptVoucherPostedBy")
-  receiptVouchersReversed  ReceiptVoucher[]          @relation("ReceiptVoucherReversedBy")
-  paymentVouchersCreated   PaymentVoucher[]          @relation("PaymentVoucherCreatedBy")
-  paymentVouchersPosted    PaymentVoucher[]          @relation("PaymentVoucherPostedBy")
-  paymentVouchersReversed  PaymentVoucher[]          @relation("PaymentVoucherReversedBy")
-  salesReturnsCreated      SalesReturn[]             @relation("SalesReturnCreatedBy")
-  salesReturnsConfirmed    SalesReturn[]             @relation("SalesReturnConfirmedBy")
-  salesReturnsCancelled    SalesReturn[]             @relation("SalesReturnCancelledBy")
-  purchaseReturnsCreated   PurchaseReturn[]          @relation("PurchaseReturnCreatedBy")
-  purchaseReturnsConfirmed PurchaseReturn[]          @relation("PurchaseReturnConfirmedBy")
-  purchaseReturnsCancelled PurchaseReturn[]          @relation("PurchaseReturnCancelledBy")
-  treasuriesCreated        Treasury[]                @relation("TreasuryCreatedBy")
-  transfersCreated         TreasuryTransfer[]        @relation("TransferCreatedBy")
-  transfersConfirmed       TreasuryTransfer[]        @relation("TransferConfirmedBy")
-  transfersCancelled       TreasuryTransfer[]        @relation("TransferCancelledBy")
+  branchAccesses              UserBranchAccess[]
+  refreshTokens               RefreshToken[]
+  inventoryWrites             InventoryMovement[]       @relation("InventoryMovementCreatedBy")
+  ordersCreated               CustomerOrder[]           @relation("CustomerOrderCreatedBy")
+  pricesApproved              CustomerOrder[]           @relation("CustomerOrderPriceApprovedBy")
+  collectionsCreated          OrderCollection[]
+  expensesCreated             Expense[]
+  factoryEntries              FactoryLedgerEntry[]
+  auditLogs                   AuditLog[]
+  journalEntries              JournalEntry[]            @relation("JournalEntryCreatedBy")
+  purchaseInvoicesCreated     PurchaseInvoice[]         @relation("PurchaseInvoiceCreatedBy")
+  salesInvoicesCreated        SalesInvoice[]            @relation("SalesInvoiceCreatedBy")
+  salesInvoiceRevisions       SalesInvoiceRevision[]    @relation("SalesInvoiceRevisionActor")
+  purchaseInvoiceRevisions    PurchaseInvoiceRevision[] @relation("PurchaseInvoiceRevisionActor")
+  inventoryTransfersCreated   InventoryTransfer[]       @relation("InventoryTransferCreatedBy")
+  inventoryTransfersUpdated   InventoryTransfer[]       @relation("InventoryTransferUpdatedBy")
+  inventoryTransfersConfirmed InventoryTransfer[]       @relation("InventoryTransferConfirmedBy")
+  inventoryTransfersCancelled InventoryTransfer[]       @relation("InventoryTransferCancelledBy")
+  payments                    Payment[]
+  journalTemplates            JournalTemplate[]
+  customerTransactions        CustomerTransaction[]
+  fixedAssets                 FixedAsset[]              @relation("FixedAssetCreatedBy")
+  depreciationEntries         DepreciationEntry[]       @relation("DepreciationEntryCreatedBy")
+  receiptVouchersCreated      ReceiptVoucher[]          @relation("ReceiptVoucherCreatedBy")
+  receiptVouchersPosted       ReceiptVoucher[]          @relation("ReceiptVoucherPostedBy")
+  receiptVouchersReversed     ReceiptVoucher[]          @relation("ReceiptVoucherReversedBy")
+  paymentVouchersCreated      PaymentVoucher[]          @relation("PaymentVoucherCreatedBy")
+  paymentVouchersPosted       PaymentVoucher[]          @relation("PaymentVoucherPostedBy")
+  paymentVouchersReversed     PaymentVoucher[]          @relation("PaymentVoucherReversedBy")
+  salesReturnsCreated         SalesReturn[]             @relation("SalesReturnCreatedBy")
+  salesReturnsConfirmed       SalesReturn[]             @relation("SalesReturnConfirmedBy")
+  salesReturnsCancelled       SalesReturn[]             @relation("SalesReturnCancelledBy")
+  purchaseReturnsCreated      PurchaseReturn[]          @relation("PurchaseReturnCreatedBy")
+  purchaseReturnsConfirmed    PurchaseReturn[]          @relation("PurchaseReturnConfirmedBy")
+  purchaseReturnsCancelled    PurchaseReturn[]          @relation("PurchaseReturnCancelledBy")
+  treasuriesCreated           Treasury[]                @relation("TreasuryCreatedBy")
+  transfersCreated            TreasuryTransfer[]        @relation("TransferCreatedBy")
+  transfersConfirmed          TreasuryTransfer[]        @relation("TransferConfirmedBy")
+  transfersCancelled          TreasuryTransfer[]        @relation("TransferCancelledBy")
 
   historicalReturnArchivesImported HistoricalSalesReturnArchive[] @relation("HistoricalArchiveImportedBy")
 
@@ -411,6 +424,7 @@ model ProductVariant {
   purchaseReturnLines  PurchaseReturnLine[]     @relation("PurchaseReturnLineVariant")
 
   historicalReturnArchiveLines HistoricalSalesReturnArchiveLine[] @relation("HistoricalArchiveLineVariant")
+  transferLines                InventoryTransferLine[]
 
   @@unique([skuId, sizeMetersPerBoard])
   @@index([skuId])
@@ -1885,4 +1899,104 @@ model PurchaseInvoiceRevision {
   @@index([status])
   @@index([revisedBy, createdAt(sort: Desc)])
   @@map("purchase_invoice_revisions")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Inventory transfer (P9) — additive, backwards compatible.
+//
+// Moving stock between two branches of the SAME company is a redistribution,
+// not a trade. It therefore changes WHERE the stock sits and nothing else: the
+// company's total boards, total metres and total inventory value are identical
+// before and after, and the shared per-variant WAC is untouched. Because the
+// chart of accounts uses ONE inventory control account rather than a per-branch
+// account, there is no ledger entry to make — the same precedent inventory
+// counts and adjustments already set.
+//
+// Only complete boards move. Metres are always derived server-side as
+// boards × the variant's own sizeMetersPerBoard, never entered by a user.
+// ═══════════════════════════════════════════════════════════════════
+
+enum InventoryTransferStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+model InventoryTransfer {
+  id                         String                  @id @default(uuid()) @db.Uuid
+  /// Allocated by the database when the DRAFT row is inserted, so a preview —
+  /// which inserts nothing — can never consume one. Rendered as TRF-000001.
+  transferNumber             BigInt                  @unique @default(autoincrement()) @map("transfer_number")
+  status                     InventoryTransferStatus @default(DRAFT)
+  transferDate               DateTime                @map("transfer_date") @db.Date
+  sourceBranchId             String                  @map("source_branch_id") @db.Uuid
+  destinationBranchId        String                  @map("destination_branch_id") @db.Uuid
+  purpose                    String?                 @db.VarChar(300)
+  notes                      String?                 @db.VarChar(1000)
+  /// Optimistic concurrency: every draft edit and every status change bumps it,
+  /// and confirm/cancel refuse a request carrying a stale value.
+  version                    Int                     @default(1)
+  confirmationIdempotencyKey String?                 @unique @map("confirmation_idempotency_key") @db.VarChar(120)
+  cancellationIdempotencyKey String?                 @unique @map("cancellation_idempotency_key") @db.VarChar(120)
+  confirmationFingerprint    String?                 @map("confirmation_fingerprint") @db.VarChar(64)
+  cancellationFingerprint    String?                 @map("cancellation_fingerprint") @db.VarChar(64)
+  createdById                String                  @map("created_by_id") @db.Uuid
+  createdAt                  DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedById                String?                 @map("updated_by_id") @db.Uuid
+  updatedAt                  DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  confirmedById              String?                 @map("confirmed_by_id") @db.Uuid
+  confirmedAt                DateTime?               @map("confirmed_at") @db.Timestamptz(6)
+  cancelledById              String?                 @map("cancelled_by_id") @db.Uuid
+  cancelledAt                DateTime?               @map("cancelled_at") @db.Timestamptz(6)
+  cancellationReason         String?                 @map("cancellation_reason") @db.VarChar(500)
+
+  sourceBranch      Branch                  @relation("InventoryTransferSource", fields: [sourceBranchId], references: [id], onDelete: Restrict)
+  destinationBranch Branch                  @relation("InventoryTransferDestination", fields: [destinationBranchId], references: [id], onDelete: Restrict)
+  creator           User                    @relation("InventoryTransferCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updater           User?                   @relation("InventoryTransferUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  confirmer         User?                   @relation("InventoryTransferConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict)
+  canceller         User?                   @relation("InventoryTransferCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  lines             InventoryTransferLine[]
+
+  @@index([sourceBranchId])
+  @@index([destinationBranchId])
+  @@index([status])
+  @@index([transferDate(sort: Desc)])
+  @@map("inventory_transfers")
+}
+
+model InventoryTransferLine {
+  id                          String   @id @default(uuid()) @db.Uuid
+  transferId                  String   @map("transfer_id") @db.Uuid
+  productVariantId            String   @map("product_variant_id") @db.Uuid
+  /// Snapshots taken when the line is written, so the document still reads
+  /// correctly after the product master is renamed or re-sized later.
+  skuCode                     String   @map("sku_code") @db.VarChar(60)
+  productNameAr               String   @map("product_name_ar") @db.VarChar(200)
+  productNameEn               String?  @map("product_name_en") @db.VarChar(200)
+  boardSizeMeters             Decimal  @map("board_size_meters") @db.Decimal(10, 4)
+  /// Whole boards only — the CHECK below refuses a fraction at the database.
+  boardQuantity               Decimal  @map("board_quantity") @db.Decimal(14, 4)
+  /// Always boards × boardSizeMeters, computed by the server.
+  meterQuantity               Decimal  @map("meter_quantity") @db.Decimal(14, 4)
+  /// The shared WAC at the moment of confirmation. Carried, never changed.
+  costPerMeter                Decimal  @default(0) @map("cost_per_meter") @db.Decimal(14, 4)
+  totalValue                  Decimal  @default(0) @map("total_value") @db.Decimal(14, 2)
+  lineIndex                   Int      @map("line_index")
+  /// The four movements this line produced. Holding them here keeps the pairing
+  /// relational without adding columns to the hot inventory_movements table.
+  sourceMovementId            String?  @map("source_movement_id") @db.Uuid
+  destinationMovementId       String?  @map("destination_movement_id") @db.Uuid
+  cancelSourceMovementId      String?  @map("cancel_source_movement_id") @db.Uuid
+  cancelDestinationMovementId String?  @map("cancel_destination_movement_id") @db.Uuid
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  transfer       InventoryTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productVariant ProductVariant    @relation(fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@unique([transferId, productVariantId])
+  @@unique([transferId, lineIndex])
+  @@index([transferId])
+  @@index([productVariantId])
+  @@map("inventory_transfer_lines")
 }

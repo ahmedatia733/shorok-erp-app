@@ -25,6 +25,8 @@ const TYPES: Array<MovementType | "ALL"> = [
   "COUNT_CORRECTION",
   "SALE_RETURN",
   "PURCHASE_RETURN",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
 ];
 
 const typeBadge: Record<MovementType, "info" | "success" | "warning" | "neutral"> = {
@@ -34,6 +36,10 @@ const typeBadge: Record<MovementType, "info" | "success" | "warning" | "neutral"
   COUNT_CORRECTION: "neutral",
   SALE_RETURN: "success",
   PURCHASE_RETURN: "warning",
+  // Neutral on purpose: an internal transfer is neither a gain nor a loss to
+  // the company, and colouring it like a receipt or a sale would say otherwise.
+  TRANSFER_IN: "neutral",
+  TRANSFER_OUT: "neutral",
 };
 
 const typeLabel: Record<MovementType, string> = {
@@ -43,6 +49,8 @@ const typeLabel: Record<MovementType, string> = {
   COUNT_CORRECTION: "تصحيح جرد",
   SALE_RETURN: "مردود مبيعات",
   PURCHASE_RETURN: "مردود مشتريات",
+  TRANSFER_IN: "تحويل وارد",
+  TRANSFER_OUT: "تحويل صادر",
 };
 
 export default function MovementsPage() {

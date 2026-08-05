@@ -22,6 +22,11 @@ export const MovementTypeEnum = z.enum([
   "COUNT_CORRECTION",
   "SALE_RETURN",
   "PURCHASE_RETURN",
+  // Internal branch-to-branch transfer. A cancellation reuses the same pair in
+  // the opposite direction and is told apart by the movement's referenceType,
+  // the way returns already distinguish sales_return from sales_return_cancel.
+  "TRANSFER_OUT",
+  "TRANSFER_IN",
 ]);
 export type MovementType = z.infer<typeof MovementTypeEnum>;
 
