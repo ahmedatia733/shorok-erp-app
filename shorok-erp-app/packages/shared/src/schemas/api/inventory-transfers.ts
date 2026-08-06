@@ -170,3 +170,54 @@ export interface InventoryTransferPreview {
   /** Proof that computing this preview wrote nothing. */
   committedChanges: 0;
 }
+
+// ── Source-stock-driven size options (P10) ────────────────────────────────
+//
+// After picking a source branch and a base product, the user is shown the
+// sizes that ACTUALLY exist in that branch. The badges below are display
+// labels only — stock identity stays (Branch, ProductVariant), and a transfer
+// is still posted against an exact productVariantId.
+
+export const SourceSizeOptionsQuerySchema = z.object({
+  sourceBranchId: z.string().uuid(),
+  productSkuId: z.string().uuid(),
+});
+export type SourceSizeOptionsQuery = z.infer<typeof SourceSizeOptionsQuerySchema>;
+
+/** ك (5.25 m) · ص (4.00 m) · م/خ (anything else genuinely stored). */
+export const TransferSizeBadgeEnum = z.enum(["LARGE", "SMALL", "CUSTOM"]);
+export type TransferSizeBadge = z.infer<typeof TransferSizeBadgeEnum>;
+
+export interface SourceSizeOption {
+  /** The exact variant a transfer line will be posted against. */
+  productVariantId: string;
+  sizeBadge: TransferSizeBadge;
+  sizeBadgeAr: string;
+  sizeBadgeEn: string;
+  /** «5.25 م» — dimensions only. Never carries an invented second dimension. */
+  dimensionsLabelAr: string;
+  dimensionsLabelEn: string;
+  boardSizeMeters: string;
+  /** Always null from a ProductVariant: only one dimension is stored. */
+  widthMeters: string | null;
+  boardsAvailable: string;
+  metersAvailable: string;
+  enabled: boolean;
+  disabledReason: string | null;
+  disabledReasonAr: string | null;
+  variantCode: string;
+  variantDisplayNameAr: string;
+  variantDisplayNameEn: string | null;
+}
+
+export interface SourceSizeOptionsResponse {
+  sourceBranchId: string;
+  sourceBranchNameAr: string;
+  productSkuId: string;
+  productCode: string;
+  productNameAr: string;
+  productNameEn: string | null;
+  options: SourceSizeOption[];
+  /** Proof this read changed nothing. */
+  committedChanges: 0;
+}

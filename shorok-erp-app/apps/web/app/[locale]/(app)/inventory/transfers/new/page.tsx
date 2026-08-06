@@ -10,27 +10,37 @@ import { Card, CardBody, CardHeader, CardTitle } from "../../../../../../compone
 import { Input } from "../../../../../../components/ui/input";
 import { Label } from "../../../../../../components/ui/label";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
-import { VariantPicker } from "../../../../../../components/features/inventory/variant-picker";
+import { SourceSizeOptions } from "../../../../../../components/features/inventory/source-size-options";
 import { TransferPreviewPanel } from "../../../../../../components/features/inventory/transfer-preview-panel";
+import { SearchableSelect } from "../../../../../../components/ui/searchable-select";
 import { ApiClientError } from "../../../../../../lib/api-client";
+import { listSkus, type SkuRow } from "../../../../../../lib/admin-client";
 import { listBranches, type BranchSummary } from "../../../../../../lib/inventory-client";
 import {
   createTransfer,
   previewTransferPayload,
   type InventoryTransferPreview,
+  type SourceSizeOption,
   type TransferPayload,
 } from "../../../../../../lib/inventory-transfers-client";
 
 interface DraftLine {
   key: string;
+  /** Step 1 — the base product. Branch-independent. */
+  productSkuId: string | null;
+  /** Step 2 — the exact variant, chosen from what the source branch really holds. */
   productVariantId: string | null;
+  /** The chosen card, kept so the line can show its board size read-only. */
+  sizeOption: SourceSizeOption | null;
   /** Kept as typed text so a stray decimal point is rejected, not rounded. */
   boardQuantity: string;
 }
 
 const newLine = (): DraftLine => ({
   key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  productSkuId: null,
   productVariantId: null,
+  sizeOption: null,
   boardQuantity: "",
 });
 
@@ -47,6 +57,7 @@ export default function NewInventoryTransferPage() {
   const router = useRouter();
 
   const [branches, setBranches] = useState<BranchSummary[]>([]);
+  const [skus, setSkus] = useState<SkuRow[]>([]);
   const [transferDate, setTransferDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [sourceBranchId, setSourceBranchId] = useState("");
   const [destinationBranchId, setDestinationBranchId] = useState("");
@@ -60,7 +71,42 @@ export default function NewInventoryTransferPage() {
 
   useEffect(() => {
     void listBranches().then((rows) => setBranches(rows.filter((b) => b.active)));
+    void listSkus().then((rows) => setSkus(rows.filter((r) => r.active)));
   }, []);
+
+  /**
+   * Changing the source warehouse invalidates every size already picked: those
+   * cards described stock in the OLD branch. The base product survives — it is
+   * the same product wherever it sits — but the exact variant and its quantity
+   * do not, and must be chosen again from the new branch's real stock.
+   */
+  const changeSourceBranch = (branchId: string) => {
+    setSourceBranchId(branchId);
+    setLines((ls) => ls.map((l) => ({ ...l, productVariantId: null, sizeOption: null, boardQuantity: "" })));
+    setPreview(null);
+  };
+
+  /** A different product means different sizes; the old selection cannot stand. */
+  const changeLineSku = (index: number, skuId: string) => {
+    setLines((ls) =>
+      ls.map((l, i) =>
+        i === index
+          ? { ...l, productSkuId: skuId || null, productVariantId: null, sizeOption: null, boardQuantity: "" }
+          : l,
+      ),
+    );
+    setPreview(null);
+  };
+
+  /** A different size means the quantity was typed against the wrong board. */
+  const changeLineSize = (index: number, variantId: string | null, option: SourceSizeOption | null) => {
+    setLines((ls) =>
+      ls.map((l, i) =>
+        i === index ? { ...l, productVariantId: variantId, sizeOption: option, boardQuantity: "" } : l,
+      ),
+    );
+    setPreview(null);
+  };
 
   const payload = useMemo<TransferPayload | null>(() => {
     const ready = lines.filter((l) => l.productVariantId && l.boardQuantity.trim() !== "");
@@ -153,7 +199,7 @@ export default function NewInventoryTransferPage() {
             <select
               id="source-branch"
               value={sourceBranchId}
-              onChange={(e) => setSourceBranchId(e.target.value)}
+              onChange={(e) => changeSourceBranch(e.target.value)}
               className="h-9 w-full rounded-md border border-border bg-surface px-2 text-sm"
             >
               <option value="">— اختر المخزن المصدر —</option>
@@ -208,8 +254,10 @@ export default function NewInventoryTransferPage() {
           <Table>
             <THead>
               <TR>
-                <TH className="w-2/3">الصنف والمقاس</TH>
+                <TH className="w-1/3">اختر الصنف</TH>
+                <TH className="w-1/3">اختر المقاس المتاح في المخزن المصدر</TH>
                 <TH>عدد الألواح</TH>
+                <TH>مقاس اللوح</TH>
                 <TH />
               </TR>
             </THead>
@@ -217,19 +265,37 @@ export default function NewInventoryTransferPage() {
               {lines.map((line, index) => (
                 <TR key={line.key}>
                   <TD>
-                    <VariantPicker
+                    <SearchableSelect
+                      id={`line-sku-${index}`}
+                      testId={`line-sku-${index}`}
+                      value={line.productSkuId ?? ""}
+                      onChange={(id) => changeLineSku(index, id)}
+                      placeholder="— اختر الصنف —"
+                      clearable
+                      options={skus.map((sk) => ({
+                        value: sk.id,
+                        label: `${sk.code} — ${sk.colorNameAr}`,
+                        keywords: [sk.code, sk.colorNameAr, sk.colorNameEn].filter(Boolean).join(" "),
+                      }))}
+                    />
+                  </TD>
+                  <TD>
+                    <SourceSizeOptions
+                      sourceBranchId={sourceBranchId || null}
+                      productSkuId={line.productSkuId}
                       value={line.productVariantId}
-                      onChange={(id) =>
-                        setLines((ls) =>
-                          ls.map((l, i) => (i === index ? { ...l, productVariantId: id } : l)),
-                        )
-                      }
+                      onChange={(variantId, option) => changeLineSize(index, variantId, option)}
+                      locale={locale}
                     />
                   </TD>
                   <TD>
                     <Input
                       aria-label={`عدد الألواح للبند ${index + 1}`}
                       inputMode="numeric"
+                      // A quantity is meaningless until a size is chosen: the
+                      // number of boards only means something once we know
+                      // which board.
+                      disabled={!line.productVariantId}
                       value={line.boardQuantity}
                       onChange={(e) =>
                         setLines((ls) =>
@@ -240,8 +306,14 @@ export default function NewInventoryTransferPage() {
                           ),
                         )
                       }
-                      className="w-28"
+                      className="w-24"
                     />
+                  </TD>
+                  <TD>
+                    {/* Read-only, straight from the chosen variant — never typed. */}
+                    <span className="text-sm text-textSecondary" data-testid={`line-board-size-${index}`}>
+                      {line.sizeOption ? line.sizeOption.dimensionsLabelAr : "—"}
+                    </span>
                   </TD>
                   <TD>
                     {lines.length > 1 && (

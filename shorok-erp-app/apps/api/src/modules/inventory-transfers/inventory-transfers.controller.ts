@@ -5,12 +5,14 @@ import {
   CreateInventoryTransferSchema,
   InventoryTransferQuerySchema,
   PreviewInventoryTransferSchema,
+  SourceSizeOptionsQuerySchema,
   UpdateInventoryTransferSchema,
   type CancelInventoryTransfer,
   type ConfirmInventoryTransfer,
   type CreateInventoryTransfer,
   type InventoryTransferQuery,
   type PreviewInventoryTransfer,
+  type SourceSizeOptionsQuery,
   type UpdateInventoryTransfer,
 } from "@shorok/shared";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -41,6 +43,25 @@ export class InventoryTransfersController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.service.list(query, user);
+  }
+
+  /**
+   * The sizes of one product that actually exist in one branch.
+   *
+   * Declared BEFORE `:id` on purpose — Nest matches routes in declaration
+   * order, so a `@Get(":id")` above this would swallow the literal path and try
+   * to load a transfer whose id is "source-size-options".
+   *
+   * GET, and read-only in the strictest sense: it creates no transfer, no line,
+   * no movement, no audit business event, and consumes no number.
+   */
+  @Get("source-size-options")
+  @Roles("OWNER", "ACCOUNTANT", "WAREHOUSE", "BRANCH_MANAGER")
+  sourceSizeOptions(
+    @Query(new ZodValidationPipe(SourceSizeOptionsQuerySchema)) query: SourceSizeOptionsQuery,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.sourceSizeOptions(query, user);
   }
 
   @Get(":id")

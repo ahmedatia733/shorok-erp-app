@@ -150,3 +150,45 @@ export function transferIdempotencyKey(
 ): string {
   return `transfer:${operation}:${transferId}:v${version}:${previewFingerprint.slice(0, 32)}`;
 }
+
+// ── Source-stock-driven size options (P10) ────────────────────────────────
+
+export interface SourceSizeOption {
+  productVariantId: string;
+  sizeBadge: "LARGE" | "SMALL" | "CUSTOM";
+  sizeBadgeAr: string;
+  sizeBadgeEn: string;
+  dimensionsLabelAr: string;
+  dimensionsLabelEn: string;
+  boardSizeMeters: string;
+  widthMeters: string | null;
+  boardsAvailable: string;
+  metersAvailable: string;
+  enabled: boolean;
+  disabledReason: string | null;
+  disabledReasonAr: string | null;
+  variantCode: string;
+  variantDisplayNameAr: string;
+  variantDisplayNameEn: string | null;
+}
+
+export interface SourceSizeOptionsResponse {
+  sourceBranchId: string;
+  sourceBranchNameAr: string;
+  productSkuId: string;
+  productCode: string;
+  productNameAr: string;
+  productNameEn: string | null;
+  options: SourceSizeOption[];
+  committedChanges: 0;
+}
+
+/**
+ * Read-only. Keyed by (source branch, product) so a response can never be
+ * shown against a different branch than the one it was asked about — the
+ * caller re-checks those two ids before rendering.
+ */
+export const getSourceSizeOptions = (sourceBranchId: string, productSkuId: string) =>
+  apiCall<SourceSizeOptionsResponse>(
+    `/inventory-transfers/source-size-options?${new URLSearchParams({ sourceBranchId, productSkuId }).toString()}`,
+  );

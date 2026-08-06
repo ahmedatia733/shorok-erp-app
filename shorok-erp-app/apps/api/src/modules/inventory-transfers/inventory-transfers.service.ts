@@ -9,9 +9,17 @@ import type {
   InventoryTransferPreview,
   InventoryTransferPreviewLine,
   InventoryTransferQuery,
+  SourceSizeOption,
+  SourceSizeOptionsQuery,
+  SourceSizeOptionsResponse,
   UpdateInventoryTransfer,
 } from "@shorok/shared";
-import { ConflictError, NotFoundError, ValidationError } from "../../common/errors/api-errors";
+import {
+  BranchForbiddenError,
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 // Value imports, NOT `import type`: Nest reads these classes from the emitted
 // decorator metadata to resolve the constructor, and a type-only import is
@@ -30,6 +38,7 @@ import {
   rate,
   TransferMathError,
 } from "./transfer-math";
+import { tryClassifyTransferSizeOption } from "./size-classification";
 
 type Tx = Prisma.TransactionClient;
 
@@ -289,6 +298,156 @@ export class InventoryTransfersService {
         cancelSourceMovementId: l.cancelSourceMovementId,
         cancelDestinationMovementId: l.cancelDestinationMovementId,
       })),
+    };
+  }
+
+  // ── source-stock size options (read-only) ────────────────────────────────
+
+  /**
+   * The sizes of one product that actually exist in one branch, as selectable
+   * options.
+   *
+   * The list starts from the product's variants rather than from the balance
+   * rows, because a standard ك or ص board with no stock still has to appear —
+   * shown and disabled — so the user learns it is unavailable here instead of
+   * wondering why it vanished. A variant with no balance row at all is simply a
+   * variant at zero.
+   *
+   * Nothing is merged. Two custom variants that both wear the «م/خ» badge stay
+   * two separate options, because the badge is a label and the variant is the
+   * identity. Every option carries the exact `productVariantId` a transfer will
+   * be posted against.
+   *
+   * This method only reads. It takes no lock and reserves nothing: availability
+   * shown here is a snapshot, and the preview and confirmation re-read it under
+   * lock before any stock moves.
+   */
+  async sourceSizeOptions(
+    query: SourceSizeOptionsQuery,
+    user: AuthenticatedUser,
+  ): Promise<SourceSizeOptionsResponse> {
+    // The global BranchScopeGuard only recognises a parameter literally named
+    // `branchId`, so branch authorization for `sourceBranchId` is enforced here
+    // rather than assumed.
+    if (user.role !== "OWNER" && !user.allowedBranches.includes(query.sourceBranchId)) {
+      throw new BranchForbiddenError({
+        reason: "UNAUTHORIZED_BRANCH_ACCESS",
+        branchId: query.sourceBranchId,
+      });
+    }
+
+    const [branch, sku] = await Promise.all([
+      this.prisma.branch.findUnique({
+        where: { id: query.sourceBranchId },
+        select: { id: true, nameAr: true, active: true },
+      }),
+      this.prisma.productSku.findUnique({
+        where: { id: query.productSkuId },
+        select: { id: true, code: true, colorNameAr: true, colorNameEn: true, active: true },
+      }),
+    ]);
+
+    if (!branch) {
+      throw new NotFoundError({ reason: "SOURCE_BRANCH_NOT_FOUND", branchId: query.sourceBranchId });
+    }
+    if (!branch.active) {
+      throw new ValidationError({
+        reason: "SOURCE_BRANCH_INACTIVE",
+        messageAr: `المخزن «${branch.nameAr}» غير نشط.`,
+      });
+    }
+    if (!sku) {
+      throw new NotFoundError({ reason: "PRODUCT_NOT_FOUND", productSkuId: query.productSkuId });
+    }
+    if (!sku.active) {
+      throw new ValidationError({
+        reason: "PRODUCT_INACTIVE",
+        messageAr: `الصنف «${sku.code}» غير نشط.`,
+      });
+    }
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: { skuId: sku.id },
+      select: { id: true, sizeMetersPerBoard: true, active: true },
+    });
+
+    const balances = variants.length
+      ? await this.prisma.branchInventoryBalance.findMany({
+          where: {
+            branchId: branch.id,
+            productVariantId: { in: variants.map((v) => v.id) },
+          },
+          select: { productVariantId: true, boardsOnHand: true, metersOnHand: true },
+        })
+      : [];
+    const balanceByVariant = new Map(balances.map((b) => [b.productVariantId, b]));
+
+    const options: SourceSizeOption[] = [];
+    for (const variant of variants) {
+      // A size that cannot be classified cannot be offered — but it also must
+      // not take the whole list down with it.
+      const display = tryClassifyTransferSizeOption({ sizeMetersPerBoard: variant.sizeMetersPerBoard });
+      if (!display) continue;
+
+      const balance = balanceByVariant.get(variant.id);
+      const boards = D(balance?.boardsOnHand);
+      const metres = D(balance?.metersOnHand);
+
+      let disabledReason: string | null = null;
+      let disabledReasonAr: string | null = null;
+
+      if (!variant.active) {
+        disabledReason = "VARIANT_INACTIVE";
+        disabledReasonAr = "هذا المقاس غير نشط.";
+      } else if (boards.isZero() !== metres.isZero()) {
+        // A board count and a metre count that disagree is a pre-existing data
+        // problem. Say so and refuse the option; do not quietly repair it, and
+        // never satisfy it from a different variant.
+        disabledReason = "SOURCE_BALANCE_INCONSISTENT";
+        disabledReasonAr = "الرصيد يحتاج مراجعة قبل التحويل";
+      } else if (boards.lte(0) || metres.lte(0)) {
+        disabledReason = "SOURCE_SIZE_OPTION_UNAVAILABLE";
+        disabledReasonAr = "غير متاح في المخزن المحدد";
+      }
+
+      options.push({
+        productVariantId: variant.id,
+        sizeBadge: display.badge,
+        sizeBadgeAr: display.badgeAr,
+        sizeBadgeEn: display.badgeEn,
+        dimensionsLabelAr: display.dimensionsLabelAr,
+        dimensionsLabelEn: display.dimensionsLabelEn,
+        boardSizeMeters: display.boardSizeMeters,
+        widthMeters: display.widthMeters,
+        boardsAvailable: qty(boards),
+        metersAvailable: qty(metres),
+        enabled: disabledReason === null,
+        disabledReason,
+        disabledReasonAr,
+        variantCode: sku.code,
+        variantDisplayNameAr: `${sku.code} — ${sku.colorNameAr} — ${display.labelAr}`,
+        variantDisplayNameEn: sku.colorNameEn ? `${sku.code} — ${sku.colorNameEn} — ${display.labelEn}` : null,
+      });
+    }
+
+    // ك first, then ص, then the custom sizes ascending — the order a
+    // storekeeper expects to scan, not database order.
+    const rank: Record<string, number> = { LARGE: 0, SMALL: 1, CUSTOM: 2 };
+    options.sort((a, b) => {
+      const byBadge = (rank[a.sizeBadge] ?? 9) - (rank[b.sizeBadge] ?? 9);
+      if (byBadge !== 0) return byBadge;
+      return new Decimal(a.boardSizeMeters).comparedTo(new Decimal(b.boardSizeMeters));
+    });
+
+    return {
+      sourceBranchId: branch.id,
+      sourceBranchNameAr: branch.nameAr,
+      productSkuId: sku.id,
+      productCode: sku.code,
+      productNameAr: sku.colorNameAr,
+      productNameEn: sku.colorNameEn ?? null,
+      options,
+      committedChanges: 0,
     };
   }
 
