@@ -143,3 +143,49 @@ export function tryClassifyTransferSizeOption(input: {
     throw e;
   }
 }
+
+// ── source availability (shared by the size picker and the product picker) ──
+
+export interface SourceAvailabilityVerdict {
+  enabled: boolean;
+  disabledReason: string | null;
+  disabledReasonAr: string | null;
+}
+
+/**
+ * Whether one variant can be transferred out of one branch right now.
+ *
+ * This is the single definition of "available in the source warehouse". The
+ * size cards ask it per variant; the product picker asks it for every variant
+ * of a product and shows the product when any answer is yes. Keeping it in one
+ * function is the point: if the two screens ever disagreed, the picker would
+ * offer a product whose every size then turned out to be greyed out, which is
+ * exactly the confusion this feature exists to remove.
+ *
+ * An inconsistent balance is reported, never repaired, and never satisfied from
+ * a sibling variant.
+ */
+export function decideSourceAvailability(input: {
+  variantActive: boolean;
+  boards: Decimal;
+  metres: Decimal;
+}): SourceAvailabilityVerdict {
+  if (!input.variantActive) {
+    return { enabled: false, disabledReason: "VARIANT_INACTIVE", disabledReasonAr: "هذا المقاس غير نشط." };
+  }
+  if (input.boards.isZero() !== input.metres.isZero()) {
+    return {
+      enabled: false,
+      disabledReason: "SOURCE_BALANCE_INCONSISTENT",
+      disabledReasonAr: "الرصيد يحتاج مراجعة قبل التحويل",
+    };
+  }
+  if (input.boards.lte(0) || input.metres.lte(0)) {
+    return {
+      enabled: false,
+      disabledReason: "SOURCE_SIZE_OPTION_UNAVAILABLE",
+      disabledReasonAr: "غير متاح في المخزن المحدد",
+    };
+  }
+  return { enabled: true, disabledReason: null, disabledReasonAr: null };
+}

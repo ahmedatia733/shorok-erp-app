@@ -192,3 +192,29 @@ export const getSourceSizeOptions = (sourceBranchId: string, productSkuId: strin
   apiCall<SourceSizeOptionsResponse>(
     `/inventory-transfers/source-size-options?${new URLSearchParams({ sourceBranchId, productSkuId }).toString()}`,
   );
+
+// ── Source-warehouse product picker (P11) ─────────────────────────────────
+
+export interface SourceProduct {
+  productSkuId: string;
+  code: string;
+  nameAr: string;
+  nameEn: string | null;
+  enabledSizeCount: number;
+}
+
+export interface SourceProductsResponse {
+  sourceBranchId: string;
+  sourceBranchNameAr: string;
+  products: SourceProduct[];
+  committedChanges: 0;
+}
+
+/**
+ * Read-only. One request per source branch — the server does the filtering, so
+ * the browser never asks about products one at a time.
+ */
+export const getSourceProducts = (sourceBranchId: string) =>
+  apiCall<SourceProductsResponse>(
+    `/inventory-transfers/source-products?${new URLSearchParams({ sourceBranchId }).toString()}`,
+  );

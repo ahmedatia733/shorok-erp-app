@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import type { AppLocale } from "../../../../../../i18n";
@@ -14,12 +14,13 @@ import { SourceSizeOptions } from "../../../../../../components/features/invento
 import { TransferPreviewPanel } from "../../../../../../components/features/inventory/transfer-preview-panel";
 import { SearchableSelect } from "../../../../../../components/ui/searchable-select";
 import { ApiClientError } from "../../../../../../lib/api-client";
-import { listSkus, type SkuRow } from "../../../../../../lib/admin-client";
 import { listBranches, type BranchSummary } from "../../../../../../lib/inventory-client";
 import {
   createTransfer,
+  getSourceProducts,
   previewTransferPayload,
   type InventoryTransferPreview,
+  type SourceProduct,
   type SourceSizeOption,
   type TransferPayload,
 } from "../../../../../../lib/inventory-transfers-client";
@@ -57,7 +58,12 @@ export default function NewInventoryTransferPage() {
   const router = useRouter();
 
   const [branches, setBranches] = useState<BranchSummary[]>([]);
-  const [skus, setSkus] = useState<SkuRow[]>([]);
+  // Only the products that can actually leave the chosen source warehouse.
+  const [products, setProducts] = useState<SourceProduct[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [productsError, setProductsError] = useState<string | null>(null);
+  /** Discards a slow answer for a branch the user has already moved on from. */
+  const productsTicket = useRef(0);
   const [transferDate, setTransferDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [sourceBranchId, setSourceBranchId] = useState("");
   const [destinationBranchId, setDestinationBranchId] = useState("");
@@ -71,18 +77,52 @@ export default function NewInventoryTransferPage() {
 
   useEffect(() => {
     void listBranches().then((rows) => setBranches(rows.filter((b) => b.active)));
-    void listSkus().then((rows) => setSkus(rows.filter((r) => r.active)));
   }, []);
 
+  // The catalogue is no longer the product list — the source warehouse is.
+  useEffect(() => {
+    if (!sourceBranchId) {
+      setProducts([]);
+      setProductsError(null);
+      setProductsLoading(false);
+      return;
+    }
+    const ticket = ++productsTicket.current;
+    const asked = sourceBranchId;
+    setProductsLoading(true);
+    setProductsError(null);
+    void getSourceProducts(asked)
+      .then((res) => {
+        // Two guards, because an out-of-order response must never repaint the
+        // picker with another warehouse's products: the newest request wins,
+        // and the payload has to say it is about the branch we are showing.
+        if (ticket !== productsTicket.current || res.sourceBranchId !== asked) return;
+        setProducts(res.products);
+      })
+      .catch((e: unknown) => {
+        if (ticket !== productsTicket.current) return;
+        setProducts([]);
+        setProductsError(apiMessages(e)[0] ?? "تعذّر تحميل الأصناف المتاحة.");
+      })
+      .finally(() => {
+        if (ticket === productsTicket.current) setProductsLoading(false);
+      });
+  }, [sourceBranchId]);
+
   /**
-   * Changing the source warehouse invalidates every size already picked: those
-   * cards described stock in the OLD branch. The base product survives — it is
-   * the same product wherever it sits — but the exact variant and its quantity
-   * do not, and must be chosen again from the new branch's real stock.
+   * Changing the source warehouse invalidates the whole line, product included.
+   *
+   * P10 kept the product across a branch change on the reasoning that a product
+   * is the same product wherever it sits. That is true of the product but not
+   * of the choice: the picker now only offers what the selected warehouse can
+   * actually send, so a product carried over from the previous branch may not
+   * be transferable here at all. Clearing it is the honest behaviour.
    */
   const changeSourceBranch = (branchId: string) => {
     setSourceBranchId(branchId);
-    setLines((ls) => ls.map((l) => ({ ...l, productVariantId: null, sizeOption: null, boardQuantity: "" })));
+    setLines((ls) =>
+      ls.map((l) => ({ ...l, productSkuId: null, productVariantId: null, sizeOption: null, boardQuantity: "" })),
+    );
     setPreview(null);
   };
 
@@ -265,19 +305,36 @@ export default function NewInventoryTransferPage() {
               {lines.map((line, index) => (
                 <TR key={line.key}>
                   <TD>
-                    <SearchableSelect
-                      id={`line-sku-${index}`}
-                      testId={`line-sku-${index}`}
-                      value={line.productSkuId ?? ""}
-                      onChange={(id) => changeLineSku(index, id)}
-                      placeholder="— اختر الصنف —"
-                      clearable
-                      options={skus.map((sk) => ({
-                        value: sk.id,
-                        label: `${sk.code} — ${sk.colorNameAr}`,
-                        keywords: [sk.code, sk.colorNameAr, sk.colorNameEn].filter(Boolean).join(" "),
-                      }))}
-                    />
+                    {!sourceBranchId ? (
+                      <p className="text-sm text-textSecondary">اختر المخزن المصدر أولًا.</p>
+                    ) : productsError ? (
+                      <p className="text-sm text-danger" data-testid={`line-sku-error-${index}`}>
+                        {productsError}
+                      </p>
+                    ) : !productsLoading && products.length === 0 ? (
+                      <p className="text-sm text-textSecondary" data-testid={`line-sku-empty-${index}`}>
+                        لا توجد أصناف متاحة للتحويل في المخزن المحدد.
+                      </p>
+                    ) : (
+                      <SearchableSelect
+                        id={`line-sku-${index}`}
+                        testId={`line-sku-${index}`}
+                        value={line.productSkuId ?? ""}
+                        onChange={(id) => changeLineSku(index, id)}
+                        placeholder="— اختر الصنف —"
+                        loading={productsLoading}
+                        loadingText="جارٍ تحميل الأصناف المتاحة..."
+                        emptyText="لا توجد أصناف متاحة للتحويل في المخزن المحدد."
+                        clearable
+                        // Search still matches code, Arabic and English name —
+                        // but only within what this warehouse can actually send.
+                        options={products.map((pr) => ({
+                          value: pr.productSkuId,
+                          label: `${pr.code} — ${pr.nameAr}`,
+                          keywords: [pr.code, pr.nameAr, pr.nameEn].filter(Boolean).join(" "),
+                        }))}
+                      />
+                    )}
                   </TD>
                   <TD>
                     <SourceSizeOptions

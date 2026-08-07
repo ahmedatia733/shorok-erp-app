@@ -5,6 +5,7 @@ import {
   CreateInventoryTransferSchema,
   InventoryTransferQuerySchema,
   PreviewInventoryTransferSchema,
+  SourceProductsQuerySchema,
   SourceSizeOptionsQuerySchema,
   UpdateInventoryTransferSchema,
   type CancelInventoryTransfer,
@@ -12,6 +13,7 @@ import {
   type CreateInventoryTransfer,
   type InventoryTransferQuery,
   type PreviewInventoryTransfer,
+  type SourceProductsQuery,
   type SourceSizeOptionsQuery,
   type UpdateInventoryTransfer,
 } from "@shorok/shared";
@@ -55,6 +57,23 @@ export class InventoryTransfersController {
    * GET, and read-only in the strictest sense: it creates no transfer, no line,
    * no movement, no audit business event, and consumes no number.
    */
+  /**
+   * The products that can actually be transferred out of one branch.
+   *
+   * Like `source-size-options`, declared before `:id` so Nest does not route
+   * the literal path into the transfer-by-id handler. GET and strictly
+   * read-only: no transfer, no line, no movement, no audit business event, no
+   * sequence consumed.
+   */
+  @Get("source-products")
+  @Roles("OWNER", "ACCOUNTANT", "WAREHOUSE", "BRANCH_MANAGER")
+  sourceProducts(
+    @Query(new ZodValidationPipe(SourceProductsQuerySchema)) query: SourceProductsQuery,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.service.sourceProducts(query, user);
+  }
+
   @Get("source-size-options")
   @Roles("OWNER", "ACCOUNTANT", "WAREHOUSE", "BRANCH_MANAGER")
   sourceSizeOptions(

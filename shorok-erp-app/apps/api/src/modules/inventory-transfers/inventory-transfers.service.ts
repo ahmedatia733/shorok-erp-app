@@ -9,6 +9,9 @@ import type {
   InventoryTransferPreview,
   InventoryTransferPreviewLine,
   InventoryTransferQuery,
+  SourceProduct,
+  SourceProductsQuery,
+  SourceProductsResponse,
   SourceSizeOption,
   SourceSizeOptionsQuery,
   SourceSizeOptionsResponse,
@@ -38,7 +41,7 @@ import {
   rate,
   TransferMathError,
 } from "./transfer-math";
-import { tryClassifyTransferSizeOption } from "./size-classification";
+import { decideSourceAvailability, tryClassifyTransferSizeOption } from "./size-classification";
 
 type Tx = Prisma.TransactionClient;
 
@@ -301,6 +304,113 @@ export class InventoryTransfersService {
     };
   }
 
+  // ── source-warehouse product picker (read-only) ──────────────────────────
+
+  /**
+   * The products that can actually be transferred out of one branch.
+   *
+   * A product qualifies when at least one of its variants is available here,
+   * judged by `decideSourceAvailability` — the very same function the size
+   * cards use. That shared call is the whole point: the picker can never offer
+   * a product whose every size then turns out to be greyed out.
+   *
+   * Each product appears exactly once no matter how many of its sizes qualify;
+   * choosing between those sizes is the next step's job, not this one's.
+   *
+   * Deliberately one database round trip. The obvious implementation — list the
+   * catalogue, then ask the size endpoint about each SKU in turn — would put
+   * one request per product on a live server every time someone opens the
+   * dropdown. Here the branch's balances are attached to the variants by a
+   * filtered relation, so the answer costs a single query regardless of
+   * catalogue size.
+   *
+   * Nothing about cost, price or the destination branch appears in the result:
+   * none of it belongs in a picker, and the destination must have no influence
+   * on what can be sent.
+   */
+  async sourceProducts(
+    query: SourceProductsQuery,
+    user: AuthenticatedUser,
+  ): Promise<SourceProductsResponse> {
+    // `sourceBranchId` is not the literal `branchId` the global BranchScopeGuard
+    // looks for, so authorization is enforced here rather than assumed.
+    if (user.role !== "OWNER" && !user.allowedBranches.includes(query.sourceBranchId)) {
+      throw new BranchForbiddenError({
+        reason: "UNAUTHORIZED_BRANCH_ACCESS",
+        branchId: query.sourceBranchId,
+      });
+    }
+
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: query.sourceBranchId },
+      select: { id: true, nameAr: true, active: true },
+    });
+    if (!branch) {
+      throw new NotFoundError({ reason: "SOURCE_BRANCH_NOT_FOUND", branchId: query.sourceBranchId });
+    }
+    if (!branch.active) {
+      throw new ValidationError({
+        reason: "SOURCE_BRANCH_INACTIVE",
+        messageAr: `المخزن «${branch.nameAr}» غير نشط.`,
+      });
+    }
+
+    // One query: every variant of every active product, carrying only this
+    // branch's balance row.
+    const variants = await this.prisma.productVariant.findMany({
+      where: { sku: { active: true } },
+      select: {
+        id: true,
+        sizeMetersPerBoard: true,
+        active: true,
+        sku: { select: { id: true, code: true, colorNameAr: true, colorNameEn: true } },
+        inventoryBalances: {
+          where: { branchId: branch.id },
+          select: { boardsOnHand: true, metersOnHand: true },
+        },
+      },
+    });
+
+    const bySku = new Map<string, SourceProduct>();
+    for (const variant of variants) {
+      // A size that cannot be classified cannot be offered, so it cannot make
+      // its product selectable either.
+      if (!tryClassifyTransferSizeOption({ sizeMetersPerBoard: variant.sizeMetersPerBoard })) continue;
+
+      const balance = variant.inventoryBalances[0];
+      const { enabled } = decideSourceAvailability({
+        variantActive: variant.active,
+        boards: D(balance?.boardsOnHand),
+        metres: D(balance?.metersOnHand),
+      });
+      if (!enabled) continue;
+
+      const existing = bySku.get(variant.sku.id);
+      if (existing) {
+        existing.enabledSizeCount += 1;
+        continue;
+      }
+      bySku.set(variant.sku.id, {
+        productSkuId: variant.sku.id,
+        code: variant.sku.code,
+        nameAr: variant.sku.colorNameAr,
+        nameEn: variant.sku.colorNameEn ?? null,
+        enabledSizeCount: 1,
+      });
+    }
+
+    const products = [...bySku.values()].sort((a, b) =>
+      a.code.localeCompare(b.code, "ar", { numeric: true }),
+    );
+
+    return {
+      sourceBranchId: branch.id,
+      sourceBranchNameAr: branch.nameAr,
+      products,
+      committedChanges: 0,
+    };
+  }
+
   // ── source-stock size options (read-only) ────────────────────────────────
 
   /**
@@ -393,22 +503,13 @@ export class InventoryTransfersService {
       const boards = D(balance?.boardsOnHand);
       const metres = D(balance?.metersOnHand);
 
-      let disabledReason: string | null = null;
-      let disabledReasonAr: string | null = null;
-
-      if (!variant.active) {
-        disabledReason = "VARIANT_INACTIVE";
-        disabledReasonAr = "هذا المقاس غير نشط.";
-      } else if (boards.isZero() !== metres.isZero()) {
-        // A board count and a metre count that disagree is a pre-existing data
-        // problem. Say so and refuse the option; do not quietly repair it, and
-        // never satisfy it from a different variant.
-        disabledReason = "SOURCE_BALANCE_INCONSISTENT";
-        disabledReasonAr = "الرصيد يحتاج مراجعة قبل التحويل";
-      } else if (boards.lte(0) || metres.lte(0)) {
-        disabledReason = "SOURCE_SIZE_OPTION_UNAVAILABLE";
-        disabledReasonAr = "غير متاح في المخزن المحدد";
-      }
+      // The one shared definition of availability — the product picker asks the
+      // very same question, so the two screens cannot drift apart.
+      const { enabled, disabledReason, disabledReasonAr } = decideSourceAvailability({
+        variantActive: variant.active,
+        boards,
+        metres,
+      });
 
       options.push({
         productVariantId: variant.id,
@@ -421,7 +522,7 @@ export class InventoryTransfersService {
         widthMeters: display.widthMeters,
         boardsAvailable: qty(boards),
         metersAvailable: qty(metres),
-        enabled: disabledReason === null,
+        enabled,
         disabledReason,
         disabledReasonAr,
         variantCode: sku.code,

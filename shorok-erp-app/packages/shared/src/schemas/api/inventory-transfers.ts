@@ -221,3 +221,32 @@ export interface SourceSizeOptionsResponse {
   /** Proof this read changed nothing. */
   committedChanges: 0;
 }
+
+// ── Source-warehouse product picker (P11) ─────────────────────────────────
+//
+// Which PRODUCTS can actually be transferred out of a branch. A product
+// qualifies exactly when at least one of its size options would be enabled by
+// the P10 rules — same definition, asked once per variant instead of once per
+// screen.
+
+export const SourceProductsQuerySchema = z.object({
+  sourceBranchId: z.string().uuid(),
+});
+export type SourceProductsQuery = z.infer<typeof SourceProductsQuerySchema>;
+
+export interface SourceProduct {
+  productSkuId: string;
+  code: string;
+  nameAr: string;
+  nameEn: string | null;
+  /** How many of this product's sizes are transferable from this branch. */
+  enabledSizeCount: number;
+}
+
+export interface SourceProductsResponse {
+  sourceBranchId: string;
+  sourceBranchNameAr: string;
+  products: SourceProduct[];
+  /** Proof this read changed nothing. */
+  committedChanges: 0;
+}
