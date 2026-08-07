@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import {
   AccountBalanceQuerySchema,
@@ -11,10 +11,12 @@ import {
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
-import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
+import { NotFoundError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
+/* eslint-disable @typescript-eslint/consistent-type-imports */
 import { PrismaService } from "../../prisma/prisma.service";
-import { AuditService } from "../audit/audit.service";
+import { AccountsService } from "./accounts.service";
+/* eslint-enable @typescript-eslint/consistent-type-imports */
 
 interface AccountNode {
   id: string;
@@ -37,7 +39,7 @@ interface AccountNode {
 export class AccountsController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly audit: AuditService,
+    private readonly accounts: AccountsService,
   ) {}
 
   /**
@@ -89,6 +91,10 @@ export class AccountsController {
 
   /**
    * POST /accounts — OWNER only: create a new account.
+   *
+   * The rules live in AccountsService because the Expenses area creates expense
+   * accounts through the same service; there is one definition of a valid
+   * account, not one per screen.
    */
   @Post()
   @Roles("OWNER")
@@ -96,66 +102,7 @@ export class AccountsController {
     @Body(new ZodValidationPipe(CreateAccountRequestSchema)) body: CreateAccountRequest,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    // Check for duplicate code
-    const existing = await this.prisma.account.findUnique({ where: { code: body.code } });
-    if (existing) {
-      throw new ValidationError({ reason: "code_already_exists", code: body.code });
-    }
-
-    return this.prisma.runInTransaction(async (tx) => {
-      // If parent specified, mark it as non-leaf
-      if (body.parentId) {
-        const parent = await tx.account.findUnique({ where: { id: body.parentId } });
-        if (!parent) throw new NotFoundError({ parentId: body.parentId });
-        if (parent.isLeaf) {
-          await tx.account.update({ where: { id: body.parentId }, data: { isLeaf: false } });
-        }
-      }
-
-      const account = await tx.account.create({
-        data: {
-          code: body.code,
-          nameAr: body.nameAr,
-          nameEn: body.nameEn,
-          category: body.category,
-          accountType: body.accountType,
-          parentId: body.parentId ?? null,
-          isLeaf: true,
-        },
-      });
-
-      await this.audit.write({
-        tx,
-        actorId: user.id,
-        action: "CREATE",
-        entityType: "account",
-        entityId: account.id,
-        afterSnapshot: {
-          code: account.code,
-          nameAr: account.nameAr,
-          nameEn: account.nameEn,
-          category: account.category,
-          accountType: account.accountType,
-          parentId: account.parentId,
-        },
-        summaryAr: `${user.name} أنشأ حساباً: ${account.code} — ${account.nameAr}`,
-        summaryEn: `${user.name} created account: ${account.code} — ${account.nameEn}`,
-      });
-
-      return {
-        id: account.id,
-        code: account.code,
-        nameAr: account.nameAr,
-        nameEn: account.nameEn,
-        category: account.category,
-        accountType: account.accountType,
-        parentId: account.parentId,
-        isLeaf: account.isLeaf,
-        active: account.active,
-        createdAt: account.createdAt,
-        children: [],
-      };
-    });
+    return this.accounts.create(body, user);
   }
 
   /**
@@ -168,45 +115,7 @@ export class AccountsController {
     @Body(new ZodValidationPipe(UpdateAccountRequestSchema)) body: UpdateAccountRequest,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.prisma.runInTransaction(async (tx) => {
-      const before = await tx.account.findUnique({ where: { id } });
-      if (!before) throw new NotFoundError({ id });
-
-      const after = await tx.account.update({
-        where: { id },
-        data: {
-          ...(body.nameAr !== undefined ? { nameAr: body.nameAr } : {}),
-          ...(body.nameEn !== undefined ? { nameEn: body.nameEn } : {}),
-          ...(body.active !== undefined ? { active: body.active } : {}),
-        },
-      });
-
-      await this.audit.write({
-        tx,
-        actorId: user.id,
-        action: "UPDATE",
-        entityType: "account",
-        entityId: id,
-        beforeSnapshot: { nameAr: before.nameAr, nameEn: before.nameEn, active: before.active },
-        afterSnapshot: { nameAr: after.nameAr, nameEn: after.nameEn, active: after.active },
-        summaryAr: `${user.name} عدّل حساب: ${after.code} — ${after.nameAr}`,
-        summaryEn: `${user.name} updated account: ${after.code} — ${after.nameEn}`,
-      });
-
-      return {
-        id: after.id,
-        code: after.code,
-        nameAr: after.nameAr,
-        nameEn: after.nameEn,
-        category: after.category,
-        accountType: after.accountType,
-        parentId: after.parentId,
-        isLeaf: after.isLeaf,
-        active: after.active,
-        createdAt: after.createdAt,
-        children: [],
-      };
-    });
+    return this.accounts.update(id, body, user);
   }
 
   /**

@@ -97,6 +97,13 @@ export default function ProtectedAppLayout({ children }: { children: React.React
         <div className="mb-6 text-lg font-bold">شروق · Shorok</div>
         <nav className="space-y-1 text-sm">
 
+          {/* المصروفات — a main entry of its own: it is the screen people open
+              daily, and it reads the same GL data the accounting section does,
+              so it carries the same audience. */}
+          {canSeeAccounting && (
+            <NavLink href={`/${locale}/accounting/expenses`} label="المصروفات" />
+          )}
+
           {/* Accounting section — OWNER and ACCOUNTANT only */}
           {canSeeAccounting && (
             <NavSection

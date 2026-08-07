@@ -20,6 +20,7 @@ import {
   type JournalEntryRow,
 } from "../../../../../lib/journal-client";
 import { listAccounts, type AccountRow } from "../../../../../lib/accounts-client";
+import { ExpenseItemCreateModal } from "../../../../../components/features/expenses/expense-item-modal";
 import { listCustomers, createCustomer, type CustomerRow } from "../../../../../lib/customers-client";
 import { listRepresentatives, type SalesRepresentative } from "../../../../../lib/sales-representatives-client";
 import { RepresentativeFormModal } from "../../../../../components/sales-representatives/representative-form-modal";
@@ -165,6 +166,9 @@ export default function JournalPage() {
   // ── Create modal state ────────────────────────────────────────────────────
   const [createOpen,    setCreateOpen]    = useState(false);
   const [leafAccounts,  setLeafAccounts]  = useState<AccountRow[]>([]);
+  // Which journal line opened «+ إضافة مصروف», so the new account lands on that
+  // line and nowhere else. null = the modal is closed.
+  const [expenseQuickAddLine, setExpenseQuickAddLine] = useState<number | null>(null);
   const [customers,     setCustomers]     = useState<CustomerRow[]>([]);
   const [suppliers,     setSuppliers]     = useState<SupplierRow[]>([]);
   const [reps,          setReps]          = useState<SalesRepresentative[]>([]);
@@ -271,6 +275,39 @@ export default function JournalPage() {
 
   function updateLine(idx: number, patch: Partial<JournalLine>) {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  }
+
+  /**
+   * Takes the expense account that was just created and puts it on the line the
+   * user was filling in.
+   *
+   * Two things matter here. The account list is refetched rather than patched,
+   * so the new item is searchable straight away — it loads once, guarded by
+   * `leafAccounts.length > 0`, and would otherwise stay stale until the modal
+   * was reopened. And the line is patched in a single `updateLine` call: routing
+   * this through `handleCategoryChange` would clear the very field being set,
+   * and nothing else on the form — the date, the description, the reference, the
+   * other lines and their amounts — is touched at all.
+   */
+  async function handleExpenseCreated(
+    idx: number,
+    account: { id: string; code: string; nameAr: string },
+  ) {
+    try {
+      setLeafAccounts(getAllLeafs(await listAccounts()));
+    } catch {
+      // A failed refresh must not lose the selection; the account exists either
+      // way, and the picker will catch up the next time the modal opens.
+    }
+    updateLine(idx, {
+      category: "expense",
+      accountId: account.id,
+      accountNameAr: account.nameAr,
+      // An expense account is never a control account, so no party applies.
+      partyType: undefined,
+      partyId: undefined,
+      entityLabel: "",
+    });
   }
 
   function handleCategoryChange(idx: number, cat: string) {
@@ -939,16 +976,37 @@ export default function JournalPage() {
                             )}
                           </div>
                         ) : (
-                          <SearchableSelect
-                            testId={`je-account-${idx}`}
-                            value={line.accountId}
-                            onChange={(v) => handleAccountChange(idx, v)}
-                            options={accountOptions(line.category)}
-                            placeholder={t("cbSearchAccounts")}
-                            emptyText={t("cbNoResults")}
-                            loadingText={t("cbLoading")}
-                            clearable
-                          />
+                          <div className="flex items-start gap-1">
+                            <div className="flex-1 min-w-0">
+                              <SearchableSelect
+                                testId={`je-account-${idx}`}
+                                value={line.accountId}
+                                onChange={(v) => handleAccountChange(idx, v)}
+                                options={accountOptions(line.category)}
+                                placeholder={t("cbSearchAccounts")}
+                                emptyText={t("cbNoResults")}
+                                loadingText={t("cbLoading")}
+                                clearable
+                              />
+                            </div>
+                            {/* Only on the expenses list, and only for someone who
+                                may actually create an account — the journal modal
+                                is open to ACCOUNTANTs, but adding to the chart of
+                                accounts is OWNER-only, so an ungated button would
+                                promise a 403. */}
+                            {line.category === "expense" && isOwner && (
+                              <button
+                                type="button"
+                                data-testid={`je-add-expense-${idx}`}
+                                title="إضافة بند مصروف جديد"
+                                aria-label="إضافة بند مصروف جديد"
+                                onClick={() => setExpenseQuickAddLine(idx)}
+                                className="shrink-0 rounded-md border border-border px-2 py-2 text-xs text-textSecondary hover:border-primary hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                              >
+                                + إضافة مصروف
+                              </button>
+                            )}
+                          </div>
                         )}
                         {/* Party required when a control account (AR/AP) is chosen directly */}
                         {line.partyType && line.category !== "customers" && line.category !== "suppliers" && (
@@ -1120,6 +1178,20 @@ export default function JournalPage() {
       {quickRepIdx !== null && (
         <RepresentativeFormModal rep={null} onClose={() => setQuickRepIdx(null)} onSaved={onQuickRepCreated} />
       )}
+
+      {/* Quick-add expense item — the same modal, endpoint and rules as
+          «إدارة المصروفات». Opening it leaves the journal exactly as it was;
+          only the line that asked for it changes, and only once an account has
+          actually been created. */}
+      <ExpenseItemCreateModal
+        open={expenseQuickAddLine !== null}
+        onClose={() => setExpenseQuickAddLine(null)}
+        existingCodes={leafAccounts.map((a) => a.code)}
+        onCreated={(account) => {
+          const idx = expenseQuickAddLine;
+          if (idx !== null) void handleExpenseCreated(idx, account);
+        }}
+      />
     </div>
   );
 }

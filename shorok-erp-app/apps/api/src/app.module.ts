@@ -16,6 +16,7 @@ import { AuditModule } from "./modules/audit/audit.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { BranchesModule } from "./modules/branches/branches.module";
 import { ExpensesModule } from "./modules/expenses/expenses.module";
+import { ExpenseAccountsModule } from "./modules/expense-accounts/expense-accounts.module";
 import { FactoryLedgerModule } from "./modules/factory-ledger/factory-ledger.module";
 import { InventoryModule } from "./modules/inventory/inventory.module";
 import { OrdersModule } from "./modules/orders/orders.module";
@@ -92,6 +93,7 @@ import { InventoryTransfersModule } from "./modules/inventory-transfers/inventor
     InventoryTransfersModule,
     OrdersModule,
     ExpensesModule,
+    ExpenseAccountsModule,
     FactoryLedgerModule,
     ReportsModule,
     AccountingStatementsModule,
