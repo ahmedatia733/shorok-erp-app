@@ -9,7 +9,6 @@ import type {
   InventoryTransferPreview,
   InventoryTransferPreviewLine,
   InventoryTransferQuery,
-  SourceProduct,
   SourceProductsQuery,
   SourceProductsResponse,
   SourceSizeOption,
@@ -31,6 +30,7 @@ import type { AuthenticatedUser } from "../../common/types/request-user";
 import { AuditService } from "../audit/audit.service";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
+import { InventoryAvailabilityService } from "../inventory/inventory-availability.service";
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 import {
   assertPairConserves,
@@ -146,6 +146,7 @@ export class InventoryTransfersService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly inventory: InventoryEngine,
+    private readonly availability: InventoryAvailabilityService,
   ) {}
 
   // ── reads ────────────────────────────────────────────────────────────────
@@ -355,58 +356,21 @@ export class InventoryTransfersService {
       });
     }
 
-    // One query: every variant of every active product, carrying only this
-    // branch's balance row.
-    const variants = await this.prisma.productVariant.findMany({
-      where: { sku: { active: true } },
-      select: {
-        id: true,
-        sizeMetersPerBoard: true,
-        active: true,
-        sku: { select: { id: true, code: true, colorNameAr: true, colorNameEn: true } },
-        inventoryBalances: {
-          where: { branchId: branch.id },
-          select: { boardsOnHand: true, metersOnHand: true },
-        },
-      },
-    });
-
-    const bySku = new Map<string, SourceProduct>();
-    for (const variant of variants) {
-      // A size that cannot be classified cannot be offered, so it cannot make
-      // its product selectable either.
-      if (!tryClassifyTransferSizeOption({ sizeMetersPerBoard: variant.sizeMetersPerBoard })) continue;
-
-      const balance = variant.inventoryBalances[0];
-      const { enabled } = decideSourceAvailability({
-        variantActive: variant.active,
-        boards: D(balance?.boardsOnHand),
-        metres: D(balance?.metersOnHand),
-      });
-      if (!enabled) continue;
-
-      const existing = bySku.get(variant.sku.id);
-      if (existing) {
-        existing.enabledSizeCount += 1;
-        continue;
-      }
-      bySku.set(variant.sku.id, {
-        productSkuId: variant.sku.id,
-        code: variant.sku.code,
-        nameAr: variant.sku.colorNameAr,
-        nameEn: variant.sku.colorNameEn ?? null,
-        enabledSizeCount: 1,
-      });
-    }
-
-    const products = [...bySku.values()].sort((a, b) =>
-      a.code.localeCompare(b.code, "ar", { numeric: true }),
-    );
+    // Delegated: the stock-adjustment picker asks the very same question, and
+    // one definition of "this product exists in this branch" is the only way
+    // the two screens can be guaranteed to agree.
+    const found = await this.availability.productsInBranch(branch.id);
 
     return {
       sourceBranchId: branch.id,
       sourceBranchNameAr: branch.nameAr,
-      products,
+      products: found.map((p) => ({
+        productSkuId: p.productSkuId,
+        code: p.code,
+        nameAr: p.nameAr,
+        nameEn: p.nameEn,
+        enabledSizeCount: p.availableSizeCount,
+      })),
       committedChanges: 0,
     };
   }

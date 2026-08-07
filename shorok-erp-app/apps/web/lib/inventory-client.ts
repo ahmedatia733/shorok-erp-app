@@ -1,7 +1,15 @@
 "use client";
 
-import type { MovementType } from "@shorok/shared";
+import type {
+  BranchStockProduct,
+  BranchStockProductsResponse,
+  BranchStockSize,
+  BranchStockSizesResponse,
+  MovementType,
+} from "@shorok/shared";
 import { apiCall } from "./api-client";
+
+export type { BranchStockProduct, BranchStockSize };
 
 export interface BranchSummary {
   id: string;
@@ -124,6 +132,18 @@ export const postAdjustment = (body: {
     method: "POST",
     body,
   });
+
+// ── what a branch is actually holding (the stock-settlement pickers) ──
+
+export const getBranchStockProducts = (branchId: string) =>
+  apiCall<BranchStockProductsResponse>(
+    `/inventory/branch-stock/products?${new URLSearchParams({ branchId }).toString()}`,
+  );
+
+export const getBranchStockSizes = (branchId: string, productSkuId: string) =>
+  apiCall<BranchStockSizesResponse>(
+    `/inventory/branch-stock/sizes?${new URLSearchParams({ branchId, productSkuId }).toString()}`,
+  );
 
 export const postCount = (body: {
   branchId: string;
