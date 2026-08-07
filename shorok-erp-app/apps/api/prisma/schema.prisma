@@ -383,6 +383,13 @@ model ProductSku {
   colorNameAr String          @map("color_name_ar") @db.VarChar(120)
   colorNameEn String          @map("color_name_en") @db.VarChar(120)
   category    ProductCategory @default(NORMAL)
+  /// The purchase price typed when the product was first created, per square
+  /// metre, in the same unit as a purchase invoice line. It is a STARTING
+  /// FIGURE and a display fallback only: it is never posted, never a WAC, never
+  /// an inventory value, and never pushed into an invoice. Once the product has
+  /// a confirmed purchase, that purchase is what the catalogue shows. Nullable
+  /// because every product that existed before this column did so without one.
+  initialPurchasePricePerMeter Decimal? @map("initial_purchase_price_per_meter") @db.Decimal(14, 2)
   active      Boolean         @default(true)
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)

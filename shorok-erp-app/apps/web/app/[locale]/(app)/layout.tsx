@@ -154,6 +154,7 @@ export default function ProtectedAppLayout({ children }: { children: React.React
             open={warehousesOpen}
             onToggle={() => setWarehousesOpen((v) => !v)}
           >
+            <NavLink href={`/${locale}/products`} label="إضافة صنف جديد" />
             <NavLink href={`/${locale}/inventory`} label={t("inventory")} />
             <NavLink href={`/${locale}/inventory/movements`} label={t("inventoryMovements")} />
             <NavLink href={`/${locale}/inventory/stock`} label="جرد المخزون" />

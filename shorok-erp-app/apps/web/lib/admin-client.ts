@@ -153,3 +153,43 @@ export const updateSystemSettings = (body: {
   defaultPriceOverrideTolerancePercent?: string;
   lowStockThresholdBoards?: string;
 }) => apiCall<SystemSettings>("/system-settings", { method: "PATCH", body });
+
+// ── Product master (P12) ──────────────────────────────────────────────────
+
+export type PurchasePriceSource = "LAST_CONFIRMED_PURCHASE" | "INITIAL_DEFAULT" | "NONE";
+
+export interface ProductCatalogueRow {
+  id: string;
+  code: string;
+  nameAr: string;
+  nameEn: string | null;
+  active: boolean;
+  createdAt: string;
+  purchasePrice: string | null;
+  purchasePriceSource: PurchasePriceSource;
+  variantCount: number;
+}
+
+export const listProductCatalogue = (q?: string, active: "true" | "false" | "all" = "true") => {
+  const params = new URLSearchParams({ active });
+  if (q?.trim()) params.set("q", q.trim());
+  return apiCall<{ products: ProductCatalogueRow[]; total: number }>(
+    `/products/catalogue?${params.toString()}`,
+  );
+};
+
+export interface CreateProductInput {
+  code: string;
+  colorNameAr: string;
+  initialPurchasePricePerMeter?: string;
+  /** Only sent from the purchase invoice, where a line needs an exact size. */
+  firstVariant?: { sizeMetersPerBoard: string };
+}
+
+/** The single canonical create path — both the catalogue page and the purchase
+ *  invoice call this, so validation can never diverge between them. */
+export const createProduct = (body: CreateProductInput) =>
+  apiCall<SkuRow & { firstVariant?: { id: string; sizeMetersPerBoard: string } }>("/products/skus", {
+    method: "POST",
+    body,
+  });

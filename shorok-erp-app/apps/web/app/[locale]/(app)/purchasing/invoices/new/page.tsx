@@ -17,6 +17,7 @@ import {
 } from "../../../../../../lib/purchase-invoices-client";
 import { AP_COLORS, apColorMap } from "../../../../../../lib/ap-colors";
 import { ProductVariantSelect } from "../../../../../../components/features/product-variant-select";
+import { ProductCreateModal } from "../../../../../../components/features/products/product-create-modal";
 import { type VariantItem } from "../../../../../../lib/variant-select";
 import { switchVariantLine } from "../../../../../../lib/variant-line";
 import {
@@ -93,6 +94,10 @@ export default function NewPurchaseInvoicePage() {
   const router = useRouter();
   const user = useCurrentUser();
   const canCreate = useHasRole("ACCOUNTANT");
+  // Product master creation is OWNER-only today (POST /products/skus), and this
+  // task does not widen that. The button is shown only to whoever may actually
+  // use it rather than offering an action that would be refused.
+  const canAddProduct = useHasRole("OWNER");
 
   const [invoiceDate, setInvoiceDate] = useState(today());
   const [supplierId, setSupplierId] = useState("");
@@ -103,6 +108,9 @@ export default function NewPurchaseInvoicePage() {
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [variants, setVariants] = useState<VariantOption[]>([]);
+  // Which line opened the add-product dialog, so the new product lands on the
+  // line the user was actually filling in.
+  const [quickAddLine, setQuickAddLine] = useState<number | null>(null);
   const variantMap = new Map(variants.map((v) => [v.id, v]));
   const variantItems: VariantItem[] = variants.map((v) => ({
     id: v.id, skuCode: v.skuCode, colorNameAr: v.skuNameAr, colorNameEn: v.skuNameEn,
@@ -305,12 +313,27 @@ export default function NewPurchaseInvoicePage() {
                   </td>
                   {/* الكود / الصنف — single searchable selector */}
                   <td className="border border-border px-1 py-1">
-                    <ProductVariantSelect
-                      variants={variantItems}
-                      value={line.productVariantId}
-                      onChange={(id) => onVariantChange(idx, id)}
-                      renderExtra={(v) => (v.price ? `شراء ${v.price}` : null)}
-                    />
+                    <div className="flex items-center gap-1">
+                      <div className="min-w-0 flex-1">
+                        <ProductVariantSelect
+                          variants={variantItems}
+                          value={line.productVariantId}
+                          onChange={(id) => onVariantChange(idx, id)}
+                          renderExtra={(v) => (v.price ? `شراء ${v.price}` : null)}
+                        />
+                      </div>
+                      {canAddProduct && (
+                        <button
+                          type="button"
+                          title="إضافة صنف جديد"
+                          data-testid={`pi-add-product-${idx}`}
+                          onClick={() => setQuickAddLine(idx)}
+                          className="shrink-0 rounded border border-success bg-success-bg px-2 py-1 text-xs font-bold text-success-foreground hover:opacity-90"
+                        >
+                          + صنف
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="border border-border px-1 py-1">
                     <input
@@ -450,6 +473,28 @@ export default function NewPurchaseInvoicePage() {
           </div>
         </div>
       </div>
+
+      <ProductCreateModal
+        open={quickAddLine !== null}
+        onClose={() => setQuickAddLine(null)}
+        // A purchase line has nothing to post against without an exact size, so
+        // this is the one place the form asks for one.
+        withSize
+        onCreated={(product, enteredPrice) => {
+          const line = quickAddLine;
+          setQuickAddLine(null);
+          if (line === null || !product.firstVariant) return;
+          // Refresh the selector so the new size is a real option, then put it
+          // on the line the user was filling in, with the price they just typed.
+          void listVariantsForInvoice().then((rows) => {
+            setVariants(rows);
+            updateLine(line, {
+              productVariantId: product.firstVariant!.id,
+              unitPrice: enteredPrice,
+            });
+          });
+        }}
+      />
     </div>
   );
 }

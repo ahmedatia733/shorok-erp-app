@@ -1,7 +1,7 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "../../lib/cn";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "success";
 type Size = "sm" | "md";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -19,6 +19,9 @@ const variantClasses: Record<Variant, string> = {
   secondary: "bg-surface text-textPrimary border border-border hover:bg-background",
   ghost: "bg-transparent text-textPrimary hover:bg-background",
   danger: "bg-danger text-primary-foreground hover:bg-danger-foreground",
+  // Uses the design system's existing success token — the same green the
+  // success Badge already uses — rather than a one-off colour.
+  success: "bg-success text-primary-foreground hover:opacity-90",
 };
 
 const sizeClasses: Record<Size, string> = {
