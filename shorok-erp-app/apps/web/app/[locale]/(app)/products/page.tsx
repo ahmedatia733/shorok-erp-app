@@ -11,6 +11,7 @@ import { EmptyState } from "../../../../components/ui/empty-state";
 import { Input } from "../../../../components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../components/ui/table";
 import { ProductCreateModal } from "../../../../components/features/products/product-create-modal";
+import { ProductEditModal } from "../../../../components/features/products/product-edit-modal";
 import { useHasRole } from "../../../../lib/auth";
 import { formatCurrency, formatDate } from "../../../../lib/format";
 import { listProductCatalogue, type ProductCatalogueRow } from "../../../../lib/admin-client";
@@ -30,6 +31,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<ProductCatalogueRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -83,9 +85,10 @@ export default function ProductsPage() {
                 <TR>
                   <TH>كود الصنف</TH>
                   <TH>اسم الصنف</TH>
-                  <TH>سعر الشراء</TH>
+                  <TH>سعر الشراء الافتراضي</TH>
                   <TH>الحالة</TH>
                   <TH>تاريخ الإضافة</TH>
+                  <TH>الإجراءات</TH>
                 </TR>
               </THead>
               <TBody>
@@ -94,19 +97,17 @@ export default function ProductsPage() {
                     <TD className="font-mono">{p.code}</TD>
                     <TD>{p.nameAr}</TD>
                     <TD>
-                      {p.purchasePrice ? (
-                        <span
-                          title={
-                            p.purchasePriceSource === "LAST_CONFIRMED_PURCHASE"
-                              ? "آخر سعر شراء مؤكد"
-                              : "السعر المبدئي قبل أول عملية شراء"
-                          }
-                        >
-                          {formatCurrency(p.purchasePrice, locale)}
+                      {p.purchasePriceState === "SINGLE" && p.defaultPurchasePrice ? (
+                        <span title="السعر الافتراضي للمشتريات الجديدة">
+                          {formatCurrency(p.defaultPurchasePrice, locale)}
+                        </span>
+                      ) : p.purchasePriceState === "MULTIPLE" ? (
+                        // The sizes disagree. Naming one of them would quietly
+                        // propose it as the product's price.
+                        <span className="text-textSecondary" title="أسعار شراء مختلفة حسب المقاس">
+                          أسعار متعددة
                         </span>
                       ) : (
-                        // Nothing has been bought and nothing was typed — say so
-                        // rather than print a zero that looks like a decision.
                         <span className="text-textSecondary">—</span>
                       )}
                     </TD>
@@ -116,17 +117,32 @@ export default function ProductsPage() {
                       </Badge>
                     </TD>
                     <TD className="text-textSecondary">{formatDate(p.createdAt, locale)}</TD>
+                    <TD>
+                      {canCreate && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          data-testid={`edit-product-${p.code}`}
+                          onClick={() => setEditing(p)}
+                        >
+                          تعديل
+                        </Button>
+                      )}
+                    </TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
           )}
           <p className="mt-3 text-xs text-textSecondary">
-            سعر الشراء المعروض هو آخر سعر شراء مؤكد، أو السعر المبدئي قبل أول عملية شراء.
-            المقاسات تُحدَّد من خلال فواتير الشراء.
+            سعر الشراء الافتراضي هو السعر المستخدم للمشتريات الجديدة، وليس سعر فاتورة سابقة.
+            تعديله لا يغيّر المخزون ولا متوسط التكلفة ولا الفواتير السابقة. المقاسات تُحدَّد من
+            خلال فواتير الشراء.
           </p>
         </CardBody>
       </Card>
+
+      <ProductEditModal product={editing} onClose={() => setEditing(null)} onSaved={() => void load()} />
 
       <ProductCreateModal
         open={modalOpen}

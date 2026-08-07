@@ -156,7 +156,7 @@ export const updateSystemSettings = (body: {
 
 // ── Product master (P12) ──────────────────────────────────────────────────
 
-export type PurchasePriceSource = "LAST_CONFIRMED_PURCHASE" | "INITIAL_DEFAULT" | "NONE";
+export type PurchasePriceState = "SINGLE" | "MULTIPLE" | "NONE";
 
 export interface ProductCatalogueRow {
   id: string;
@@ -165,10 +165,23 @@ export interface ProductCatalogueRow {
   nameEn: string | null;
   active: boolean;
   createdAt: string;
-  purchasePrice: string | null;
-  purchasePriceSource: PurchasePriceSource;
+  defaultPurchasePrice: string | null;
+  purchasePriceState: PurchasePriceState;
+  eligibleVariantCount: number;
+  latestConfirmedPurchasePrice: string | null;
   variantCount: number;
 }
+
+export interface UpdateProductInput {
+  code?: string;
+  colorNameAr?: string;
+  /** Sent ONLY when the user deliberately changed the price. Absent means
+   *  "leave every size's price exactly as it is". */
+  purchasePriceUpdate?: { apply: true; value: string };
+}
+
+export const updateProduct = (id: string, body: UpdateProductInput) =>
+  apiCall<SkuRow & { variantsRepriced: number }>(`/products/skus/${id}`, { method: "PATCH", body });
 
 export const listProductCatalogue = (q?: string, active: "true" | "false" | "all" = "true") => {
   const params = new URLSearchParams({ active });

@@ -4,7 +4,7 @@ import {
   type ProductCatalogueQuery,
   type ProductCatalogueResponse,
   type ProductCatalogueRow,
-  type PurchasePriceSource,
+  type PurchasePriceState,
 } from "@shorok/shared";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -22,6 +22,11 @@ interface CatalogueRow {
   initial_purchase_price_per_meter: string | null;
   latest_confirmed_price: string | null;
   variant_count: bigint;
+  /** Purchase-eligible sizes = ACTIVE variants, the same set the purchase
+   *  invoice selector offers. */
+  eligible_count: bigint;
+  distinct_default_prices: bigint;
+  single_default_price: string | null;
 }
 
 /**
@@ -71,6 +76,18 @@ export class ProductCatalogueController {
         JOIN purchase_invoices pi ON pi.id = l.invoice_id
         WHERE pi.status::text = 'CONFIRMED'
         ORDER BY v.sku_id, pi.invoice_date DESC, pi.invoice_number DESC, l.id DESC
+      ),
+      -- Purchase-eligible sizes only: GET /products/variants filters on
+      -- active = true, so that is exactly the set a new purchase can choose
+      -- from, and exactly the set whose defaults define the product's default.
+      eligible AS (
+        SELECT sku_id,
+               count(*)                                   AS eligible_count,
+               count(DISTINCT default_purchase_price_per_meter) AS distinct_default_prices,
+               min(default_purchase_price_per_meter)      AS one_price
+        FROM product_variants
+        WHERE active
+        GROUP BY sku_id
       )
       SELECT s.id,
              s.code,
@@ -80,9 +97,13 @@ export class ProductCatalogueController {
              s.created_at,
              s.initial_purchase_price_per_meter::text AS initial_purchase_price_per_meter,
              lc.unit_price::text                      AS latest_confirmed_price,
-             (SELECT count(*) FROM product_variants pv WHERE pv.sku_id = s.id) AS variant_count
+             (SELECT count(*) FROM product_variants pv WHERE pv.sku_id = s.id) AS variant_count,
+             coalesce(e.eligible_count, 0)            AS eligible_count,
+             coalesce(e.distinct_default_prices, 0)   AS distinct_default_prices,
+             e.one_price::text                        AS single_default_price
       FROM product_skus s
       LEFT JOIN latest_confirmed lc ON lc.sku_id = s.id
+      LEFT JOIN eligible e          ON e.sku_id  = s.id
       WHERE (${activeFilter}::boolean IS NULL OR s.active = ${activeFilter}::boolean)
         AND (${search}::text IS NULL
              OR s.code ILIKE ${search}::text
@@ -92,17 +113,27 @@ export class ProductCatalogueController {
     `;
 
     const products: ProductCatalogueRow[] = rows.map((r) => {
-      // A real purchase always wins; the typed starting price is only what we
-      // show until one exists; and when there is neither we say so rather than
-      // printing a zero that looks like a decision.
-      let purchasePrice: string | null = null;
-      let purchasePriceSource: PurchasePriceSource = "NONE";
-      if (r.latest_confirmed_price !== null) {
-        purchasePrice = r.latest_confirmed_price;
-        purchasePriceSource = "LAST_CONFIRMED_PURCHASE";
+      const eligible = Number(r.eligible_count);
+      const distinct = Number(r.distinct_default_prices);
+
+      // The editable default describes what the NEXT purchase should start
+      // from, so it comes from the sizes a purchase can actually choose — never
+      // from what some past invoice happened to cost. A product whose sizes
+      // disagree has no single answer, and saying "متعددة" is more honest than
+      // picking one of them.
+      let defaultPurchasePrice: string | null = null;
+      let purchasePriceState: PurchasePriceState = "NONE";
+
+      if (eligible > 0 && distinct === 1) {
+        defaultPurchasePrice = r.single_default_price;
+        purchasePriceState = "SINGLE";
+      } else if (eligible > 0 && distinct > 1) {
+        purchasePriceState = "MULTIPLE";
       } else if (r.initial_purchase_price_per_meter !== null) {
-        purchasePrice = r.initial_purchase_price_per_meter;
-        purchasePriceSource = "INITIAL_DEFAULT";
+        // No size to ask yet, so the figure typed when the product was created
+        // is the product's default.
+        defaultPurchasePrice = r.initial_purchase_price_per_meter;
+        purchasePriceState = "SINGLE";
       }
 
       return {
@@ -112,8 +143,10 @@ export class ProductCatalogueController {
         nameEn: r.color_name_en,
         active: r.active,
         createdAt: r.created_at.toISOString(),
-        purchasePrice,
-        purchasePriceSource,
+        defaultPurchasePrice,
+        purchasePriceState,
+        eligibleVariantCount: eligible,
+        latestConfirmedPurchasePrice: r.latest_confirmed_price,
         variantCount: Number(r.variant_count),
       };
     });

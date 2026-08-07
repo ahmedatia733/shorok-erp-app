@@ -123,10 +123,67 @@ export class ProductsSkuController {
     @Body(new ZodValidationPipe(UpdateSkuRequestSchema)) body: UpdateSkuRequest,
     @CurrentUser() user: AuthenticatedUser,
   ) {
+    try {
+      return await this.updateSku(id, body, user);
+    } catch (e) {
+      if (isUniqueViolation(e, "code")) {
+        throw new ConflictError("errors.conflict", {
+          reason: "PRODUCT_CODE_ALREADY_EXISTS",
+          field: "code",
+          messageAr: "كود الصنف مستخدم بالفعل.",
+          messageEn: "Product code already exists.",
+        });
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Edits a product, and — only when explicitly asked — its default purchase
+   * price.
+   *
+   * Everything happens in one transaction: the product row, every eligible
+   * size's default, and the audit. A product must never come out of this
+   * half-edited, with a new code but old prices or two of five sizes updated.
+   *
+   * Changing a default purchase price is not a purchase. It says what the next
+   * invoice should start from and nothing more: no WAC moves, no stock moves,
+   * no journal is written, and every historical invoice keeps the price it was
+   * actually agreed at.
+   */
+  private updateSku(id: string, body: UpdateSkuRequest, user: AuthenticatedUser) {
     return this.prisma.runInTransaction(async (tx) => {
       const before = await tx.productSku.findUnique({ where: { id } });
       if (!before) throw new NotFoundError({ id });
-      const after = await tx.productSku.update({ where: { id }, data: body });
+
+      const priceUpdate = body.purchasePriceUpdate;
+
+      const after = await tx.productSku.update({
+        where: { id },
+        data: {
+          ...(body.code !== undefined ? { code: body.code } : {}),
+          ...(body.colorNameAr !== undefined ? { colorNameAr: body.colorNameAr } : {}),
+          // Only when the caller actually sent one. The edit form asks for the
+          // Arabic name alone, and an English name already on the record must
+          // not be quietly replaced by it.
+          ...(body.colorNameEn !== undefined ? { colorNameEn: body.colorNameEn } : {}),
+          ...(body.active !== undefined ? { active: body.active } : {}),
+          ...(priceUpdate ? { initialPurchasePricePerMeter: priceUpdate.value } : {}),
+        },
+      });
+
+      // The eligible set is ACTIVE variants — exactly what GET /products/variants
+      // offers a new purchase invoice. Inactive sizes are left alone: they are
+      // not on offer, so changing their price would be an edit nobody asked for.
+      let variantsUpdated = 0;
+      if (priceUpdate) {
+        const res = await tx.productVariant.updateMany({
+          where: { skuId: id, active: true },
+          data: { defaultPurchasePricePerMeter: priceUpdate.value },
+        });
+        variantsUpdated = res.count;
+      }
+
       await this.audit.write({
         tx,
         actorId: user.id,
@@ -134,11 +191,16 @@ export class ProductsSkuController {
         entityType: "product_sku",
         entityId: id,
         beforeSnapshot: before,
-        afterSnapshot: after,
-        summaryAr: `حدّث المالك بيانات الصنف «${after.colorNameAr}».`,
-        summaryEn: `Owner updated SKU "${after.colorNameEn}".`,
+        afterSnapshot: { ...after, variantsRepriced: variantsUpdated },
+        summaryAr: priceUpdate
+          ? `حدّث ${user.name} بيانات الصنف «${after.colorNameAr}» (${after.code}) وسعر الشراء الافتراضي إلى ${priceUpdate.value} لعدد ${variantsUpdated} مقاس. لم يتغيّر المخزون ولا متوسط التكلفة ولا الفواتير السابقة.`
+          : `حدّث ${user.name} بيانات الصنف «${after.colorNameAr}» (${after.code}).`,
+        summaryEn: priceUpdate
+          ? `${user.name} updated SKU "${after.colorNameEn}" (${after.code}) and set the default purchase price to ${priceUpdate.value} on ${variantsUpdated} size(s). Stock, WAC and past invoices unchanged.`
+          : `${user.name} updated SKU "${after.colorNameEn}" (${after.code}).`,
       });
-      return after;
+
+      return { ...after, variantsRepriced: variantsUpdated };
     });
   }
 }

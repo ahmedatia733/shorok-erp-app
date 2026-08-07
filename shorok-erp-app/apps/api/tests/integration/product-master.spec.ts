@@ -83,7 +83,7 @@ describe("product master", () => {
     const code = uniqueCode();
     await create({ code, colorNameAr: "دقة", initialPurchasePricePerMeter: "1234.56" });
     const r = row((await catalogue()).body, (await catalogue()).body.products.find((p: { code: string }) => p.code === code)!.id)[0]!;
-    expect(r.purchasePrice).toBe("1234.56");
+    expect(r.defaultPurchasePrice).toBe("1234.56");
   });
 
   it("reports a duplicate code as a safe Arabic conflict, never a 500", async () => {
@@ -196,19 +196,19 @@ describe("product master", () => {
 
   // ── price semantics ──────────────────────────────────────────────────────
 
-  it("shows the typed starting price before any purchase exists", async () => {
+  it("shows the typed starting price as the product default before any size exists", async () => {
     const code = uniqueCode();
     const res = await create({ code, colorNameAr: "مبدئي", initialPurchasePricePerMeter: "455.25" });
     const r = row((await catalogue()).body, res.body.id)[0]!;
-    expect(r.purchasePrice).toBe("455.25");
-    expect(r.purchasePriceSource).toBe("INITIAL_DEFAULT");
+    expect(r.defaultPurchasePrice).toBe("455.25");
+    expect(r.purchasePriceState).toBe("SINGLE");
   });
 
   it("shows nothing at all when there is neither a purchase nor a starting price", async () => {
     const res = await create({ code: uniqueCode(), colorNameAr: "بدون سعر" });
     const r = row((await catalogue()).body, res.body.id)[0]!;
-    expect(r.purchasePrice).toBeNull();
-    expect(r.purchasePriceSource).toBe("NONE");
+    expect(r.defaultPurchasePrice).toBeNull();
+    expect(r.purchasePriceState).toBe("NONE");
   });
 
   // ── authorization ────────────────────────────────────────────────────────
