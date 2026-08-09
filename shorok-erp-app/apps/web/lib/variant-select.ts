@@ -16,10 +16,19 @@ export interface VariantItem {
   cost?: string | null;
 }
 
-/** Combined visible label, e.g. "1023 — أصفر — مقاس 5.25 م". */
+/**
+ * Combined visible label, e.g. "1023 — أصفر — مقاس 5.25 م".
+ *
+ * A base product that has no size yet is labelled with its code and name alone.
+ * Printing «مقاس 0 م» would put a size on screen that the product does not
+ * have, and a size nobody chose is exactly what must never be implied.
+ */
 export function variantLabel(v: VariantItem): string {
-  const size = Number(v.sizeMetersPerBoard);
-  const sizeStr = Number.isFinite(size) ? `مقاس ${trimNum(v.sizeMetersPerBoard)} م` : v.sizeMetersPerBoard;
+  const raw = (v.sizeMetersPerBoard ?? "").trim();
+  if (raw === "") return `${v.skuCode} — ${v.colorNameAr}`;
+  const size = Number(raw);
+  if (Number.isFinite(size) && size <= 0) return `${v.skuCode} — ${v.colorNameAr}`;
+  const sizeStr = Number.isFinite(size) ? `مقاس ${trimNum(raw)} م` : raw;
   return `${v.skuCode} — ${v.colorNameAr} — ${sizeStr}`;
 }
 
