@@ -159,7 +159,8 @@ credential was neither changed nor rotated.
 
 ## Artifacts
 
-- Backup: `backup/pre-legacy-returns-no-invoice-J7au-20260809T180011Z.dump`
+- Backup: `pre-legacy-returns-no-invoice-J7au-20260809T180011Z.dump`, kept with the
+  other production backups outside this repository
   (426,263 bytes, SHA-256 `5afe0b55…c8d81c9a18`, 588 TOC entries, 61 tables) —
   taken fresh immediately before the change and retained.
 - The scratch database and its temporary runner were removed afterwards.
