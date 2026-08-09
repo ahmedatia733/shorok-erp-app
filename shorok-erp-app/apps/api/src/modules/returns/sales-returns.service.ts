@@ -7,6 +7,7 @@ import { Prisma, PrismaService } from "../../prisma/prisma.service";
 import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { AuditService } from "../audit/audit.service";
+import { ReturnStockService } from "./return-stock.service";
 import { InventoryEngine } from "../inventory/inventory.engine";
 import { PostingEngine } from "../posting/posting.engine";
 import { ReversalService } from "../posting/reversal.service";
@@ -36,6 +37,7 @@ export class SalesReturnsService {
     private readonly reversal: ReversalService,
     private readonly effectiveConfig: EffectiveConfigService,
     private readonly returnable: ReturnableService,
+    private readonly returnStock: ReturnStockService,
   ) {}
 
   // Every returns endpoint loads a resource by UUID first, so a branch the user
@@ -200,6 +202,14 @@ export class SalesReturnsService {
    * update). Cancellation is blocked if it would drive metres/boards/value
    * negative (returned stock already consumed).
    */
+  /**
+   * Returned goods back into stock, at their HISTORICAL cost.
+   *
+   * The arithmetic lives in ReturnStockService, which «مردودات بدون فواتير»
+   * also uses — one weighted-average implementation, two documents. What stays
+   * here is this document's own rule: the value handed over is the historical
+   * cost snapshotted on the original invoice line, never a current cost.
+   */
   private async applyReturnToStock(
     tx: Tx,
     lines: Array<{ variantId: string; meters: Decimal; boards: Decimal; cogs: Decimal }>,
@@ -209,48 +219,16 @@ export class SalesReturnsService {
     sign: 1 | -1,
     refId: string,
   ) {
-    const groups = new Map<string, { meters: Decimal; boards: Decimal; cogs: Decimal; items: typeof lines }>();
-    for (const l of lines) {
-      const g = groups.get(l.variantId) ?? { meters: new Decimal(0), boards: new Decimal(0), cogs: new Decimal(0), items: [] };
-      g.meters = g.meters.plus(l.meters); g.boards = g.boards.plus(l.boards); g.cogs = g.cogs.plus(l.cogs); g.items.push(l);
-      groups.set(l.variantId, g);
-    }
-    const variantIds = [...groups.keys()].sort();
-    // Deterministic-order variant locks (the single costing lock, §3).
-    for (const vid of variantIds) {
-      await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${vid}::uuid FOR UPDATE`;
-    }
-    for (const vid of variantIds) {
-      const g = groups.get(vid)!;
-      const agg = await tx.branchInventoryBalance.aggregate({ _sum: { metersOnHand: true, boardsOnHand: true }, where: { productVariantId: vid } });
-      const curMeters = D(agg._sum.metersOnHand), curBoards = D(agg._sum.boardsOnHand);
-      const variant = await tx.productVariant.findUnique({ where: { id: vid }, select: { avgCostPerMeter: true } });
-      const curValue = curMeters.mul(D(variant?.avgCostPerMeter));
-      const newMeters = curMeters.plus(g.meters.mul(sign));
-      const newBoards = curBoards.plus(g.boards.mul(sign));
-      const newValue = curValue.plus(g.cogs.mul(sign));
-      if (newMeters.isNegative() || newBoards.isNegative() || newValue.isNegative()) {
-        throw new ValidationError({ reason: "return_reversal_would_make_stock_negative", productVariantId: vid });
-      }
-      await tx.productVariant.update({
-        where: { id: vid },
-        data: {
-          avgCostPerMeter: newMeters.gt(0) ? newValue.div(newMeters).toFixed(4) : "0",
-          avgCost: newBoards.gt(0) ? newValue.div(newBoards).toFixed(4) : "0",
-          costUpdatedAt: new Date(),
-        },
-      });
-      for (const it of g.items) {
-        await this.inventoryEngine.apply({
-          branchId, productVariantId: vid, movementType: "SALE_RETURN",
-          boardsDelta: it.boards.mul(sign).toFixed(4), metersDelta: it.meters.mul(sign).toFixed(4),
-          reference: { type: sign > 0 ? "sales_return" : "sales_return_cancel", id: refId }, actor: user,
-          summaryAr: sign > 0 ? `ارتجاع مبيعات للمخزون — مردود ${returnNumber}` : `إلغاء ارتجاع مبيعات — مردود ${returnNumber}`,
-          summaryEn: sign > 0 ? `Sales return to stock — return ${returnNumber}` : `Cancel sales return restock — return ${returnNumber}`,
-          humanReadableNote: `مردود مبيعات ${returnNumber}`, tx,
-        });
-      }
-    }
+    await this.returnStock.apply(tx, lines, branchId, user, sign, {
+      applyRefType: "sales_return",
+      reverseRefType: "sales_return_cancel",
+      refId,
+      summaryApplyAr: `ارتجاع مبيعات للمخزون — مردود ${returnNumber}`,
+      summaryReverseAr: `إلغاء ارتجاع مبيعات — مردود ${returnNumber}`,
+      summaryApplyEn: `Sales return to stock — return ${returnNumber}`,
+      summaryReverseEn: `Cancel sales return restock — return ${returnNumber}`,
+      humanReadableNote: `مردود مبيعات ${returnNumber}`,
+    });
   }
 
   // ── CREATE (draft) ─────────────────────────────────────────────────────────

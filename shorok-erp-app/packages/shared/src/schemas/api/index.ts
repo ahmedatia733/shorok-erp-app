@@ -1,4 +1,5 @@
 export * from "./accounts";
+export * from "./legacy-returns";
 export * from "./expense-accounts";
 export * from "./audit";
 export * from "./auth";

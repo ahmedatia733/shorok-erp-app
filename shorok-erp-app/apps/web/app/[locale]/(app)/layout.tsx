@@ -152,6 +152,10 @@ export default function ProtectedAppLayout({ children }: { children: React.React
             <NavLink href={`/${locale}/orders`} label={t("orders")} />
             <NavLink href={`/${locale}/sales/invoices`} label="فواتير المبيعات" />
             <NavLink href={`/${locale}/sales/returns`} label="مردودات المبيعات" />
+            {/* Goods sold before the ERP existed, returned against a paper
+                invoice. Sits under the returns it belongs with, and leaves the
+                invoice-linked returns above exactly as they were. */}
+            <NavLink href={`/${locale}/sales/legacy-returns`} label="مردودات بدون فواتير" />
             <NavLink href={`/${locale}/sales/representatives`} label={t("salesRepresentatives")} />
           </NavSection>
 

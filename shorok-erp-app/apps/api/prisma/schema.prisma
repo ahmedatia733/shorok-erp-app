@@ -224,6 +224,7 @@ model Branch {
   receiptVouchers    ReceiptVoucher[]         @relation("ReceiptVoucherBranch")
   paymentVouchers    PaymentVoucher[]         @relation("PaymentVoucherBranch")
   salesReturns       SalesReturn[]            @relation("SalesReturnBranch")
+  legacySalesReturns LegacySalesReturn[]      @relation("LegacyReturnBranch")
   purchaseReturns    PurchaseReturn[]         @relation("PurchaseReturnBranch")
   treasuries         Treasury[]
   transfersOutgoing  InventoryTransfer[]      @relation("InventoryTransferSource")
@@ -278,6 +279,9 @@ model User {
   paymentVouchersPosted       PaymentVoucher[]          @relation("PaymentVoucherPostedBy")
   paymentVouchersReversed     PaymentVoucher[]          @relation("PaymentVoucherReversedBy")
   salesReturnsCreated         SalesReturn[]             @relation("SalesReturnCreatedBy")
+  legacyReturnsCreated        LegacySalesReturn[]       @relation("LegacyReturnCreatedBy")
+  legacyReturnsConfirmed      LegacySalesReturn[]       @relation("LegacyReturnConfirmedBy")
+  legacyReturnsCancelled      LegacySalesReturn[]       @relation("LegacyReturnCancelledBy")
   salesReturnsConfirmed       SalesReturn[]             @relation("SalesReturnConfirmedBy")
   salesReturnsCancelled       SalesReturn[]             @relation("SalesReturnCancelledBy")
   purchaseReturnsCreated      PurchaseReturn[]          @relation("PurchaseReturnCreatedBy")
@@ -378,21 +382,21 @@ model RefreshToken {
 // ============================== ProductSku ===========================
 
 model ProductSku {
-  id          String          @id @default(uuid()) @db.Uuid
-  code        String          @unique @db.VarChar(60)
-  colorNameAr String          @map("color_name_ar") @db.VarChar(120)
-  colorNameEn String          @map("color_name_en") @db.VarChar(120)
-  category    ProductCategory @default(NORMAL)
+  id                           String          @id @default(uuid()) @db.Uuid
+  code                         String          @unique @db.VarChar(60)
+  colorNameAr                  String          @map("color_name_ar") @db.VarChar(120)
+  colorNameEn                  String          @map("color_name_en") @db.VarChar(120)
+  category                     ProductCategory @default(NORMAL)
   /// The purchase price typed when the product was first created, per square
   /// metre, in the same unit as a purchase invoice line. It is a STARTING
   /// FIGURE and a display fallback only: it is never posted, never a WAC, never
   /// an inventory value, and never pushed into an invoice. Once the product has
   /// a confirmed purchase, that purchase is what the catalogue shows. Nullable
   /// because every product that existed before this column did so without one.
-  initialPurchasePricePerMeter Decimal? @map("initial_purchase_price_per_meter") @db.Decimal(14, 2)
-  active      Boolean         @default(true)
-  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  initialPurchasePricePerMeter Decimal?        @map("initial_purchase_price_per_meter") @db.Decimal(14, 2)
+  active                       Boolean         @default(true)
+  createdAt                    DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   variants ProductVariant[]
 
@@ -428,6 +432,7 @@ model ProductVariant {
   purchaseInvoiceLines PurchaseInvoiceLine[]
   salesInvoiceLines    SalesInvoiceLine[]
   salesReturnLines     SalesReturnLine[]        @relation("SalesReturnLineVariant")
+  legacyReturnLines    LegacySalesReturnLine[]  @relation("LegacyReturnLineVariant")
   purchaseReturnLines  PurchaseReturnLine[]     @relation("PurchaseReturnLineVariant")
 
   historicalReturnArchiveLines HistoricalSalesReturnArchiveLine[] @relation("HistoricalArchiveLineVariant")
@@ -944,6 +949,7 @@ model Customer {
   salesInvoices   SalesInvoice[]
   receiptVouchers ReceiptVoucher[]
   salesReturns    SalesReturn[]         @relation("SalesReturnCustomer")
+  legacyReturns   LegacySalesReturn[]   @relation("LegacyReturnCustomer")
 
   historicalReturnArchives HistoricalSalesReturnArchive[] @relation("HistoricalArchiveCustomer")
 
@@ -2006,4 +2012,95 @@ model InventoryTransferLine {
   @@index([transferId])
   @@index([productVariantId])
   @@map("inventory_transfer_lines")
+}
+
+/// مردودات بدون فواتير — a customer returning goods bought before this ERP
+/// existed, with only the paper invoice to go on.
+///
+/// Deliberately NOT a SalesReturn. That document requires a real electronic
+/// invoice and reverses the historical cost snapshot persisted on its line;
+/// neither exists here, and faking either would be a lie about what happened.
+/// The paper invoice is recorded as a plain reference, never as a relation.
+model LegacySalesReturn {
+  id                    String    @id @default(uuid()) @db.Uuid
+  returnNumber          BigInt    @unique @default(autoincrement()) @map("return_number")
+  customerId            String    @map("customer_id") @db.Uuid
+  branchId              String    @map("branch_id") @db.Uuid
+  /// What the paper says. A reference only — there is no electronic invoice.
+  paperInvoiceNumber    String    @map("paper_invoice_number") @db.VarChar(120)
+  paperInvoiceDate      DateTime  @map("paper_invoice_date") @db.Date
+  returnDate            DateTime  @map("return_date") @db.Date
+  status                String    @default("DRAFT") @db.VarChar(20)
+  /// The only settlement this document has. Cash/bank refunds are not offered.
+  settlementMode        String    @default("KEEP_AS_CUSTOMER_CREDIT") @map("settlement_mode") @db.VarChar(40)
+  notes                 String?   @db.VarChar(1000)
+  subtotal              Decimal   @default(0) @db.Decimal(14, 2)
+  discountTotal         Decimal   @default(0) @map("discount_total") @db.Decimal(14, 2)
+  taxTotal              Decimal   @default(0) @map("tax_total") @db.Decimal(14, 2)
+  grandTotal            Decimal   @default(0) @map("grand_total") @db.Decimal(14, 2)
+  /// Σ line cogs, valued at the WAC snapshotted when this document was confirmed.
+  cogsTotal             Decimal   @default(0) @map("cogs_total") @db.Decimal(14, 2)
+  journalEntryId        String?   @map("journal_entry_id") @db.Uuid
+  cogsJournalEntryId    String?   @map("cogs_journal_entry_id") @db.Uuid
+  customerTransactionId String?   @map("customer_transaction_id") @db.Uuid
+  salesReturnsAccountId String?   @map("sales_returns_account_id") @db.Uuid
+  confirmedAt           DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  confirmedBy           String?   @map("confirmed_by") @db.Uuid
+  cancelledAt           DateTime? @map("cancelled_at") @db.Timestamptz(6)
+  cancelledBy           String?   @map("cancelled_by") @db.Uuid
+  cancellationReason    String?   @map("cancellation_reason") @db.VarChar(300)
+  createdBy             String    @map("created_by") @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // journal / tx / account references stay unconstrained UUIDs — the same
+  // convention SalesInvoice and SalesReturn already use. Only actors are FK'd.
+  customer  Customer                @relation("LegacyReturnCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  branch    Branch                  @relation("LegacyReturnBranch", fields: [branchId], references: [id], onDelete: Restrict)
+  creator   User                    @relation("LegacyReturnCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  confirmer User?                   @relation("LegacyReturnConfirmedBy", fields: [confirmedBy], references: [id], onDelete: Restrict)
+  canceller User?                   @relation("LegacyReturnCancelledBy", fields: [cancelledBy], references: [id], onDelete: Restrict)
+  lines     LegacySalesReturnLine[]
+
+  @@index([customerId])
+  @@index([branchId])
+  @@index([status])
+  @@index([returnDate(sort: Desc)])
+  @@index([paperInvoiceNumber])
+  @@map("legacy_sales_returns")
+}
+
+model LegacySalesReturnLine {
+  id                   String   @id @default(uuid()) @db.Uuid
+  legacySalesReturnId  String   @map("legacy_sales_return_id") @db.Uuid
+  productVariantId     String   @map("product_variant_id") @db.Uuid
+  lengthM              Decimal? @map("length_m") @db.Decimal(14, 4)
+  widthM               Decimal? @map("width_m") @db.Decimal(14, 4)
+  returnedBoards       Decimal  @map("returned_boards") @db.Decimal(14, 4)
+  /// CANONICAL quantity, exactly as the sales/return documents treat metres.
+  returnedMeters       Decimal  @map("returned_meters") @db.Decimal(14, 4)
+  /// Read off the paper invoice by the operator. Never guessed by the system.
+  unitPricePerMeter    Decimal  @map("unit_price_per_meter") @db.Decimal(14, 2)
+  discountPct          Decimal  @default(0) @map("discount_pct") @db.Decimal(5, 2)
+  taxRate              Decimal  @default(0) @map("tax_rate") @db.Decimal(5, 2)
+  lineSubtotal         Decimal  @map("line_subtotal") @db.Decimal(14, 2)
+  lineDiscount         Decimal  @default(0) @map("line_discount") @db.Decimal(14, 2)
+  lineNetExTax         Decimal  @map("line_net_ex_tax") @db.Decimal(14, 2)
+  lineTax              Decimal  @default(0) @map("line_tax") @db.Decimal(14, 2)
+  lineTotal            Decimal  @map("line_total") @db.Decimal(14, 2)
+  /// The variant's weighted-average cost per metre AT CONFIRMATION, frozen here.
+  /// The original cost is unknowable without the electronic invoice, so the
+  /// approved policy values the goods at what stock is worth when they come
+  /// back. Persisting it is what makes the cancellation reverse the amount that
+  /// was actually posted rather than whatever the WAC has since become.
+  costPerMeterSnapshot Decimal? @map("cost_per_meter_snapshot") @db.Decimal(14, 4)
+  lineCogs             Decimal  @default(0) @map("line_cogs") @db.Decimal(14, 2)
+  note                 String?  @db.VarChar(300)
+
+  legacySalesReturn LegacySalesReturn @relation(fields: [legacySalesReturnId], references: [id], onDelete: Cascade)
+  productVariant    ProductVariant    @relation("LegacyReturnLineVariant", fields: [productVariantId], references: [id], onDelete: Restrict)
+
+  @@index([legacySalesReturnId])
+  @@index([productVariantId])
+  @@map("legacy_sales_return_lines")
 }
