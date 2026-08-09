@@ -5,18 +5,44 @@ export const PurchaseInvoiceStatusEnum = z.enum(["DRAFT", "CONFIRMED", "CANCELLE
 
 const decimalStr = z.string().regex(/^\d+(\.\d{1,4})?$/);
 
-export const PurchaseInvoiceLineInputSchema = z.object({
-  productVariantId: UuidSchema,
-  colorCode: z.string().max(20).optional(),
-  boardsQuantity: decimalStr,
-  lengthM: decimalStr.optional(),
-  widthM: decimalStr.optional(),
-  heightM: decimalStr.optional(),
-  unitLabel: z.string().max(30).optional(),
-  unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/),
-  taxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0"),
-  isFree: z.boolean().default(false),
-});
+/**
+ * One purchase line.
+ *
+ * A line may name the exact ProductVariant it is buying, or — when the product
+ * has never been bought at this size before — name the base ProductSku plus the
+ * size actually purchased, and let the server resolve or create the exact
+ * variant. That second form is what lets a brand-new catalogue product, which
+ * legitimately has no sizes yet, be purchased at all: buying is precisely where
+ * a product's first size enters the system.
+ *
+ * `productVariantId` stays supported and unchanged so existing drafts, the
+ * revision flow and any older client keep working.
+ */
+export const PurchaseInvoiceLineInputSchema = z
+  .object({
+    productVariantId: UuidSchema.optional(),
+    /** With `sizeMetersPerBoard`, the alternative to naming a variant. */
+    productSkuId: UuidSchema.optional(),
+    /** The board size actually purchased, in metres — never a placeholder. */
+    sizeMetersPerBoard: z
+      .string()
+      .regex(/^\d+(\.\d{1,4})?$/)
+      .refine((v) => Number(v) > 0, { message: "size must be greater than zero" })
+      .optional(),
+    colorCode: z.string().max(20).optional(),
+    boardsQuantity: decimalStr,
+    lengthM: decimalStr.optional(),
+    widthM: decimalStr.optional(),
+    heightM: decimalStr.optional(),
+    unitLabel: z.string().max(30).optional(),
+    unitPrice: z.string().regex(/^\d+(\.\d{1,2})?$/),
+    taxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).default("0"),
+    isFree: z.boolean().default(false),
+  })
+  .refine(
+    (l) => Boolean(l.productVariantId) || Boolean(l.productSkuId && l.sizeMetersPerBoard),
+    { message: "a line needs either productVariantId, or productSkuId with sizeMetersPerBoard" },
+  );
 export type PurchaseInvoiceLineInput = z.infer<typeof PurchaseInvoiceLineInputSchema>;
 
 export const CreatePurchaseInvoiceRequestSchema = z.object({

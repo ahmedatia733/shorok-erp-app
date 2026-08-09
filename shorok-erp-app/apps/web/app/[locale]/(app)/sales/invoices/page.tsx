@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useLocale } from "next-intl";
 import type { AppLocale } from "../../../../../i18n";
 import { Alert } from "../../../../../components/ui/alert";
@@ -14,7 +14,7 @@ import { isPostingConfigError } from "../../../../../lib/posting-config";
 import { ProductVariantSelect } from "../../../../../components/features/product-variant-select";
 import { type VariantItem } from "../../../../../lib/variant-select";
 import { switchVariantLine } from "../../../../../lib/variant-line";
-import { salesVariantExtra, toSalesVariantItem } from "../../../../../lib/sales-variant";
+import { salesVariantExtra, toSalesVariantItem, type SalesVariant } from "../../../../../lib/sales-variant";
 import {
   boardArea,
   totalMeters as calcTotalMeters,
@@ -347,11 +347,70 @@ function InvoiceForm({
   // Searchable customer options — findable by code, Arabic name, or phone
   // (case-insensitive, whitespace-tolerant via the shared SearchableSelect).
   const customerOptions: SearchableOption[] = toCustomerOptions(customers);
-  const variantMap = new Map(variants.map((v) => [v.id, v]));
+  /**
+   * What this branch can actually sell.
+   *
+   * Selling takes stock out, and the inventory engine refuses to take stock
+   * that is not there — so the dropdown asks the same question up front, for
+   * the branch on the form, instead of letting a whole invoice be typed against
+   * something the confirm step will reject. Buying is a different question and
+   * is not asked here: a product with no stock is perfectly purchasable.
+   */
+  const [available, setAvailable] = useState<SalesVariant[]>([]);
+  const [availableLoading, setAvailableLoading] = useState(false);
+  /** Discards a slow answer for a branch the user has already moved on from. */
+  const availabilityTicket = useRef(0);
+
+  useEffect(() => {
+    if (!branchId) {
+      setAvailable([]);
+      setAvailableLoading(false);
+      return;
+    }
+    const ticket = ++availabilityTicket.current;
+    const asked = branchId;
+    setAvailableLoading(true);
+    void apiCall<{
+      branchId: string;
+      variants: Array<{
+        id: string;
+        skuCode: string;
+        skuNameAr: string;
+        sizeMetersPerBoard: string;
+        defaultPurchasePricePerMeter: string;
+      }>;
+    }>(`/sales-invoices/available-products?branchId=${asked}`)
+      .then((res) => {
+        // Two guards, because a late answer for another branch must never
+        // repaint this one's products: newest request wins, and the payload has
+        // to say it is about the branch on screen.
+        if (ticket !== availabilityTicket.current || res.branchId !== asked) return;
+        setAvailable(
+          res.variants.map((v) => ({
+            id: v.id,
+            skuCode: v.skuCode,
+            skuNameAr: v.skuNameAr,
+            sizeMetersPerBoard: v.sizeMetersPerBoard,
+            defaultCostPrice: v.defaultPurchasePricePerMeter,
+          })),
+        );
+      })
+      .catch(() => {
+        if (ticket === availabilityTicket.current) setAvailable([]);
+      })
+      .finally(() => {
+        if (ticket === availabilityTicket.current) setAvailableLoading(false);
+      });
+  }, [branchId]);
+
+  // Displaying a saved line must keep working even if its stock has since run
+  // out, so the label map is the full catalogue; only what may be CHOSEN is
+  // narrowed to what the branch holds.
+  const variantMap = new Map([...variants, ...available].map((v) => [v.id, v]));
   // Items for the single searchable selector (code/color/size + cost hint ONLY).
   // The SALE price is entered manually and is deliberately NOT exposed here, so
   // it can neither be shown in the dropdown nor influence the form.
-  const variantItems: VariantItem[] = variants.map(toSalesVariantItem);
+  const variantItems: VariantItem[] = available.map(toSalesVariantItem);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -621,6 +680,15 @@ function InvoiceForm({
                   <td className="border border-border px-1 py-1">
                     <ProductVariantSelect
                       variants={variantItems}
+                      placeholder={
+                        !branchId
+                          ? "اختر الفرع أولاً لعرض الأصناف المتاحة"
+                          : availableLoading
+                            ? "جارٍ تحميل الأصناف المتاحة..."
+                            : variantItems.length === 0
+                              ? "لا توجد أصناف متاحة في هذا الفرع"
+                              : undefined
+                      }
                       value={line.productVariantId}
                       onChange={(id) => onVariantChange(idx, id)}
                       renderExtra={(v) => salesVariantExtra(v.cost)}

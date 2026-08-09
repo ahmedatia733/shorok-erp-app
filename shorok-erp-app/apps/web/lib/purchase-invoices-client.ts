@@ -104,7 +104,11 @@ export const createPurchaseInvoice = (body: {
   customsNumber?: string;
   notes?: string;
   lines: Array<{
-    productVariantId: string;
+    /** Either the exact variant… */
+    productVariantId?: string;
+    /** …or the base product plus the size actually purchased. */
+    productSkuId?: string;
+    sizeMetersPerBoard?: string;
     colorCode?: string;
     boardsQuantity: string;
     lengthM?: string;
@@ -146,4 +150,36 @@ export const listVariantsForInvoice = async (): Promise<VariantOption[]> => {
     sizeMetersPerBoard: v.sizeMetersPerBoard,
     defaultPurchasePricePerMeter: v.defaultPurchasePricePerMeter,
   }));
+};
+
+// ── the purchase catalogue ─────────────────────────────────────────────────
+
+export interface PurchaseCatalogueVariant {
+  productVariantId: string;
+  sizeMetersPerBoard: string;
+  defaultPurchasePricePerMeter: string;
+}
+
+export interface PurchaseCatalogueProduct {
+  productSkuId: string;
+  code: string;
+  nameAr: string;
+  nameEn: string;
+  initialPurchasePricePerMeter: string | null;
+  variants: PurchaseCatalogueVariant[];
+}
+
+/**
+ * Every active base product, each listed once.
+ *
+ * Purchases start from the product, not from a size: a product that has never
+ * been bought has no sizes yet, and buying it is how its first size arrives.
+ * That is why this is not `/products/variants`, which can only describe sizes
+ * that already exist.
+ */
+export const listPurchaseCatalogue = async (): Promise<PurchaseCatalogueProduct[]> => {
+  const res = await apiCall<{ products: PurchaseCatalogueProduct[] }>(
+    "/products/purchase-catalogue",
+  );
+  return res.products;
 };

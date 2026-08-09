@@ -13,6 +13,7 @@ import {
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
+import { resolvePurchaseVariant } from "../products/variant-resolution";
 import { NotFoundError, ValidationError } from "../../common/errors/api-errors";
 import type { AuthenticatedUser } from "../../common/types/request-user";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -244,11 +245,16 @@ export class PurchaseInvoicesController {
     }> = [];
 
     for (const line of body.lines) {
+      // A line names either the exact variant, or the base product plus the
+      // size actually purchased. The second form is how a catalogue product
+      // that has never been bought gets its first real size — resolved here,
+      // never invented, and never by reviving a retired one.
+      const { productVariantId } = await resolvePurchaseVariant(this.prisma, line);
       const variant = await this.prisma.productVariant.findUnique({
-        where: { id: line.productVariantId },
+        where: { id: productVariantId },
       });
       if (!variant || !variant.active) {
-        throw new NotFoundError({ productVariantId: line.productVariantId });
+        throw new NotFoundError({ productVariantId });
       }
 
       const boardsQty = new Decimal(line.boardsQuantity);
@@ -276,7 +282,7 @@ export class PurchaseInvoicesController {
       }
 
       lineData.push({
-        productVariantId: line.productVariantId,
+        productVariantId: variant.id,
         colorCode: line.colorCode ?? null,
         boardsQuantity: boardsQty,
         lengthM,

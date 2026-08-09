@@ -12,16 +12,16 @@ import { listAllBranches, type BranchRow } from "../../../../../../lib/admin-cli
 import { listSuppliers, type SupplierRow } from "../../../../../../lib/suppliers-client";
 import {
   createPurchaseInvoice,
-  listVariantsForInvoice,
-  type VariantOption,
+  listPurchaseCatalogue,
+  type PurchaseCatalogueProduct,
 } from "../../../../../../lib/purchase-invoices-client";
 import { AP_COLORS, apColorMap } from "../../../../../../lib/ap-colors";
 import { ProductVariantSelect } from "../../../../../../components/features/product-variant-select";
 import { ProductCreateModal } from "../../../../../../components/features/products/product-create-modal";
 import { type VariantItem } from "../../../../../../lib/variant-select";
+import { purchaseLineSize } from "../../../../../../lib/purchase-line-size";
 import { switchVariantLine } from "../../../../../../lib/variant-line";
 import {
-  boardArea,
   totalMeters as calcTotalMeters,
   lineTotalPerMeter,
   taxAmount as calcTax,
@@ -35,7 +35,7 @@ const SIZE_S = BOARD_AREA_SMALL; // صغير — 4 م²/لوح
 interface InvoiceLine {
   _key: string;
   colorCode: string;
-  productVariantId: string;
+  productSkuId: string;
   boardsQuantity: string;
   sizeChoice: "" | "K" | "S";
   customL: string;
@@ -57,7 +57,7 @@ function mkLine(): InvoiceLine {
   return {
     _key: Math.random().toString(36).slice(2),
     colorCode: "",
-    productVariantId: "",
+    productSkuId: "",
     boardsQuantity: "",
     sizeChoice: "",
     customL: "",
@@ -72,12 +72,15 @@ function mkLine(): InvoiceLine {
   };
 }
 
-function recompute(line: InvoiceLine, variant?: VariantOption): Partial<InvoiceLine> {
+function recompute(line: InvoiceLine): Partial<InvoiceLine> {
   // Area (م²) per board — standard كبير/صغير, custom طول×عرض, or the variant's
   // stored size. All arithmetic is Decimal-safe (see lib/line-calc), so the
   // preview equals what the API posts. Purchase lines price PER METER:
   //   totalMeters = boards × areaPerBoard,  lineTotal = totalMeters × price.
-  const perBoard  = boardArea(line.sizeChoice, line.customL, line.customW, variant?.sizeMetersPerBoard ?? "");
+  // The size is whatever was chosen on THIS line — ك, ص or a custom board.
+  // Nothing falls back to a previously stored size, because the size is what
+  // decides which exact ProductVariant this purchase lands on.
+  const perBoard  = purchaseLineSize(line) ?? "0";
   const meters    = calcTotalMeters(line.boardsQuantity || "0", perBoard);
   const lineTotal = lineTotalPerMeter(meters, line.unitPrice || "0");
   const tax       = calcTax(lineTotal, line.taxRate || "0");
@@ -107,14 +110,20 @@ export default function NewPurchaseInvoicePage() {
 
   const [suppliers, setSuppliers] = useState<SupplierRow[]>([]);
   const [branches, setBranches] = useState<BranchRow[]>([]);
-  const [variants, setVariants] = useState<VariantOption[]>([]);
+  const [products, setProducts] = useState<PurchaseCatalogueProduct[]>([]);
   // Which line opened the add-product dialog, so the new product lands on the
   // line the user was actually filling in.
   const [quickAddLine, setQuickAddLine] = useState<number | null>(null);
-  const variantMap = new Map(variants.map((v) => [v.id, v]));
-  const variantItems: VariantItem[] = variants.map((v) => ({
-    id: v.id, skuCode: v.skuCode, colorNameAr: v.skuNameAr, colorNameEn: v.skuNameEn,
-    sizeMetersPerBoard: v.sizeMetersPerBoard, price: v.defaultPurchasePricePerMeter,
+  const productMap = new Map(products.map((p) => [p.productSkuId, p]));
+
+  /** Every active base product, each once, with the sizes it already has. */
+  const productItems: VariantItem[] = products.map((p) => ({
+    id: p.productSkuId,
+    skuCode: p.code,
+    colorNameAr: p.nameAr,
+    colorNameEn: p.nameEn,
+    sizeMetersPerBoard: "",
+    price: p.initialPurchasePricePerMeter ?? undefined,
   }));
 
   const [saving, setSaving] = useState(false);
@@ -125,7 +134,9 @@ export default function NewPurchaseInvoicePage() {
     void Promise.all([
       listSuppliers().then(setSuppliers),
       listAllBranches().then(setBranches),
-      listVariantsForInvoice().then(setVariants),
+      // The purchase catalogue is base products, so a product that has never
+      // been bought — and therefore has no sizes yet — is still offered here.
+      listPurchaseCatalogue().then(setProducts),
     ]);
   }, [canCreate, locale, router]);
 
@@ -133,17 +144,22 @@ export default function NewPurchaseInvoicePage() {
     setLines((prev) => {
       const next = [...prev];
       const merged = { ...next[idx]!, ...patch };
-      const variant = variantMap.get(merged.productVariantId);
-      next[idx] = { ...merged, ...recompute(merged, variant) };
+      next[idx] = { ...merged, ...recompute(merged) };
       return next;
     });
   }
 
-  function onVariantChange(idx: number, vid: string) {
-    const variant = variantMap.get(vid);
-    // Clear the previous variant's size overrides and load the new variant's
-    // own purchase cost per meter — never keep a stale price or size.
-    updateLine(idx, switchVariantLine(vid, variant?.defaultPurchasePricePerMeter));
+  function onProductChange(idx: number, skuId: string) {
+    const product = productMap.get(skuId);
+    // A different product means a different price and a size that was chosen
+    // for something else — neither may carry over. The shared reset helper is
+    // keyed on a variant id because the sales line still is; here the identity
+    // is the base product, so its id is taken and the variant key dropped.
+    const { productVariantId: _dropped, ...reset } = switchVariantLine(
+      skuId,
+      product?.initialPurchasePricePerMeter ?? undefined,
+    );
+    updateLine(idx, { ...reset, productSkuId: skuId });
   }
 
   const subtotal = lines.reduce((s, l) => s + (parseFloat(l.lineTotal) || 0), 0);
@@ -154,9 +170,12 @@ export default function NewPurchaseInvoicePage() {
   const grandTotal = subtotal + totalTax;
 
   async function save() {
-    const validLines = lines.filter(
-      (l) => l.productVariantId && parseFloat(l.boardsQuantity) > 0,
-    );
+    // A line is ready when it names a product, a real size and a quantity. The
+    // size is required because it is what decides the exact ProductVariant this
+    // purchase lands on — it is never guessed on the user's behalf.
+    const validLines = lines
+      .map((l) => ({ line: l, size: purchaseLineSize(l) }))
+      .filter(({ line, size }) => line.productSkuId && size && parseFloat(line.boardsQuantity) > 0);
     if (!supplierId || !branchId || validLines.length === 0) {
       setError("يرجى اختيار المورد والفرع وإضافة بند واحد على الأقل");
       return;
@@ -168,8 +187,9 @@ export default function NewPurchaseInvoicePage() {
         invoiceDate,
         supplierId,
         branchId,
-        lines: validLines.map((l) => ({
-          productVariantId: l.productVariantId,
+        lines: validLines.map(({ line: l, size }) => ({
+          productSkuId: l.productSkuId,
+          sizeMetersPerBoard: size!,
           colorCode: l.colorCode || undefined,
           boardsQuantity: l.boardsQuantity || "1",
           lengthM: l.customL || (l.sizeChoice === "K" ? String(SIZE_K) : l.sizeChoice === "S" ? String(SIZE_S) : undefined),
@@ -305,7 +325,6 @@ export default function NewPurchaseInvoicePage() {
           </thead>
           <tbody>
             {lines.map((line, idx) => {
-              const variant = variantMap.get(line.productVariantId);
               return (
                 <tr key={line._key} className="hover:bg-background/50">
                   <td className="border border-border px-1 py-1 text-center text-textSecondary text-xs">
@@ -316,9 +335,9 @@ export default function NewPurchaseInvoicePage() {
                     <div className="flex items-center gap-1">
                       <div className="min-w-0 flex-1">
                         <ProductVariantSelect
-                          variants={variantItems}
-                          value={line.productVariantId}
-                          onChange={(id) => onVariantChange(idx, id)}
+                          variants={productItems}
+                          value={line.productSkuId}
+                          onChange={(id) => onProductChange(idx, id)}
                           renderExtra={(v) => (v.price ? `شراء ${v.price}` : null)}
                         />
                       </div>
@@ -483,15 +502,13 @@ export default function NewPurchaseInvoicePage() {
         onCreated={(product, enteredPrice) => {
           const line = quickAddLine;
           setQuickAddLine(null);
-          if (line === null || !product.firstVariant) return;
-          // Refresh the selector so the new size is a real option, then put it
-          // on the line the user was filling in, with the price they just typed.
-          void listVariantsForInvoice().then((rows) => {
-            setVariants(rows);
-            updateLine(line, {
-              productVariantId: product.firstVariant!.id,
-              unitPrice: enteredPrice,
-            });
+          if (line === null) return;
+          // Refetch so the new product is a real option before it is selected,
+          // then put it on the line the user was filling in with the price they
+          // just typed. No reload, and nothing else on the invoice moves.
+          void listPurchaseCatalogue().then((rows: PurchaseCatalogueProduct[]) => {
+            setProducts(rows);
+            updateLine(line, { productSkuId: product.id, unitPrice: enteredPrice });
           });
         }}
       />
