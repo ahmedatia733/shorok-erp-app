@@ -2,6 +2,8 @@
 
 **Status:** live in production · **Date:** 2026-08-10 · **Commit:** `ba03cee`
 
+النسخة العربية: [ACCOUNT-SEARCH-INVOICE-PROFITABILITY-REPORT.ar.md](ACCOUNT-SEARCH-INVOICE-PROFITABILITY-REPORT.ar.md)
+
 Two things shipped together: statement screens you can search, and a report
 that answers what each sale actually earned.
 
