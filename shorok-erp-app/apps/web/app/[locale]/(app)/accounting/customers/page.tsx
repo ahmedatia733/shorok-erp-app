@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "next-intl";
 import { Alert } from "../../../../../components/ui/alert";
@@ -10,7 +10,9 @@ import { Button } from "../../../../../components/ui/button";
 import { Input } from "../../../../../components/ui/input";
 import { Modal } from "../../../../../components/ui/modal";
 import { Skeleton } from "../../../../../components/ui/skeleton";
+import { SearchableSelect } from "../../../../../components/ui/searchable-select";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
+import { toCustomerOptions } from "../../../../../lib/customer-options";
 import { useHasRole } from "../../../../../lib/auth";
 import {
   listCustomers,
@@ -55,6 +57,9 @@ export default function CustomerStatementPage() {
   const canRecord = useHasRole("ACCOUNTANT");
 
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
+  // Inactive customers stay listed and marked: an inactive customer can still
+  // have a history worth reading.
+  const customerOptions = useMemo(() => toCustomerOptions(customers, { markInactive: true }), [customers]);
   const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
 
   // Pre-select customer if customerId is in URL params
@@ -233,18 +238,16 @@ export default function CustomerStatementPage() {
                 </button>
               )}
             </div>
-            <select
-              className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+            <SearchableSelect
+              id="cust-stmt-customer"
+              testId="cust-stmt-customer"
               value={selectedId}
-              onChange={(e) => { setSelectedId(e.target.value); setData(null); }}
-            >
-              <option value="">— اختر —</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.code} — {c.nameAr}{c.active ? "" : " (غير نشط)"}
-                </option>
-              ))}
-            </select>
+              onChange={(id) => { setSelectedId(id); setData(null); }}
+              options={customerOptions}
+              placeholder="بحث بالكود أو الاسم أو الهاتف..."
+              emptyText="لا يوجد عميل مطابق"
+              clearable
+            />
           </div>
 
           <div>
@@ -447,19 +450,15 @@ export default function CustomerStatementPage() {
                 {customers.find((c) => c.id === selectedId)?.nameAr}
               </div>
             ) : (
-              <select
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+              <SearchableSelect
+                id="cust-tx-customer"
+                testId="cust-tx-customer"
                 value={txCustomerId}
-                onChange={(e) => setTxCustomerId(e.target.value)}
-                required
-              >
-                <option value="">— اختر العميل —</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.code} — {c.nameAr}
-                  </option>
-                ))}
-              </select>
+                onChange={setTxCustomerId}
+                options={customerOptions}
+                placeholder="بحث بالكود أو الاسم أو الهاتف..."
+                emptyText="لا يوجد عميل مطابق"
+              />
             )}
           </div>
 

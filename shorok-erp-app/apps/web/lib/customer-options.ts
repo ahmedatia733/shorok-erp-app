@@ -1,18 +1,33 @@
 /**
- * Builds and filters the searchable customer options for the Sales Invoice
- * customer selector. A customer is findable by code, Arabic name, and phone.
+ * Builds and filters the searchable customer options used wherever a customer
+ * is picked — sales invoices, legacy returns, and the customer account
+ * statement. A customer is findable by code, Arabic name, and phone.
+ *
+ * One mapping, reused, so a customer looks and searches the same everywhere.
  * The filter mirrors SearchableSelect's internal matching (label + keywords,
  * case-insensitive, whitespace-tolerant) so it can be unit-tested directly.
  */
 import type { CustomerRow } from "./customers-client";
 import type { SearchableOption } from "../components/ui/searchable-select";
 
-export function toCustomerOptions(customers: CustomerRow[]): SearchableOption[] {
-  return customers.map((c) => ({
-    value: c.id,
-    label: `${c.code} — ${c.nameAr}${c.phone ? ` — ${c.phone}` : ""}`,
-    keywords: `${c.code} ${c.nameAr} ${c.phone ?? ""}`,
-  }));
+export function toCustomerOptions(
+  customers: CustomerRow[],
+  /**
+   * Screens that list every customer — the account statement — mark the
+   * inactive ones instead of hiding them, because an inactive customer can
+   * still have a history worth reading. Screens that create new documents
+   * leave this off.
+   */
+  opts: { markInactive?: boolean } = {},
+): SearchableOption[] {
+  return customers.map((c) => {
+    const inactive = opts.markInactive && c.active === false ? " (غير نشط)" : "";
+    return {
+      value: c.id,
+      label: `${c.code} — ${c.nameAr}${c.phone ? ` — ${c.phone}` : ""}${inactive}`,
+      keywords: `${c.code} ${c.nameAr} ${c.phone ?? ""}`,
+    };
+  });
 }
 
 /** Same matching rule SearchableSelect uses: substring of `label + keywords`,

@@ -13,6 +13,7 @@ import { SearchableSelect, type SearchableOption } from "../../../../../componen
 import { ApiClientError } from "../../../../../lib/api-client";
 import { cn } from "../../../../../lib/cn";
 import { accountingMoney } from "../../../../../lib/statement-format";
+import { filterStatementAccounts } from "../../../../../lib/statement-account-filter";
 import { statementRowLabel } from "../../../../../lib/statement-labels";
 import { sourceDocumentHref } from "../../../../../lib/source-document";
 import {
@@ -56,6 +57,7 @@ export default function StatementPage() {
   const t = useTranslations("accounting.statement");
   const dir = locale === "ar" ? "rtl" : "ltr";
 
+  const [accountQuery, setAccountQuery] = useState("");
   const [options, setOptions] = useState<StatementOptions | null>(null);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [optionsError, setOptionsError] = useState<string | null>(null);
@@ -167,6 +169,7 @@ export default function StatementPage() {
     if (next === category) return;
     setCategory(next);
     setEntityId(ALL);
+    setAccountQuery(""); // a query from the old list would hide the new one
     setData(null);
   }
 
@@ -212,6 +215,14 @@ export default function StatementPage() {
   }, [options, load]);
 
   const isConsolidated = data?.selectionType === "consolidated";
+
+  // Free-text search over the listed accounts, matched against code and name
+  // exactly the way the entity combobox matches. Display only: the category
+  // totals below the table are the API's and are never re-summed here.
+  const visibleBreakdown = useMemo(
+    () => filterStatementAccounts(data?.breakdown ?? [], accountQuery),
+    [data, accountQuery],
+  );
 
   // ── render ───────────────────────────────────────────────────────────────
 
@@ -352,8 +363,28 @@ export default function StatementPage() {
             {/* ── Detailed accounts table (consolidated) ─────────────────────── */}
             {isConsolidated && (
               <section>
-                <div className="px-4 py-2 text-sm font-semibold">
-                  {t("accountsDetails", { count: data.breakdown.length })}
+                {/* Search over the listed accounts. This filters what is
+                    DISPLAYED and nothing else — the totals below stay the
+                    authoritative category totals from the API, so no balance
+                    changes meaning because someone typed in a box. */}
+                <div className="flex flex-wrap items-center gap-3 px-4 py-2">
+                  <span className="text-sm font-semibold">
+                    {t("accountsDetails", { count: data.breakdown.length })}
+                  </span>
+                  <input
+                    type="search"
+                    id="stmt-account-search"
+                    data-testid="stmt-account-search"
+                    className="h-8 w-full max-w-xs rounded border border-border bg-background px-2 text-sm sm:w-64"
+                    placeholder={t("searchAccounts")}
+                    value={accountQuery}
+                    onChange={(e) => setAccountQuery(e.target.value)}
+                  />
+                  {accountQuery.trim() && (
+                    <span className="text-xs text-textSecondary" data-testid="stmt-account-search-count">
+                      {t("accountsShown", { shown: visibleBreakdown.length, total: data.breakdown.length })}
+                    </span>
+                  )}
                 </div>
                 <div className="max-h-[520px] overflow-auto border-t border-border" data-testid="statement-accounts-scroll">
                   <table className="w-full min-w-[720px] border-collapse text-sm [&_td]:border [&_td]:border-border [&_th]:border [&_th]:border-border" data-testid="statement-accounts-table">
@@ -369,15 +400,21 @@ export default function StatementPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
-                      {data.breakdown.length === 0 ? (
+                      {visibleBreakdown.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="px-4 py-6 text-center text-sm text-textSecondary">
-                            {t("noAccounts")}
-                            {!includeZero && t("noAccountsHint")}
+                            {data.breakdown.length === 0 ? (
+                              <>
+                                {t("noAccounts")}
+                                {!includeZero && t("noAccountsHint")}
+                              </>
+                            ) : (
+                              t("noAccountMatch")
+                            )}
                           </td>
                         </tr>
                       ) : (
-                        data.breakdown.map((b, i) => (
+                        visibleBreakdown.map((b, i) => (
                           <tr key={b.entityId} className={cn("hover:bg-background/70", i % 2 === 1 && "bg-background/40")}>
                             <td className="px-3 py-2 font-mono text-xs" dir="ltr">{b.code || "—"}</td>
                             <td className="max-w-[240px] truncate px-3 py-2" title={b.name}>{b.name}</td>
@@ -403,7 +440,14 @@ export default function StatementPage() {
                       // on the client. They total the same accounts the rows list.
                       <tfoot className="sticky bottom-0 border-t-2 border-border bg-background font-semibold">
                         <tr>
-                          <td className="px-3 py-2" colSpan={2}>{t("total")}</td>
+                          <td className="px-3 py-2" colSpan={2}>
+                            {t("total")}
+                            {accountQuery.trim() && (
+                              <span className="ms-2 text-xs font-normal text-textSecondary">
+                                ({t("totalAllAccounts")})
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-end">{money(data.openingBalance)}</td>
                           <td className="px-3 py-2 text-end">{money(data.periodDebit)}</td>
                           <td className="px-3 py-2 text-end">{money(data.periodCredit)}</td>

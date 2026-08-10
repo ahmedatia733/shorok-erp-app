@@ -630,7 +630,11 @@
       "noEntities": "No accounts in this list",
       "loadOptionsError": "Failed to load account lists",
       "loadError": "Failed to load the account statement",
-      "retry": "Retry"
+      "retry": "Retry",
+      "searchAccounts": "Search accounts by code or name…",
+      "accountsShown": "Showing {shown} of {total}",
+      "noAccountMatch": "No account matches your search.",
+      "totalAllAccounts": "Total of all accounts in this list"
     }
   },
   "import": {

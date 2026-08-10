@@ -36,3 +36,34 @@ describe("customer selector search", () => {
     expect(opts[1]!.label).toBe("C-0002 — مارتن فايز"); // no phone → no trailing dash
   });
 });
+
+/**
+ * The account-statement variant. It lists every customer, including inactive
+ * ones — an inactive customer can still have a history worth reading — so it
+ * marks them rather than hiding them.
+ */
+describe("toCustomerOptions with markInactive", () => {
+  const customers = [
+    { id: "1", code: "C-0001", nameAr: "عميل نشط", phone: "0100", active: true },
+    { id: "2", code: "C-0002", nameAr: "عميل موقوف", phone: null, active: false },
+  ] as never[];
+
+  it("marks an inactive customer but still offers it", () => {
+    const opts = toCustomerOptions(customers, { markInactive: true });
+    expect(opts).toHaveLength(2);
+    expect(opts[1]!.label).toContain("(غير نشط)");
+    expect(opts[0]!.label).not.toContain("غير نشط");
+  });
+
+  it("leaves the marker off by default, so document screens are unchanged", () => {
+    expect(toCustomerOptions(customers).some((o) => o.label.includes("غير نشط"))).toBe(false);
+  });
+
+  it("keeps a marked customer findable by code, name and phone", () => {
+    const opts = toCustomerOptions(customers, { markInactive: true });
+    for (const q of ["C-0002", "موقوف"]) {
+      expect(filterCustomerOptions(opts, q)).toHaveLength(1);
+    }
+    expect(filterCustomerOptions(opts, "0100")).toHaveLength(1);
+  });
+});

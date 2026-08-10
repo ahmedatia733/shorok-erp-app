@@ -630,7 +630,11 @@
       "noEntities": "لا توجد حسابات في هذه القائمة",
       "loadOptionsError": "فشل تحميل قوائم الحسابات",
       "loadError": "فشل تحميل كشف الحساب",
-      "retry": "إعادة المحاولة"
+      "retry": "إعادة المحاولة",
+      "searchAccounts": "بحث في الحسابات بالكود أو الاسم...",
+      "accountsShown": "عرض {shown} من {total}",
+      "noAccountMatch": "لا يوجد حساب مطابق للبحث.",
+      "totalAllAccounts": "إجمالي كل حسابات القائمة"
     }
   },
   "import": {

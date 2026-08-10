@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { Prisma, PrismaService } from "../../prisma/prisma.service";
 import { groupKeyExpr, type GroupBy } from "./report-range";
+import { M } from "./sales-metrics";
 
 /**
  * Sales-representative + sales reporting, aggregated ENTIRELY in SQL (no
@@ -34,20 +35,8 @@ export interface ReportFilters {
   allowedBranchIds?: string[];
 }
 
-// Shared metric expressions (all summed from sales_invoice_lines l joined to
-// their confirmed invoice si and variant/sku).
-const M = {
-  invoices: `count(distinct si.id)`,
-  boards:   `coalesce(sum(l.quantity), 0)`,
-  meters:   `coalesce(sum(l.meters_quantity), 0)`,
-  gross:    `coalesce(sum(l.meters_quantity * l.unit_price), 0)`,
-  net:      `coalesce(sum(l.line_total), 0)`,
-  discount: `coalesce(sum(l.meters_quantity * l.unit_price - l.line_total), 0)`,
-  // Historical COGS: the NEW meter-based lineCogsAtPosting when present, else the
-  // LEGACY per-board snapshot (boards × unit_cost_at_posting). Never recomputed
-  // from the current mutable avg cost.
-  cogs:     `coalesce(sum(coalesce(l.line_cogs_at_posting, l.quantity * coalesce(l.unit_cost_at_posting, 0))), 0)`,
-};
+// The shared metric expressions now live in ./sales-metrics so the invoice
+// profitability report computes revenue and cost with exactly this arithmetic.
 
 @Injectable()
 export class SalesRepReportsService {
