@@ -170,6 +170,7 @@
         "boards": "Boards",
         "meters": "Meters",
         "actor": "User",
+        "document": "Document",
         "note": "Note"
       },
       "empty": "No movements yet."

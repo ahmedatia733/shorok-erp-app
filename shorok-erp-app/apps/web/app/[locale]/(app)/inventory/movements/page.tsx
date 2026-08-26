@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import type { MovementType } from "@shorok/shared";
 import type { AppLocale } from "../../../../../i18n";
@@ -15,6 +16,7 @@ import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/ta
 import { BranchPicker } from "../../../../../components/features/inventory/branch-picker";
 import { ApiClientError } from "../../../../../lib/api-client";
 import { listMovements, type MovementRow } from "../../../../../lib/inventory-client";
+import { movementDocument } from "../../../../../lib/movement-document";
 import { formatDateTime, formatNumber } from "../../../../../lib/format";
 
 const TYPES: Array<MovementType | "ALL"> = [
@@ -227,6 +229,7 @@ export default function MovementsPage() {
                     <TH dir="ltr" className="text-end">{t("columns.boards")}</TH>
                     <TH dir="ltr" className="text-end">{t("columns.meters")}</TH>
                     <TH>{t("columns.actor")}</TH>
+                    <TH>{t("columns.document")}</TH>
                     <TH>{t("columns.note")}</TH>
                   </TR>
                 </THead>
@@ -253,6 +256,24 @@ export default function MovementsPage() {
                         {formatNumber(m.metersQuantity, locale)}
                       </TD>
                       <TD>{m.creator.name}</TD>
+                      <TD>
+                        {(() => {
+                          // Built from the stored referenceType/referenceId, never
+                          // from the Arabic note — so a «مردود بدون فاتورة» opens its
+                          // own page and not the invoice-linked return page.
+                          // Link, not <a>: a full reload drops the session cookie
+                          // and bounces the user to the login screen.
+                          const doc = movementDocument(m, locale);
+                          if (!doc) return "—";
+                          return doc.href ? (
+                            <Link href={doc.href} className="text-blue-700 hover:underline">
+                              {doc.labelAr}
+                            </Link>
+                          ) : (
+                            doc.labelAr
+                          );
+                        })()}
+                      </TD>
                       <TD>{m.humanReadableNote ?? "—"}</TD>
                     </TR>
                   ))}

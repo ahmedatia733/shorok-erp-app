@@ -590,4 +590,52 @@ describe("legacy sales returns (مردودات بدون فواتير)", () => {
     expect(await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return", referenceId: d.body.id } })).toBe(1);
   });
 
+
+  it("the movement is returned by the Inventory Movements API under ALL and under SALE_RETURN", async () => {
+    await buy("5.25", "10", "500");
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    const d = await draft([{ productVariantId: variant.id, returnedBoards: "4", unitPricePerMeter: "700" }]);
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+
+    // ALL — no movementType filter at all.
+    const all = await get(`/inventory/movements?branchId=${h.branchId}&limit=200`);
+    expect(all.status).toBe(200);
+    const mine = all.body.data.filter((m: { referenceId: string }) => m.referenceId === d.body.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].referenceType).toBe("legacy_sales_return");
+    expect(mine[0].movementType).toBe("SALE_RETURN");
+    expect(mine[0].referenceId).toBe(d.body.id);
+
+    // and under the SALE_RETURN filter the user would pick from the dropdown
+    const filtered = await get(`/inventory/movements?branchId=${h.branchId}&movementType=SALE_RETURN&limit=200`);
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.data.some((m: { referenceId: string }) => m.referenceId === d.body.id)).toBe(true);
+
+    // the row carries what the UI needs to name and link the document
+    expect(mine[0].humanReadableNote).toContain("مردود بدون فاتورة");
+  });
+
+  it("cancelling writes exactly one reversing movement and nets the stock to zero", async () => {
+    await buy("5.25", "10", "500");
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    const before = await stock(variant.id);
+
+    const d = await draft([{ productVariantId: variant.id, returnedBoards: "2", unitPricePerMeter: "700" }]);
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+    const cancelled = await post(`/legacy-returns/${d.body.id}/cancel`, { reason: "اختبار" });
+    expect(cancelled.status).toBeLessThan(300);
+
+    const after = await stock(variant.id);
+    expect(after.boards.toFixed(4)).toBe(before.boards.toFixed(4));
+    expect(after.meters.toFixed(4)).toBe(before.meters.toFixed(4));
+
+    const apply = await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return", referenceId: d.body.id } });
+    const reverse = await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return_cancel", referenceId: d.body.id } });
+    expect(apply).toBe(1);
+    expect(reverse).toBe(1);
+
+    // a second cancel adds nothing
+    await post(`/legacy-returns/${d.body.id}/cancel`, { reason: "اختبار" });
+    expect(await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return_cancel", referenceId: d.body.id } })).toBe(1);
+  });
 });
