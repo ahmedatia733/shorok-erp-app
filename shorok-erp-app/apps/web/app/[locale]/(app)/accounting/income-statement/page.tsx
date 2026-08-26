@@ -14,6 +14,7 @@ import {
   type ISAccountLine,
 } from "../../../../../lib/journal-client";
 import { formatCurrency } from "../../../../../lib/format";
+import { CREDIT_HINT_AR, CREDIT_LABEL_AR, deductionDisplay } from "../../../../../lib/pnl-format";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -91,9 +92,16 @@ function exportCSV(data: IncomeStatementData, compare: IncomeStatementData | nul
 
   const rows: string[][] = [h];
 
+  // Same sign rule as the screen: a credit balance is never exported wrapped in
+  // deduction parentheses, or the spreadsheet repeats the misleading row.
+  const csvAmount = (amount: string, neg: boolean) => {
+    if (!neg) return amount;
+    const d = deductionDisplay(amount);
+    return d.parenthesise ? `(${d.magnitude})` : `${d.magnitude} ${CREDIT_LABEL_AR}`;
+  };
   const addLine = (label: string, amount: string, neg: boolean, prevAmt?: string) => {
-    const disp = neg ? `(${amount})` : amount;
-    const prevDisp = prevAmt != null ? (neg ? `(${prevAmt})` : prevAmt) : "—";
+    const disp = csvAmount(amount, neg);
+    const prevDisp = prevAmt != null ? csvAmount(prevAmt, neg) : "—";
     const chg = prevAmt != null ? (changePct(amount, prevAmt)?.label ?? "—") : "—";
     rows.push(compare ? [label, disp, pctOfRev(amount, data.revenue), prevDisp, chg] : [label, disp, pctOfRev(amount, data.revenue)]);
   };
@@ -185,10 +193,16 @@ function PLSection({
   rowClass,
 }: PLSectionProps) {
   const hasLines = lines.length > 0;
-  const disp = (a: string) =>
-    isDeduction
-      ? `(${formatCurrency(a, locale)})`
-      : formatCurrency(a, locale);
+  // Parentheses mean "deducted". An amount that is already negative is a CREDIT
+  // balance — it increased profit — so it must not be dressed as a deduction.
+  const disp = (a: string) => {
+    if (!isDeduction) return formatCurrency(a, locale);
+    const d = deductionDisplay(a);
+    return d.parenthesise
+      ? `(${formatCurrency(d.magnitude, locale)})`
+      : `${formatCurrency(d.magnitude, locale)} ${CREDIT_LABEL_AR}`;
+  };
+  const isCredit = (a: string) => isDeduction && deductionDisplay(a).kind === "CREDIT";
 
   const chg = compareTotal != null ? changePct(total, compareTotal) : null;
   const chgColor = (c: { positive: boolean } | null) => {
@@ -216,8 +230,10 @@ function PLSection({
           </div>
         </td>
         <td
-          className={`px-4 py-2.5 text-sm text-end tabular-nums ${bold ? "font-semibold" : ""} ${parseFloat(total) < 0 ? "text-red-600" : ""}`}
+          className={`px-4 py-2.5 text-sm text-end tabular-nums ${bold ? "font-semibold" : ""} ${isCredit(total) ? "text-green-700" : ""}`}
           dir="ltr"
+          title={isCredit(total) ? CREDIT_HINT_AR : undefined}
+          data-credit={isCredit(total) ? "true" : undefined}
         >
           {disp(total)}
         </td>
@@ -255,10 +271,13 @@ function PLSection({
                   <span className="text-xs opacity-50">↗</span>
                 </a>
               </td>
-              <td className="px-4 py-2 text-sm text-end tabular-nums text-textSecondary" dir="ltr">
-                {isDeduction
-                  ? `(${formatCurrency(line.amount, locale)})`
-                  : formatCurrency(line.amount, locale)}
+              <td
+                className={`px-4 py-2 text-sm text-end tabular-nums ${isCredit(line.amount) ? "text-green-700" : "text-textSecondary"}`}
+                dir="ltr"
+                title={isCredit(line.amount) ? CREDIT_HINT_AR : undefined}
+                data-credit={isCredit(line.amount) ? "true" : undefined}
+              >
+                {disp(line.amount)}
               </td>
               <td className="px-4 py-2 text-sm text-end tabular-nums text-textSecondary">
                 {pctOfRev(line.amount, revenue)}
@@ -266,11 +285,7 @@ function PLSection({
               {compare && (
                 <>
                   <td className="px-4 py-2 text-sm text-end tabular-nums text-textSecondary" dir="ltr">
-                    {prevAmt != null
-                      ? isDeduction
-                        ? `(${formatCurrency(prevAmt, locale)})`
-                        : formatCurrency(prevAmt, locale)
-                      : "—"}
+                    {prevAmt != null ? disp(prevAmt) : "—"}
                   </td>
                   <td className={`px-4 py-2 text-sm text-end ${chgColor(lineChg)}`}>
                     {lineChg?.label ?? "—"}
@@ -492,9 +507,18 @@ export default function IncomeStatementPage() {
             />
             <KpiCard
               label="إجمالي المصاريف"
-              value={`(${formatCurrency(data.totalExpenses, locale)})`}
-              sub={`${data.expenses.length} بند مصروف`}
-              color="text-red-600"
+              value={(() => {
+                const d = deductionDisplay(data.totalExpenses);
+                return d.parenthesise
+                  ? `(${formatCurrency(d.magnitude, locale)})`
+                  : `${formatCurrency(d.magnitude, locale)} ${CREDIT_LABEL_AR}`;
+              })()}
+              sub={
+                deductionDisplay(data.totalExpenses).kind === "CREDIT"
+                  ? CREDIT_HINT_AR
+                  : `${data.expenses.length} بند مصروف`
+              }
+              color={deductionDisplay(data.totalExpenses).kind === "CREDIT" ? "text-green-700" : "text-red-600"}
             />
             <KpiCard
               label="صافي الربح"
