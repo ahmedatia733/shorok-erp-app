@@ -223,6 +223,63 @@ describe("income statement — expense sign", () => {
     expect((await request(server()).get(`/api/v1/reports/income-statement?${RANGE}`)).status).toBe(401);
   });
 
+
+  // ── net revenue and contra-revenue ────────────────────────────────────────
+
+  it("a sales return debits contra-revenue and is ALREADY inside the API's revenue total", async () => {
+    const before = (await pnl()).body;
+    // A contra-revenue account in the REVENUE category, debited by a return.
+    const contra = (await handle.prisma.account.create({
+      data: { code: `SR${Date.now().toString().slice(-6)}`, nameAr: "مردودات المبيعات", nameEn: "Sales returns",
+              category: "REVENUE" as never, accountType: "REVENUE" as never, isLeaf: true, active: true },
+    })).id;
+    await post("2026-09-01", [{ account: contra, debit: "50000" }, { account: cash, credit: "50000" }], "مردودات مبيعات");
+    const after = (await pnl()).body;
+
+    // The revenue TOTAL already dropped by the return — it is net, not gross.
+    expect(D(after.revenue).toFixed(2)).toBe(D(before.revenue).minus(50000).toFixed(2));
+    // And the contra account appears as a NEGATIVE revenue line.
+    const line = after.revenueLines.find((l: { accountId: string }) => l.accountId === contra);
+    expect(D(line.amount).toFixed(2)).toBe("-50000.00");
+  });
+
+  it("the revenue total is exactly the sum of its lines — so a UI split cannot double count", async () => {
+    const res = (await pnl()).body;
+    const summed = res.revenueLines.reduce((a: Decimal, l: { amount: string }) => a.plus(l.amount), new Decimal(0));
+    expect(summed.toFixed(2)).toBe(D(res.revenue).toFixed(2));
+
+    // Reconstructing gross and deductions the way the statement does must return
+    // the same net — never revenue minus the return a second time.
+    const gross = res.revenueLines.filter((l: { amount: string }) => Number(l.amount) >= 0)
+      .reduce((a: Decimal, l: { amount: string }) => a.plus(l.amount), new Decimal(0));
+    const deductions = res.revenueLines.filter((l: { amount: string }) => Number(l.amount) < 0)
+      .reduce((a: Decimal, l: { amount: string }) => a.plus(new Decimal(l.amount).abs()), new Decimal(0));
+    expect(gross.minus(deductions).toFixed(2)).toBe(D(res.revenue).toFixed(2));
+    expect(gross.minus(deductions).minus(deductions).toFixed(2)).not.toBe(D(res.revenue).toFixed(2));
+  });
+
+  it("net revenue − cost of sales = gross profit, with returns in play", async () => {
+    const res = (await pnl()).body;
+    expect(D(res.grossProfit).toFixed(2)).toBe(D(res.revenue).minus(res.costOfSales).toFixed(2));
+  });
+
+  it("gross profit − total expenses = net profit, with returns in play", async () => {
+    const res = (await pnl()).body;
+    expect(D(res.netProfit).toFixed(2)).toBe(D(res.grossProfit).minus(res.totalExpenses).toFixed(2));
+  });
+
+  it("every expense account the API returns is a leaf with a non-zero amount, so grouping can never lose one", async () => {
+    const res = (await pnl()).body;
+    expect(res.expenses.length).toBeGreaterThan(0);
+    for (const e of res.expenses) {
+      expect(e.accountId).toBeTruthy();
+      expect(e.code).toBeTruthy();
+      expect(D(e.amount).isZero()).toBe(false);
+    }
+    const summed = res.expenses.reduce((a: Decimal, e: { amount: string }) => a.plus(e.amount), new Decimal(0));
+    expect(summed.toFixed(2)).toBe(D(res.totalExpenses).toFixed(2));
+  });
+
   it("requesting the report writes nothing", async () => {
     const count = async () => ({
       journals: await handle.prisma.journalEntry.count(),

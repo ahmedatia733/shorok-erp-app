@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import type { AppLocale } from "../../../../../i18n";
@@ -15,6 +15,13 @@ import {
 } from "../../../../../lib/journal-client";
 import { formatCurrency } from "../../../../../lib/format";
 import { CREDIT_HINT_AR, CREDIT_LABEL_AR, deductionDisplay } from "../../../../../lib/pnl-format";
+import {
+  groupExpenses,
+  splitRevenue,
+  type ExpenseGroup,
+  type PnlAmountLine,
+  type RevenueSplit,
+} from "../../../../../lib/pnl-sections";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -106,16 +113,37 @@ function exportCSV(data: IncomeStatementData, compare: IncomeStatementData | nul
     rows.push(compare ? [label, disp, pctOfRev(amount, data.revenue), prevDisp, chg] : [label, disp, pctOfRev(amount, data.revenue)]);
   };
 
-  addLine("الإيرادات", data.revenue, false, compare?.revenue);
-  for (const l of data.revenueLines)
-    addLine(`  ${l.code} ${l.nameAr}`, l.amount, false, cRevMap.get(l.accountId));
-  addLine("تكلفة المبيعات", data.costOfSales, true, compare?.costOfSales);
+  // The export mirrors the screen exactly: same sections, same order, same
+  // signs — so a spreadsheet and a printout can never tell different stories.
+  const rev = splitRevenue(data.revenueLines);
+  const cRev = compare ? splitRevenue(compare.revenueLines) : null;
+  const groups = groupExpenses(data.expenses);
+  const cGroups = compare ? groupExpenses(compare.expenses) : null;
+
+  addLine("الإيرادات", rev.grossTotal, false, cRev?.grossTotal);
+  for (const l of rev.gross) addLine(`  ${l.code} ${l.nameAr}`, l.amount, false, cRevMap.get(l.accountId));
+  if (rev.deductions.length > 0) {
+    addLine("مردودات وتخفيضات المبيعات", rev.deductionsTotal, true, cRev?.deductionsTotal);
+    for (const l of rev.deductions) {
+      const prev = cRevMap.get(l.accountId);
+      addLine(`  ${l.code} ${l.nameAr}`, l.amount, true, prev != null ? String(Math.abs(Number(prev))) : undefined);
+    }
+  }
+  addLine("صافي الإيرادات", rev.netRevenue, false, cRev?.netRevenue);
+
+  addLine("تكلفة البضاعة المباعة", data.costOfSales, true, compare?.costOfSales);
   for (const l of data.cogsLines)
     addLine(`  ${l.code} ${l.nameAr}`, l.amount, true, cCOGSMap.get(l.accountId));
+
   addLine("مجمل الربح", data.grossProfit, false, compare?.grossProfit);
-  addLine("المصاريف", data.totalExpenses, true, compare?.totalExpenses);
-  for (const l of data.expenses)
-    addLine(`  ${l.code} ${l.nameAr}`, l.amount, true, cExpMap.get(l.accountId));
+
+  addLine("المصروفات التشغيلية", data.totalExpenses, true, compare?.totalExpenses);
+  for (const g of groups) {
+    addLine(`  ${g.labelAr}`, g.total, true, cGroups?.find((x) => x.id === g.id)?.total);
+    for (const l of g.lines) addLine(`    ${l.code} ${l.nameAr}`, l.amount, true, cExpMap.get(l.accountId));
+  }
+  addLine("إجمالي المصروفات", data.totalExpenses, true, compare?.totalExpenses);
+
   addLine("صافي الربح", data.netProfit, false, compare?.netProfit);
 
   const csv = "﻿" + rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
@@ -154,148 +182,175 @@ function KpiCard({
   );
 }
 
-// ── P&L expandable section row ────────────────────────────────────────────────
+// ── Statement rows ────────────────────────────────────────────────────────────
 
-interface PLSectionProps {
-  id: string;
-  label: string;
-  total: string;
-  lines: ISAccountLine[];
+/**
+ * One account line. `isDeduction` only decides how the amount READS: a positive
+ * amount is money out and prints in parentheses, while a credit balance prints
+ * as a positive magnitude marked «دائن», because parentheses already mean
+ * "deducted" and wrapping a negative would negate it twice.
+ */
+function AccountRow({
+  line, revenue, isDeduction, locale, compare, prevAmt, statementBase, indent = "ps-10",
+}: {
+  line: PnlAmountLine;
   revenue: string;
   isDeduction: boolean;
-  invertChange: boolean;
+  locale: AppLocale;
+  compare: IncomeStatementData | null;
+  prevAmt: string | undefined;
+  statementBase: string;
+  indent?: string;
+}) {
+  const d = deductionDisplay(line.amount);
+  const credit = isDeduction && d.kind === "CREDIT";
+  const show = (a: string) => {
+    if (!isDeduction) return formatCurrency(a, locale);
+    const x = deductionDisplay(a);
+    return x.parenthesise
+      ? `(${formatCurrency(x.magnitude, locale)})`
+      : `${formatCurrency(x.magnitude, locale)} ${CREDIT_LABEL_AR}`;
+  };
+  const chg = prevAmt != null ? changePct(line.amount, prevAmt) : null;
+  return (
+    <tr className="border-b border-border/40 hover:bg-surface/40 bg-background/20">
+      <td className={`px-4 py-2 text-sm ${indent}`}>
+        <a
+          href={`${statementBase}?accountId=${line.accountId}`}
+          className="inline-flex items-center gap-1.5 text-blue-700 hover:underline"
+        >
+          <span className="font-mono text-xs text-textSecondary">{line.code}</span>
+          {locale === "ar" ? line.nameAr : line.nameEn}
+          <span className="text-xs opacity-50">↗</span>
+        </a>
+      </td>
+      <td
+        className={`px-4 py-2 text-sm text-end tabular-nums ${credit ? "text-green-700" : "text-textSecondary"}`}
+        dir="ltr"
+        title={credit ? CREDIT_HINT_AR : undefined}
+        data-credit={credit ? "true" : undefined}
+      >
+        {show(line.amount)}
+      </td>
+      <td className="px-4 py-2 text-sm text-end tabular-nums text-textSecondary">
+        {pctOfRev(line.amount, revenue)}
+      </td>
+      {compare && (
+        <>
+          <td className="px-4 py-2 text-sm text-end tabular-nums text-textSecondary" dir="ltr">
+            {prevAmt != null ? show(prevAmt) : "—"}
+          </td>
+          <td className="px-4 py-2 text-sm text-end text-textSecondary">{chg?.label ?? "—"}</td>
+        </>
+      )}
+    </tr>
+  );
+}
+
+/** A named section heading with its own total (الإيرادات، المصروفات، a group). */
+function SectionRow({
+  label, total, revenue, isDeduction, locale, compare, compareTotal, expandable, expanded, onToggle, indent = "",
+}: {
+  label: string;
+  total: string;
+  revenue: string;
+  isDeduction: boolean;
   locale: AppLocale;
   compare: IncomeStatementData | null;
   compareTotal: string | undefined;
-  compareLineMap: Map<string, string>;
-  expanded: boolean;
-  onToggle: () => void;
-  statementBase: string;
-  bold?: boolean;
-  rowClass?: string;
+  expandable?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+  indent?: string;
+}) {
+  const d = deductionDisplay(total);
+  const credit = isDeduction && d.kind === "CREDIT";
+  const show = (a: string) => {
+    if (!isDeduction) return formatCurrency(a, locale);
+    const x = deductionDisplay(a);
+    return x.parenthesise
+      ? `(${formatCurrency(x.magnitude, locale)})`
+      : `${formatCurrency(x.magnitude, locale)} ${CREDIT_LABEL_AR}`;
+  };
+  return (
+    <tr
+      className={`border-b border-border transition-colors hover:bg-surface/60 ${expandable ? "cursor-pointer select-none" : ""}`}
+      onClick={expandable ? onToggle : undefined}
+    >
+      <td className={`px-4 py-2.5 text-sm ${indent}`}>
+        <div className="flex items-center gap-1.5">
+          {expandable && (
+            <span className="text-textSecondary text-xs w-3 shrink-0">{expanded ? "▾" : "▸"}</span>
+          )}
+          <span className="font-semibold">{label}</span>
+        </div>
+      </td>
+      <td
+        className={`px-4 py-2.5 text-sm text-end tabular-nums font-semibold ${credit ? "text-green-700" : ""}`}
+        dir="ltr"
+        title={credit ? CREDIT_HINT_AR : undefined}
+        data-credit={credit ? "true" : undefined}
+      >
+        {show(total)}
+      </td>
+      <td className="px-4 py-2.5 text-sm text-end tabular-nums text-textSecondary">
+        {pctOfRev(total, revenue)}
+      </td>
+      {compare && (
+        <>
+          <td className="px-4 py-2.5 text-sm text-end tabular-nums text-textSecondary" dir="ltr">
+            {compareTotal != null ? show(compareTotal) : "—"}
+          </td>
+          <td className="px-4 py-2.5 text-sm text-end text-textSecondary">
+            {compareTotal != null ? changePct(total, compareTotal)?.label ?? "—" : "—"}
+          </td>
+        </>
+      )}
+    </tr>
+  );
 }
 
-function PLSection({
-  label,
-  total,
-  lines,
-  revenue,
-  isDeduction,
-  invertChange,
-  locale,
-  compare,
-  compareTotal,
-  compareLineMap,
-  expanded,
-  onToggle,
-  statementBase,
-  bold,
-  rowClass,
-}: PLSectionProps) {
-  const hasLines = lines.length > 0;
-  // Parentheses mean "deducted". An amount that is already negative is a CREDIT
-  // balance — it increased profit — so it must not be dressed as a deduction.
-  const disp = (a: string) => {
-    if (!isDeduction) return formatCurrency(a, locale);
-    const d = deductionDisplay(a);
-    return d.parenthesise
-      ? `(${formatCurrency(d.magnitude, locale)})`
-      : `${formatCurrency(d.magnitude, locale)} ${CREDIT_LABEL_AR}`;
-  };
-  const isCredit = (a: string) => isDeduction && deductionDisplay(a).kind === "CREDIT";
-
-  const chg = compareTotal != null ? changePct(total, compareTotal) : null;
-  const chgColor = (c: { positive: boolean } | null) => {
-    if (!c) return "text-textSecondary";
-    const good = invertChange ? !c.positive : c.positive;
-    return good ? "text-green-700" : "text-red-600";
-  };
-
-  const cols = compare ? 5 : 3;
-
+/**
+ * A carried-forward subtotal: صافي الإيرادات، مجمل الربح، صافي الربح. These are
+ * the numbers a reader follows down the page, so they are never wrapped in
+ * deduction parentheses — a subtotal is a result, not an outflow.
+ */
+function SubtotalRow({
+  label, value, revenue, locale, compare, compareValue, strong, testId,
+}: {
+  label: string;
+  value: string;
+  revenue: string;
+  locale: AppLocale;
+  compare: IncomeStatementData | null;
+  compareValue: string | undefined;
+  strong?: boolean;
+  testId?: string;
+}) {
+  const negative = Number(value) < 0;
+  const tone = strong ? (negative ? "text-red-600" : "text-green-700") : negative ? "text-red-600" : "text-blue-700";
+  const chg = compareValue != null ? changePct(value, compareValue) : null;
   return (
-    <>
-      <tr
-        className={`border-b border-border transition-colors ${rowClass ?? "hover:bg-surface/60"} ${hasLines ? "cursor-pointer select-none" : ""}`}
-        onClick={hasLines ? onToggle : undefined}
-      >
-        <td className="px-4 py-2.5 text-sm">
-          <div className="flex items-center gap-1.5">
-            {hasLines && (
-              <span className="text-textSecondary text-xs w-3 shrink-0">
-                {expanded ? "▾" : "▸"}
-              </span>
-            )}
-            <span className={bold ? "font-semibold" : ""}>{label}</span>
-          </div>
-        </td>
-        <td
-          className={`px-4 py-2.5 text-sm text-end tabular-nums ${bold ? "font-semibold" : ""} ${isCredit(total) ? "text-green-700" : ""}`}
-          dir="ltr"
-          title={isCredit(total) ? CREDIT_HINT_AR : undefined}
-          data-credit={isCredit(total) ? "true" : undefined}
-        >
-          {disp(total)}
-        </td>
-        <td className="px-4 py-2.5 text-sm text-end tabular-nums text-textSecondary">
-          {pctOfRev(total, revenue)}
-        </td>
-        {compare && (
-          <>
-            <td className="px-4 py-2.5 text-sm text-end tabular-nums text-textSecondary" dir="ltr">
-              {compareTotal != null ? disp(compareTotal) : "—"}
-            </td>
-            <td className={`px-4 py-2.5 text-sm text-end font-medium ${chgColor(chg)}`}>
-              {chg?.label ?? "—"}
-            </td>
-          </>
-        )}
-      </tr>
-
-      {expanded &&
-        lines.map((line) => {
-          const prevAmt = compareLineMap.get(line.accountId);
-          const lineChg = prevAmt != null ? changePct(line.amount, prevAmt) : null;
-          return (
-            <tr
-              key={line.accountId}
-              className="border-b border-border/40 hover:bg-surface/40 bg-background/20"
-            >
-              <td className="px-4 py-2 text-sm ps-10">
-                <a
-                  href={`${statementBase}?accountId=${line.accountId}`}
-                  className="inline-flex items-center gap-1.5 text-blue-700 hover:underline"
-                >
-                  <span className="font-mono text-xs text-textSecondary">{line.code}</span>
-                  {locale === "ar" ? line.nameAr : line.nameEn}
-                  <span className="text-xs opacity-50">↗</span>
-                </a>
-              </td>
-              <td
-                className={`px-4 py-2 text-sm text-end tabular-nums ${isCredit(line.amount) ? "text-green-700" : "text-textSecondary"}`}
-                dir="ltr"
-                title={isCredit(line.amount) ? CREDIT_HINT_AR : undefined}
-                data-credit={isCredit(line.amount) ? "true" : undefined}
-              >
-                {disp(line.amount)}
-              </td>
-              <td className="px-4 py-2 text-sm text-end tabular-nums text-textSecondary">
-                {pctOfRev(line.amount, revenue)}
-              </td>
-              {compare && (
-                <>
-                  <td className="px-4 py-2 text-sm text-end tabular-nums text-textSecondary" dir="ltr">
-                    {prevAmt != null ? disp(prevAmt) : "—"}
-                  </td>
-                  <td className={`px-4 py-2 text-sm text-end ${chgColor(lineChg)}`}>
-                    {lineChg?.label ?? "—"}
-                  </td>
-                </>
-              )}
-            </tr>
-          );
-        })}
-    </>
+    <tr
+      className={strong ? (negative ? "bg-red-50/60 border-b-2 border-border" : "bg-green-50/60 border-b-2 border-border") : "border-b border-border bg-blue-50/40"}
+      data-testid={testId}
+    >
+      <td className={`px-4 py-3 text-sm ${strong ? "font-bold" : "font-semibold"}`}>{label}</td>
+      <td className={`px-4 py-3 ${strong ? "text-base font-bold" : "text-sm font-semibold"} text-end tabular-nums ${tone}`} dir="ltr">
+        {formatCurrency(value, locale)}
+      </td>
+      <td className="px-4 py-3 text-sm text-end tabular-nums text-textSecondary">{pctOfRev(value, revenue)}</td>
+      {compare && (
+        <>
+          <td className="px-4 py-3 text-sm text-end tabular-nums text-textSecondary" dir="ltr">
+            {compareValue != null ? formatCurrency(compareValue, locale) : "—"}
+          </td>
+          <td className={`px-4 py-3 text-sm text-end font-medium ${chg ? (chg.positive ? "text-green-700" : "text-red-600") : "text-textSecondary"}`}>
+            {chg?.label ?? "—"}
+          </td>
+        </>
+      )}
+    </tr>
   );
 }
 
@@ -333,7 +388,7 @@ export default function IncomeStatementPage() {
 
   // ── Expand state (all expanded by default) ───────────────────────────────
   const [expanded, setExpanded] = useState<Set<string>>(
-    new Set(["revenue", "cogs", "expenses"]),
+    new Set(["revenue", "returns", "cogs", "expenses"]),
   );
 
   function toggle(id: string) {
@@ -385,6 +440,14 @@ export default function IncomeStatementPage() {
   const cRevMap = new Map((compareData?.revenueLines ?? []).map((l) => [l.accountId, l.amount]));
   const cCOGSMap = new Map((compareData?.cogsLines ?? []).map((l) => [l.accountId, l.amount]));
   const cExpMap = new Map((compareData?.expenses ?? []).map((l) => [l.accountId, l.amount]));
+
+  // Presentation only: the API's totals are used verbatim below. `revSplit.netRevenue`
+  // is reconstructed from the same lines and equals `data.revenue`, so the sales
+  // return is deducted once, not twice.
+  const revSplit: RevenueSplit = splitRevenue(data?.revenueLines ?? []);
+  const cRev = compareData ? splitRevenue(compareData.revenueLines) : null;
+  const expenseGroups: ExpenseGroup[] = groupExpenses(data?.expenses ?? []);
+  const cGroups = compareData ? groupExpenses(compareData.expenses) : null;
 
   const statementBase = `/${locale}/accounting/statement`;
 
@@ -553,129 +616,180 @@ export default function IncomeStatementPage() {
                 </tr>
               </thead>
               <tbody>
-                {/* ── Revenue ── */}
-                <PLSection
-                  id="revenue"
+                {/* ── الإيرادات ─────────────────────────────────────────── */}
+                <SectionRow
                   label="الإيرادات"
-                  total={data.revenue}
-                  lines={data.revenueLines}
+                  total={revSplit.grossTotal}
                   revenue={data.revenue}
                   isDeduction={false}
-                  invertChange={false}
                   locale={locale}
                   compare={compareData}
-                  compareTotal={compareData?.revenue}
-                  compareLineMap={cRevMap}
+                  compareTotal={cRev?.grossTotal}
+                  expandable={revSplit.gross.length > 0}
                   expanded={expanded.has("revenue")}
                   onToggle={() => toggle("revenue")}
-                  statementBase={statementBase}
+                />
+                {expanded.has("revenue") &&
+                  revSplit.gross.map((l) => (
+                    <AccountRow
+                      key={l.accountId}
+                      line={l}
+                      revenue={data.revenue}
+                      isDeduction={false}
+                      locale={locale}
+                      compare={compareData}
+                      prevAmt={cRevMap.get(l.accountId)}
+                      statementBase={statementBase}
+                    />
+                  ))}
+
+                {/* مردودات المبيعات — a visible deduction from revenue. The API's
+                    revenue total is ALREADY net of it, so صافي الإيرادات below is
+                    that same total: the return is applied exactly once. */}
+                {revSplit.deductions.length > 0 && (
+                  <>
+                    <SectionRow
+                      label="مردودات وتخفيضات المبيعات"
+                      total={revSplit.deductionsTotal}
+                      revenue={data.revenue}
+                      isDeduction
+                      locale={locale}
+                      compare={compareData}
+                      compareTotal={cRev?.deductionsTotal}
+                      expandable
+                      expanded={expanded.has("returns")}
+                      onToggle={() => toggle("returns")}
+                    />
+                    {expanded.has("returns") &&
+                      revSplit.deductions.map((l) => {
+                        const prev = cRevMap.get(l.accountId);
+                        return (
+                          <AccountRow
+                            key={l.accountId}
+                            line={l}
+                            revenue={data.revenue}
+                            isDeduction
+                            locale={locale}
+                            compare={compareData}
+                            prevAmt={prev != null ? String(Math.abs(Number(prev))) : undefined}
+                            statementBase={statementBase}
+                          />
+                        );
+                      })}
+                  </>
+                )}
+
+                <SubtotalRow
+                  label="صافي الإيرادات"
+                  value={revSplit.netRevenue}
+                  revenue={data.revenue}
+                  locale={locale}
+                  compare={compareData}
+                  compareValue={cRev?.netRevenue}
+                  testId="is-net-revenue"
                 />
 
-                {/* ── COGS ── */}
-                <PLSection
-                  id="cogs"
-                  label="تكلفة المبيعات"
+                {/* ── تكلفة البضاعة المباعة ──────────────────────────────── */}
+                <SectionRow
+                  label="تكلفة البضاعة المباعة"
                   total={data.costOfSales}
-                  lines={data.cogsLines}
                   revenue={data.revenue}
                   isDeduction
-                  invertChange
                   locale={locale}
                   compare={compareData}
                   compareTotal={compareData?.costOfSales}
-                  compareLineMap={cCOGSMap}
+                  expandable={data.cogsLines.length > 0}
                   expanded={expanded.has("cogs")}
                   onToggle={() => toggle("cogs")}
-                  statementBase={statementBase}
+                />
+                {expanded.has("cogs") &&
+                  data.cogsLines.map((l) => (
+                    <AccountRow
+                      key={l.accountId}
+                      line={l}
+                      revenue={data.revenue}
+                      isDeduction
+                      locale={locale}
+                      compare={compareData}
+                      prevAmt={cCOGSMap.get(l.accountId)}
+                      statementBase={statementBase}
+                    />
+                  ))}
+
+                <SubtotalRow
+                  label="مجمل الربح"
+                  value={data.grossProfit}
+                  revenue={data.revenue}
+                  locale={locale}
+                  compare={compareData}
+                  compareValue={compareData?.grossProfit}
+                  testId="is-gross-profit"
                 />
 
-                <DividerRow cols={cols} thick />
-
-                {/* ── Gross profit ── */}
-                <tr className="border-b border-border bg-blue-50/40">
-                  <td className="px-4 py-3 text-sm font-semibold">مجمل الربح</td>
-                  <td
-                    className={`px-4 py-3 text-sm text-end tabular-nums font-semibold ${parseFloat(data.grossProfit) < 0 ? "text-red-600" : "text-blue-700"}`}
-                    dir="ltr"
-                  >
-                    {formatCurrency(data.grossProfit, locale)}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-end tabular-nums text-textSecondary">
-                    {gm != null ? `${gm.toFixed(1)}%` : "—"}
-                  </td>
-                  {compareData && (
-                    <>
-                      <td
-                        className={`px-4 py-3 text-sm text-end tabular-nums ${parseFloat(compareData.grossProfit) < 0 ? "text-red-600" : "text-blue-700/70"}`}
-                        dir="ltr"
-                      >
-                        {formatCurrency(compareData.grossProfit, locale)}
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-sm text-end font-medium ${(() => {
-                          const c = changePct(data.grossProfit, compareData.grossProfit);
-                          return c ? (c.positive ? "text-green-700" : "text-red-600") : "text-textSecondary";
-                        })()}`}
-                      >
-                        {changePct(data.grossProfit, compareData.grossProfit)?.label ?? "—"}
-                      </td>
-                    </>
-                  )}
-                </tr>
-
-                <DividerRow cols={cols} />
-
-                {/* ── Expenses ── */}
-                <PLSection
-                  id="expenses"
-                  label="المصاريف"
+                {/* ── المصروفات التشغيلية ────────────────────────────────── */}
+                <SectionRow
+                  label="المصروفات التشغيلية"
                   total={data.totalExpenses}
-                  lines={data.expenses}
                   revenue={data.revenue}
                   isDeduction
-                  invertChange
                   locale={locale}
                   compare={compareData}
                   compareTotal={compareData?.totalExpenses}
-                  compareLineMap={cExpMap}
+                  expandable={expenseGroups.length > 0}
                   expanded={expanded.has("expenses")}
                   onToggle={() => toggle("expenses")}
-                  statementBase={statementBase}
+                />
+                {expanded.has("expenses") &&
+                  expenseGroups.map((g) => (
+                    <Fragment key={g.id}>
+                      <SectionRow
+                        label={g.labelAr}
+                        total={g.total}
+                        revenue={data.revenue}
+                        isDeduction
+                        locale={locale}
+                        compare={compareData}
+                        compareTotal={cGroups?.find((x) => x.id === g.id)?.total}
+                        indent="ps-8"
+                      />
+                      {g.lines.map((l) => (
+                        <AccountRow
+                          key={l.accountId}
+                          line={l}
+                          revenue={data.revenue}
+                          isDeduction
+                          locale={locale}
+                          compare={compareData}
+                          prevAmt={cExpMap.get(l.accountId)}
+                          statementBase={statementBase}
+                          indent="ps-14"
+                        />
+                      ))}
+                    </Fragment>
+                  ))}
+
+                <SubtotalRow
+                  label="إجمالي المصروفات"
+                  value={data.totalExpenses}
+                  revenue={data.revenue}
+                  locale={locale}
+                  compare={compareData}
+                  compareValue={compareData?.totalExpenses}
+                  testId="is-total-expenses"
                 />
 
                 <DividerRow cols={cols} thick />
 
-                {/* ── Net profit ── */}
-                <tr className={netNum >= 0 ? "bg-green-50/60" : "bg-red-50/60"}>
-                  <td className="px-4 py-3 text-sm font-bold">صافي الربح</td>
-                  <td
-                    className={`px-4 py-3 text-base text-end tabular-nums font-bold ${netNum >= 0 ? "text-green-700" : "text-red-600"}`}
-                    dir="ltr"
-                  >
-                    {formatCurrency(data.netProfit, locale)}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-end tabular-nums text-textSecondary">
-                    {nm != null ? `${nm.toFixed(1)}%` : "—"}
-                  </td>
-                  {compareData && (
-                    <>
-                      <td
-                        className={`px-4 py-3 text-sm text-end tabular-nums font-bold ${parseFloat(compareData.netProfit) >= 0 ? "text-green-700/70" : "text-red-600/70"}`}
-                        dir="ltr"
-                      >
-                        {formatCurrency(compareData.netProfit, locale)}
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-sm text-end font-bold ${(() => {
-                          const c = changePct(data.netProfit, compareData.netProfit);
-                          return c ? (c.positive ? "text-green-700" : "text-red-600") : "text-textSecondary";
-                        })()}`}
-                      >
-                        {changePct(data.netProfit, compareData.netProfit)?.label ?? "—"}
-                      </td>
-                    </>
-                  )}
-                </tr>
+                <SubtotalRow
+                  label="صافي الربح"
+                  value={data.netProfit}
+                  revenue={data.revenue}
+                  locale={locale}
+                  compare={compareData}
+                  compareValue={compareData?.netProfit}
+                  strong
+                  testId="is-net-profit"
+                />
               </tbody>
             </table>
           </div>
