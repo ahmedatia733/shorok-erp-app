@@ -21,6 +21,7 @@
     "deposit:post": "ts-node --transpile-only scripts/post-capital-funded-deposit.ts",
     "catalogue:create": "ts-node --transpile-only scripts/create-catalogue-products.ts",
     "opening-inventory:import": "ts-node --transpile-only scripts/import-branch-opening-inventory.ts",
+    "coa:restructure": "ts-node --transpile-only scripts/restructure-chart-of-accounts.ts",
     "sales-returns-account:configure": "ts-node --transpile-only scripts/configure-sales-returns-account.ts"
   },
   "prisma": {

@@ -36,6 +36,11 @@ export interface PnlAmountLine {
   nameAr: string;
   nameEn: string;
   amount: string;
+  /** The account's parent in the chart hierarchy. Present once the chart is
+   *  linked; absent on an installation whose hierarchy is not yet populated. */
+  parentId?: string | null;
+  parentCode?: string | null;
+  parentNameAr?: string | null;
 }
 
 /** Exact string addition at money scale — never float, never drifting. */
@@ -110,6 +115,18 @@ const GROUP_ORDER: Array<{ id: ExpenseGroupId; labelAr: string }> = [
 ];
 
 /**
+ * The expense group headers in the chart, by code. When an account carries a
+ * parent, the parent IS the section — no guessing required.
+ */
+const PARENT_CODE_TO_GROUP: Record<string, ExpenseGroupId> = {
+  "6010": "SELLING",
+  "6020": "ADMIN",
+  "6030": "FINANCE",
+  "6040": "OTHER",
+  "6050": "DEPRECIATION",
+};
+
+/**
  * Which section an expense account is read under.
  *
  * The chart has no hierarchy field yet, so this maps the accounts that actually
@@ -120,7 +137,19 @@ const GROUP_ORDER: Array<{ id: ExpenseGroupId; labelAr: string }> = [
  * written — falls to «مصروفات أخرى». A new expense account must show up in the
  * wrong section rather than silently vanish from the statement.
  */
-export function classifyExpense(line: { code: string; nameAr: string; nameEn: string }): ExpenseGroupId {
+export function classifyExpense(line: {
+  code: string;
+  nameAr: string;
+  nameEn: string;
+  parentCode?: string | null;
+}): ExpenseGroupId {
+  // The chart hierarchy is the source of truth when it is populated: the
+  // account's parent IS its section. The name/code rules below are the
+  // fallback for an installation whose chart has not been linked yet, which
+  // keeps this working on both sides of the migration.
+  const byParent = line.parentCode ? PARENT_CODE_TO_GROUP[line.parentCode] : undefined;
+  if (byParent) return byParent;
+
   const name = `${line.nameAr} ${line.nameEn}`.toLowerCase();
   // Depreciation is recognised by name: no depreciation account exists in the
   // chart today, and this task must not invent one.

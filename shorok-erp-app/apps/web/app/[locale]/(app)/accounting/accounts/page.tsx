@@ -33,6 +33,25 @@ const ACCOUNT_TYPES = [
   "EXPENSE",
 ] as const;
 
+/**
+ * A header's figure is the sum of the leaf balances beneath it, computed here
+ * for display. Nothing stores a parent balance: a header never carries a
+ * journal line, so its total is only ever the sum of what its descendants hold.
+ */
+function rollUp(acc: AccountRow, balances: Record<string, string>): number | null {
+  if (acc.isLeaf) {
+    const b = balances[acc.id];
+    return b === undefined ? null : Number(b);
+  }
+  let total = 0;
+  let seen = false;
+  for (const child of acc.children ?? []) {
+    const v = rollUp(child, balances);
+    if (v !== null) { total += v; seen = true; }
+  }
+  return seen ? total : null;
+}
+
 function AccountTree({
   accounts,
   depth,
@@ -62,20 +81,25 @@ function AccountTree({
               <span className={acc.isLeaf ? "text-sm" : "text-sm font-medium"}>
                 {locale === "ar" ? acc.nameAr : acc.nameEn}
               </span>
-              {acc.isLeaf && (
+              {acc.isLeaf ? (
                 <Badge variant={acc.active ? "success" : "neutral"}>
                   {acc.active ? t("active") : t("archived")}
+                </Badge>
+              ) : (
+                <Badge variant="neutral" title="حساب تجميعي — لا يقبل الترحيل المباشر">
+                  مجموعة
                 </Badge>
               )}
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              {acc.isLeaf && balances[acc.id] !== undefined && (() => {
-                const bal = balances[acc.id];
-                return bal !== undefined ? (
-                  <span className="text-sm font-medium">
-                    {formatCurrency(bal, locale)}
+              {(() => {
+                const bal = rollUp(acc, balances);
+                if (bal === null) return null;
+                return (
+                  <span className={acc.isLeaf ? "text-sm font-medium" : "text-sm font-semibold text-textSecondary"}>
+                    {formatCurrency(String(bal), locale)}
                   </span>
-                ) : null;
+                );
               })()}
               {isOwner && (
                 <Button size="sm" variant="ghost" onClick={() => onEdit(acc)}>

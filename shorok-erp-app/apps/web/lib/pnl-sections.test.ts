@@ -57,6 +57,36 @@ describe("splitRevenue", () => {
   });
 });
 
+describe("classifyExpense — hierarchy first", () => {
+  const withParent = (code: string, parentCode: string) =>
+    ({ code, nameAr: "أي اسم", nameEn: "anything", parentCode });
+
+  it("uses the account's real parent when the chart is linked", () => {
+    expect(classifyExpense(withParent("6100", "6010"))).toBe("SELLING");
+    expect(classifyExpense(withParent("6200", "6020"))).toBe("ADMIN");
+    expect(classifyExpense(withParent("6500", "6030"))).toBe("FINANCE");
+    expect(classifyExpense(withParent("6600", "6040"))).toBe("OTHER");
+    expect(classifyExpense(withParent("6800", "6050"))).toBe("DEPRECIATION");
+  });
+
+  it("the parent wins over the account's own code", () => {
+    // A transport-coded account deliberately filed under G&A must read as G&A.
+    expect(classifyExpense(withParent("6100", "6020"))).toBe("ADMIN");
+    // And a brand-new code under selling lands in selling, not Other.
+    expect(classifyExpense(withParent("6900", "6010"))).toBe("SELLING");
+  });
+
+  it("falls back to code/name rules when the chart is not yet linked", () => {
+    expect(classifyExpense({ code: "6100", nameAr: "النقل والشحن", nameEn: "x" })).toBe("SELLING");
+    expect(classifyExpense({ code: "6100", nameAr: "x", nameEn: "x", parentCode: null })).toBe("SELLING");
+  });
+
+  it("an unrecognised parent falls through to the code rules rather than vanishing", () => {
+    expect(classifyExpense({ code: "6500", nameAr: "x", nameEn: "x", parentCode: "9999" })).toBe("FINANCE");
+    expect(classifyExpense({ code: "7777", nameAr: "x", nameEn: "x", parentCode: "9999" })).toBe("OTHER");
+  });
+});
+
 describe("classifyExpense", () => {
   it("maps the accounts that exist today to their reading sections", () => {
     expect(classifyExpense(line("6100", "النقل والشحن", "0"))).toBe("SELLING");

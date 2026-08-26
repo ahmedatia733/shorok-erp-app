@@ -2,7 +2,18 @@ import { Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { PrismaService } from "../../prisma/prisma.service";
 
-export interface PnlLine { accountId: string; code: string; nameAr: string; nameEn: string; amount: string }
+export interface PnlLine {
+  accountId: string;
+  code: string;
+  nameAr: string;
+  nameEn: string;
+  amount: string;
+  /** The account's parent in the chart hierarchy, so reports can group by the
+   *  real tree instead of guessing from code prefixes. Null for a root. */
+  parentId: string | null;
+  parentCode: string | null;
+  parentNameAr: string | null;
+}
 export interface Pnl {
   from: string; to: string;
   branchAttributionComplete: boolean; // false → all-branches only, not branch-filterable
@@ -31,6 +42,8 @@ export class FinancialReportsService {
       where: { isLeaf: true, category: { in: ["REVENUE", "COST_OF_SALES", "EXPENSE"] } },
       select: {
         id: true, code: true, nameAr: true, nameEn: true, category: true,
+        parentId: true,
+        parent: { select: { id: true, code: true, nameAr: true } },
         journalLines: {
           where: { journalEntry: { status: "POSTED", reversalOfId: null, entryDate: { gte: from, lte: to } } },
           select: { debit: true, credit: true },
@@ -43,7 +56,13 @@ export class FinancialReportsService {
     for (const acc of accounts) {
       const dr = acc.journalLines.reduce((s, l) => s.plus(l.debit.toString()), new Decimal(0));
       const cr = acc.journalLines.reduce((s, l) => s.plus(l.credit.toString()), new Decimal(0));
-      const line = (amount: Decimal): PnlLine => ({ accountId: acc.id, code: acc.code, nameAr: acc.nameAr, nameEn: acc.nameEn, amount: amount.toFixed(2) });
+      const line = (amount: Decimal): PnlLine => ({
+        accountId: acc.id, code: acc.code, nameAr: acc.nameAr, nameEn: acc.nameEn,
+        amount: amount.toFixed(2),
+        parentId: acc.parent?.id ?? null,
+        parentCode: acc.parent?.code ?? null,
+        parentNameAr: acc.parent?.nameAr ?? null,
+      });
       if (acc.category === "REVENUE") {
         const amount = cr.minus(dr); revenue = revenue.plus(amount);
         if (!amount.isZero()) revenueLines.push(line(amount));
