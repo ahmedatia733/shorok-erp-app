@@ -5,6 +5,14 @@ import { Prisma, PrismaService } from "../../prisma/prisma.service";
 /** Normal balance side of an account — determines how debit/credit affect the running balance. */
 export type NormalSide = "DEBIT" | "CREDIT";
 
+/**
+ * The statement-only source type for «مردود بدون فاتورة». It is deliberately
+ * NOT a JournalSourceType value: adding one would need a schema migration and
+ * would still leave already-posted rows carrying SALES_RETURN. This is a
+ * presentation discriminator resolved from persisted ids.
+ */
+export const LEGACY_SALES_RETURN_SOURCE = "LEGACY_SALES_RETURN";
+
 export interface StatementRow {
   journalEntryId: string;
   journalLineId: string;
@@ -104,7 +112,16 @@ export class StatementService {
       include: StatementService.lineInclude,
       orderBy: StatementService.lineOrderBy,
     });
-    return StatementService.reduce(lines, () => normalSide, from, to);
+    const result = StatementService.reduce(lines, () => normalSide, from, to);
+    // A legacy return («مردود بدون فاتورة») posts its journal with sourceType
+    // SALES_RETURN — JournalSourceType has no value of its own for it — but its
+    // sourceId is a legacy_sales_returns id, not a sales_returns one. Left
+    // alone the statement links such a row to the ordinary sales-return page,
+    // which cannot find that id and shows "not found". Resolving it from the
+    // stored id keeps the distinction structural rather than text-matched, and
+    // repairs rows posted long before this code existed without rewriting them.
+    await this.markLegacyReturnRows(result.rows);
+    return result;
   }
 
   /**
@@ -181,5 +198,44 @@ export class StatementService {
       endingBalance: endingBalance.toFixed(2),
       rows,
     };
+  }
+
+  /**
+   * Re-labels the SALES_RETURN rows whose document is actually a legacy return.
+   *
+   * One query for the whole page, so a long statement costs a single extra
+   * lookup. A row keeps SALES_RETURN unless its id genuinely exists in
+   * legacy_sales_returns, so an ordinary return is never mistaken for one.
+   */
+  private markLegacyReturnRows = (rows: Array<{ sourceType: string | null; sourceId: string | null }>) =>
+    markLegacyReturnRows(this.prisma, rows);
+}
+
+/**
+ * Re-labels the SALES_RETURN rows whose document is actually a legacy return.
+ *
+ * One query per statement, so a long page costs a single extra lookup. A row
+ * keeps SALES_RETURN unless its id genuinely exists in legacy_sales_returns,
+ * so an ordinary return is never mistaken for one. Shared by the single-party
+ * statement and the consolidated one so the two cannot drift apart.
+ */
+export async function markLegacyReturnRows(
+  prisma: PrismaService,
+  rows: Array<{ sourceType: string | null; sourceId: string | null }>,
+): Promise<void> {
+  const candidates = [...new Set(
+    rows.filter((r) => r.sourceType === "SALES_RETURN" && r.sourceId).map((r) => r.sourceId!),
+  )];
+  if (candidates.length === 0) return;
+  const legacy = await prisma.legacySalesReturn.findMany({
+    where: { id: { in: candidates } },
+    select: { id: true },
+  });
+  if (legacy.length === 0) return;
+  const legacyIds = new Set(legacy.map((l) => l.id));
+  for (const r of rows) {
+    if (r.sourceType === "SALES_RETURN" && r.sourceId && legacyIds.has(r.sourceId)) {
+      r.sourceType = LEGACY_SALES_RETURN_SOURCE;
+    }
   }
 }

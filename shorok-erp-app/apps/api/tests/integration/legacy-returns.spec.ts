@@ -515,4 +515,79 @@ describe("legacy sales returns (مردودات بدون فواتير)", () => {
     expect(await h.prisma.journalEntry.count()).toBe(before.journals);
     expect(await h.prisma.legacySalesReturn.count()).toBe(before.docs);
   });
+  // ── the statement link, and the stock effect, pinned ────────────────────
+
+  it("the customer statement re-labels a legacy return so it links to its OWN page", async () => {
+    await buy("5.25", "10", "500");
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    const d = await draft([{ productVariantId: variant.id, returnedBoards: "1", unitPricePerMeter: "700" }]);
+    expect(d.status).toBe(201);
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+
+    const stmt = await get(`/customers/statement/${customerId}`);
+    expect(stmt.status).toBe(200);
+    const row = stmt.body.entries.find((e: { sourceId: string }) => e.sourceId === d.body.id);
+    expect(row).toBeDefined();
+
+    // The journal is posted as SALES_RETURN because JournalSourceType has no
+    // legacy value; the statement must hand the UI something that routes to the
+    // legacy page rather than the ordinary sales-return page.
+    expect(row.sourceType).toBe("LEGACY_SALES_RETURN");
+
+    // The id really is a legacy return and NOT an ordinary one — which is
+    // exactly why /sales/returns/:id answered "not found".
+    expect(await h.prisma.legacySalesReturn.count({ where: { id: d.body.id } })).toBe(1);
+    expect(await h.prisma.salesReturn.count({ where: { id: d.body.id } })).toBe(0);
+  });
+
+  it("anything still labelled SALES_RETURN is a genuine invoice-linked return", async () => {
+    const stmt = await get(`/customers/statement/${customerId}`);
+    for (const e of stmt.body.entries as Array<{ sourceType: string; sourceId: string }>) {
+      if (e.sourceType === "SALES_RETURN" && e.sourceId) {
+        expect(await h.prisma.legacySalesReturn.count({ where: { id: e.sourceId } })).toBe(0);
+      }
+    }
+  });
+
+  it("confirming adds exactly the returned boards and Decimal-safe metres to the chosen branch", async () => {
+    await buy("5.25", "10", "500");
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    const before = await stock(variant.id);
+    const otherBranchBefore = await h.prisma.branchInventoryBalance.findMany({ where: { NOT: { branchId: h.branchId } } });
+
+    const d = await draft([{ productVariantId: variant.id, returnedBoards: "3", unitPricePerMeter: "700" }]);
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+
+    const after = await stock(variant.id);
+    const expectedMeters = new Decimal(3).mul(variant.sizeMetersPerBoard.toString());
+    expect(after.boards.minus(before.boards).toFixed(4)).toBe("3.0000");
+    expect(after.meters.minus(before.meters).toFixed(4)).toBe(expectedMeters.toFixed(4));
+
+    // no other branch moved
+    const otherBranchAfter = await h.prisma.branchInventoryBalance.findMany({ where: { NOT: { branchId: h.branchId } } });
+    expect(otherBranchAfter.map((b) => `${b.branchId}:${b.boardsOnHand}`).sort())
+      .toEqual(otherBranchBefore.map((b) => `${b.branchId}:${b.boardsOnHand}`).sort());
+
+    // the movement is attributable to this exact document
+    const movements = await h.prisma.inventoryMovement.findMany({
+      where: { referenceType: "legacy_sales_return", referenceId: d.body.id },
+    });
+    expect(movements).toHaveLength(1);
+    expect(new Decimal(movements[0]!.boardsQuantity.toString()).toFixed(4)).toBe("3.0000");
+    expect(new Decimal(movements[0]!.metersQuantity.toString()).toFixed(4)).toBe(expectedMeters.toFixed(4));
+    expect(movements[0]!.branchId).toBe(h.branchId);
+  });
+
+  it("a second confirmation adds no further stock", async () => {
+    await buy("5.25", "10", "500");
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    const d = await draft([{ productVariantId: variant.id, returnedBoards: "2", unitPricePerMeter: "700" }]);
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+    const after1 = await stock(variant.id);
+    await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    const after2 = await stock(variant.id);
+    expect(after2.boards.toFixed(4)).toBe(after1.boards.toFixed(4));
+    expect(await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return", referenceId: d.body.id } })).toBe(1);
+  });
+
 });

@@ -64,3 +64,43 @@ describe("source-document resolver", () => {
       .toBe("/ar/accounting/journal/je-9");
   });
 });
+
+/**
+ * «مردود بدون فاتورة» has its own document and its own page, but its journal is
+ * posted with sourceType SALES_RETURN because JournalSourceType has no value of
+ * its own for it. The statement API re-labels such a row from the persisted id;
+ * these tests pin what the link layer must then do with it.
+ */
+describe("legacy sales return links", () => {
+  const L = "ar";
+
+  it("opens the legacy-return page, not the ordinary sales-return page", () => {
+    const href = sourceDocumentHref({ sourceType: "LEGACY_SALES_RETURN", sourceId: "abc-123" }, L);
+    expect(href).toBe("/ar/sales/legacy-returns/abc-123");
+    expect(href).not.toContain("/sales/returns/");
+  });
+
+  it("counts as a real source document, so the row links to the document not the journal", () => {
+    expect(hasSourceDocument({ sourceType: "LEGACY_SALES_RETURN", sourceId: "abc-123", journalEntryId: "je-1" })).toBe(true);
+    expect(sourceDocumentHref({ sourceType: "LEGACY_SALES_RETURN", sourceId: "abc-123", journalEntryId: "je-1" }, L))
+      .toBe("/ar/sales/legacy-returns/abc-123");
+  });
+
+  it("is labelled distinctly from an invoice-linked return", () => {
+    expect(sourceLabel("LEGACY_SALES_RETURN")).toBe("مردود بدون فاتورة");
+    expect(sourceLabel("SALES_RETURN")).toBe("مردود فاتورة مبيعات");
+  });
+
+  it("leaves every other document type exactly where it was", () => {
+    expect(sourceDocumentHref({ sourceType: "SALES_INVOICE", sourceId: "i1" }, L)).toBe("/ar/sales/invoices/i1");
+    expect(sourceDocumentHref({ sourceType: "PURCHASE_INVOICE", sourceId: "p1" }, L)).toBe("/ar/purchasing/invoices/p1");
+    expect(sourceDocumentHref({ sourceType: "SALES_RETURN", sourceId: "r1" }, L)).toBe("/ar/sales/returns/r1");
+    expect(sourceDocumentHref({ sourceType: "PURCHASE_RETURN", sourceId: "pr1" }, L)).toBe("/ar/purchasing/returns/pr1");
+  });
+
+  it("an unknown source falls back to the journal entry rather than a broken link", () => {
+    expect(sourceDocumentHref({ sourceType: "RECEIPT_VOUCHER", sourceId: "v1", journalEntryId: "je-9" }, L))
+      .toBe("/ar/accounting/journal/je-9");
+    expect(sourceDocumentHref({ sourceType: "WHAT_IS_THIS", sourceId: "x" }, L)).toBeNull();
+  });
+});

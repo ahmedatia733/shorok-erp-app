@@ -15,6 +15,7 @@ import {
   type StatementLineInput,
   type StatementRow,
 } from "./statement.service";
+import { markLegacyReturnRows } from "./statement.service";
 
 export interface BreakdownEntry {
   entityId: string;
@@ -171,6 +172,7 @@ export class ConsolidatedStatementService {
 
     const merged = StatementService.reduce(lines, (l) => sideOf(l.accountId), params.from, params.to);
 
+    await markLegacyReturnRows(this.prisma, merged.rows);
     return {
       selectionType: specific ? "specific" : "consolidated",
       category: def.id,
@@ -221,6 +223,7 @@ export class ConsolidatedStatementService {
     })) as unknown as StatementLineInput[];
 
     const merged = StatementService.reduce(lines, () => side, params.from, params.to);
+    await markLegacyReturnRows(this.prisma, merged.rows);
 
     let breakdown: BreakdownEntry[] = [];
     if (specific) {
@@ -280,6 +283,7 @@ export class ConsolidatedStatementService {
       const retained = new Set(breakdown.map((b) => b.entityId));
       const filteredLines = lines.filter((l) => l.partyId != null && retained.has(l.partyId));
       const refiltered = StatementService.reduce(filteredLines, () => side, params.from, params.to);
+    await markLegacyReturnRows(this.prisma, refiltered.rows);
       return this.partyResult(def, null, def.allLabel, refiltered, breakdown, accountById);
     }
 

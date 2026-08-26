@@ -35,6 +35,7 @@ const DOC_LABELS: Record<string, { ar: string; en: string }> = {
 // number is the return's OWN reference (SR-2 / PR-3), never the journal number.
 const RETURN_LABELS: Record<string, { ar: string; en: string; prefix: RegExp }> = {
   SALES_RETURN: { ar: "مردود فاتورة مبيعات", en: "Sales Invoice Return", prefix: /^SR-/i },
+  LEGACY_SALES_RETURN: { ar: "مردود بدون فاتورة", en: "Return Without Invoice", prefix: /^LRN-/i },
   PURCHASE_RETURN: { ar: "مردود فاتورة مشتريات", en: "Purchase Invoice Return", prefix: /^PR-/i },
 };
 

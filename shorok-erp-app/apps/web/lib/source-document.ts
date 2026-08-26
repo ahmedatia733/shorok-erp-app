@@ -29,12 +29,19 @@ const SOURCE_ROUTES: Record<string, (id: string, locale: string) => string> = {
   // foreign branch), so building the link leaks nothing the statement didn't.
   SALES_RETURN: (id, l) => `/${l}/sales/returns/${id}`,
   PURCHASE_RETURN: (id, l) => `/${l}/purchasing/returns/${id}`,
+  // «مردود بدون فاتورة» keeps its own document and its own page. Its journal is
+  // posted with sourceType SALES_RETURN — the enum has no value of its own for
+  // it — so the statement API re-labels the row from the persisted id before it
+  // reaches here. Without that, this id would be sent to the ordinary
+  // sales-return page, which cannot find it.
+  LEGACY_SALES_RETURN: (id, l) => `/${l}/sales/legacy-returns/${id}`,
 };
 
 export const SOURCE_LABELS: Record<string, string> = {
   SALES_INVOICE: "فاتورة مبيعات",
   PURCHASE_INVOICE: "فاتورة مشتريات",
   SALES_RETURN: "مردود فاتورة مبيعات",
+  LEGACY_SALES_RETURN: "مردود بدون فاتورة",
   PURCHASE_RETURN: "مردود فاتورة مشتريات",
   RECEIPT_VOUCHER: "سند قبض",
   PAYMENT_VOUCHER: "سند صرف",
