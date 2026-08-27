@@ -79,6 +79,35 @@ export class LegacyReturnsService {
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
+  /**
+   * The sales-returns account the business currently uses, for a document whose
+   * own date predates its configuration.
+   *
+   * Read from the newest posting profile that names one, so it follows the
+   * approved accounting configuration rather than a constant compiled in here —
+   * change the configuration and this follows it. Nothing is written: the
+   * historical profile keeps saying what it always said, and no other leg of
+   * it is substituted.
+   *
+   * Returns null when the business has genuinely never configured the account,
+   * which is a real configuration gap and stays a refusal.
+   */
+  private async canonicalSalesReturnsAccountId(): Promise<string | null> {
+    const configured = await this.prisma.postingProfile.findFirst({
+      where: { salesReturnsAccountId: { not: null } },
+      orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }],
+      select: { salesReturnsAccountId: true },
+    });
+    if (!configured?.salesReturnsAccountId) return null;
+    // It must still be postable today; a configured account that was since
+    // archived or turned into a header is not a usable answer.
+    const account = await this.prisma.account.findUnique({
+      where: { id: configured.salesReturnsAccountId },
+      select: { id: true, isLeaf: true, active: true },
+    });
+    return account && account.isLeaf && account.active ? account.id : null;
+  }
+
   private assertBranch(user: AuthenticatedUser, branchId: string): void {
     if (user.role !== "OWNER" && !user.allowedBranches.includes(branchId)) {
       throw new ValidationError({ reason: "branch_not_allowed", branchId });
@@ -292,7 +321,14 @@ export class LegacyReturnsService {
 
     const returnDateStr = pre.returnDate.toISOString().slice(0, 10);
     const profile = await this.effectiveConfig.postingProfileAsOf(returnDateStr);
-    const salesReturnsAccountId = profile?.salesReturnsAccountId ?? null;
+    // Every other leg stays strictly date-effective, exactly as posted
+    // documents require. The sales-returns account is the one exception, and
+    // only for this document type: a return without an invoice is dated by the
+    // paper it came from, so it routinely lands before the day somebody first
+    // configured that account — and refusing then says nothing about the
+    // return, only about when the bookkeeping was set up.
+    const salesReturnsAccountId =
+      profile?.salesReturnsAccountId ?? (await this.canonicalSalesReturnsAccountId());
     const arAccountId = profile?.arAccountId ?? null;
     const vatOutputAccountId = profile?.vatOutputAccountId ?? null;
     const cogsAccountId = profile?.cogsAccountId ?? null;
@@ -328,33 +364,33 @@ export class LegacyReturnsService {
       // The original cost is unknowable, so the goods are valued at what stock
       // of this exact variant is worth right now — read once, frozen on the
       // line, and used again unchanged when the document is cancelled.
+      //
+      // A variant nobody has ever bought has no such value. The goods are still
+      // physically real and still come back into the warehouse, so the document
+      // confirms; what it cannot do is state a cost. It carries none, and the
+      // variant's average stays unestablished until a purchase establishes it.
+      //
+      // The price the user typed is never a candidate. It is what the customer
+      // is being credited, which is a commercial decision about this one
+      // document and says nothing about what the goods cost the company.
       const variantIds = [...new Set(fresh.lines.map((l) => l.productVariantId))].sort();
       for (const vid of variantIds) {
         await tx.$queryRaw`SELECT id FROM product_variants WHERE id = ${vid}::uuid FOR UPDATE`;
       }
-      const wac = new Map<string, Decimal>();
+      const wac = new Map<string, Decimal | null>();
       for (const vid of variantIds) {
         const v = await tx.productVariant.findUnique({
           where: { id: vid },
-          select: { avgCostPerMeter: true, sku: { select: { code: true, colorNameAr: true } }, sizeMetersPerBoard: true },
+          select: { avgCostPerMeter: true },
         });
         const cost = D(v?.avgCostPerMeter);
-        // No usable cost means no posting. Zero, the selling price and the
-        // purchase default are all forbidden substitutes — the document waits
-        // until the variant has a real weighted-average cost.
-        if (!cost.isFinite() || cost.lte(0)) {
-          throw new ValidationError({
-            reason: "legacy_return_cost_unavailable",
-            productVariantId: vid,
-            productCode: v?.sku.code ?? null,
-            messageAr: `لا يوجد متوسط تكلفة معتمد للصنف «${v?.sku.colorNameAr ?? ""}» مقاس ${D(v?.sizeMetersPerBoard).toFixed(2)} م، ولا يمكن تأكيد المرتجع بدون تكلفة حقيقية. سجّل شراءً لهذا المقاس أولاً.`,
-          });
-        }
-        wac.set(vid, cost);
+        // `null` records the absence of a cost basis. It is deliberately not
+        // zero: zero is a cost, and this variant does not have one.
+        wac.set(vid, cost.isFinite() && cost.gt(0) ? cost : null);
       }
 
       const stockLines = fresh.lines.map((l) => {
-        const cost = wac.get(l.productVariantId)!;
+        const cost = wac.get(l.productVariantId) ?? null;
         const meters = D(l.returnedMeters);
         return {
           lineId: l.id,
@@ -362,10 +398,12 @@ export class LegacyReturnsService {
           meters,
           boards: D(l.returnedBoards),
           costPerMeter: cost,
-          cogs: new Decimal(meters.mul(cost).toFixed(2)),
+          cogs: cost === null ? null : new Decimal(meters.mul(cost).toFixed(2)),
         };
       });
-      const cogsTotal = stockLines.reduce((a, l) => a.plus(l.cogs), new Decimal(0));
+      // Only costed lines contribute to the inventory-value journal. Uncosted
+      // ones move quantity and nothing else, so there is no value to post.
+      const cogsTotal = stockLines.reduce((a, l) => a.plus(l.cogs ?? 0), new Decimal(0));
 
       const returnNumber = fresh.returnNumber.toString();
       const branchId = fresh.branchId;
@@ -446,11 +484,17 @@ export class LegacyReturnsService {
         },
       );
 
-      // 4. Freeze the cost basis on each line.
+      // 4. Freeze the cost basis on each line. A null snapshot is the record
+      //    that no cost basis existed at confirmation — cancellation reads it
+      //    back and reverses the same way, and it is what distinguishes "never
+      //    costed" from "costed at zero".
       for (const l of stockLines) {
         await tx.legacySalesReturnLine.update({
           where: { id: l.lineId },
-          data: { costPerMeterSnapshot: l.costPerMeter.toFixed(4), lineCogs: l.cogs.toFixed(2) },
+          data: {
+            costPerMeterSnapshot: l.costPerMeter === null ? null : l.costPerMeter.toFixed(4),
+            lineCogs: (l.cogs ?? new Decimal(0)).toFixed(2),
+          },
         });
       }
 
@@ -541,7 +585,11 @@ export class LegacyReturnsService {
           variantId: l.productVariantId,
           meters: D(l.returnedMeters),
           boards: D(l.returnedBoards),
-          cogs: D(l.lineCogs),
+          // Reverse on exactly the basis the confirmation used. A line frozen
+          // without a cost basis gives back quantity only; reading its zero
+          // `lineCogs` as a real value would write that zero into the average
+          // on the way out, which is the same fiction from the other side.
+          cogs: l.costPerMeterSnapshot === null ? null : D(l.lineCogs),
         })),
         fresh.branchId,
         user,

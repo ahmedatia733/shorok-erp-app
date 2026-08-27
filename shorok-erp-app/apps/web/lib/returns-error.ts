@@ -118,8 +118,9 @@ const MESSAGES: Record<string, { ar: (d: Details) => string; en: (d: Details) =>
     en: () => "The selected settlement mode is not supported (cash refund is not available yet).",
   },
   // ── returns without an invoice ───────────────────────────────────────────
-  // The backend sends its own messageAr/messageEn here naming the product and
-  // size; this is the fallback for when it doesn't.
+  // A missing inventory cost no longer refuses the document — the goods come
+  // back as quantity and the variant stays uncosted. This entry is kept as a
+  // defensive mapping so an older API build still explains itself.
   legacy_return_cost_unavailable: {
     ar: (d) => `لا يمكن تأكيد المرتجع لأن الصنف ${val(d, "productCode")} لا توجد له تكلفة مخزون معتمدة بعد. سجّل فاتورة شراء لهذا الصنف بنفس المقاس أولاً، ثم أعد المحاولة.`,
     en: (d) => `The return cannot be confirmed because product ${val(d, "productCode")} has no established inventory cost yet. Record a purchase invoice for this exact size first, then try again.`,
@@ -127,6 +128,10 @@ const MESSAGES: Record<string, { ar: (d: Details) => string; en: (d: Details) =>
   legacy_return_not_draft: {
     ar: (d) => `لا يمكن تأكيد هذا المرتجع لأن حالته «${val(d, "status") === "CANCELLED" ? "ملغي" : val(d, "status") === "CONFIRMED" ? "مؤكد" : val(d, "status")}» وليست مسودة.`,
     en: (d) => `This return cannot be confirmed because its status is "${val(d, "status")}", not a draft.`,
+  },
+  return_cost_basis_inconsistent: {
+    ar: () => "تعذّر تحديد أساس التكلفة لأحد الأصناف في هذا المستند.",
+    en: () => "The cost basis for one of the products on this document could not be determined.",
   },
   legacy_return_not_confirmed: {
     ar: () => "لا يمكن الإلغاء إلا لمردود مؤكد.",

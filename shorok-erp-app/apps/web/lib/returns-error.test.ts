@@ -115,6 +115,7 @@ describe("returnErrorMessage", () => {
       "ap_account_required", "ar_account_required", "boards_must_be_positive", "branch_not_allowed",
       "cogs_or_inventory_account_required", "delta_must_be_nonzero", "duplicate_original_line",
       "insufficient_inventory_for_return", "inventory_account_required", "legacy_return_cost_unavailable",
+      "return_cost_basis_inconsistent",
       "legacy_return_not_confirmed", "legacy_return_not_draft", "line_not_on_invoice", "meters_sign_mismatch",
       "no_full_boards_available_for_return", "original_invoice_not_confirmed",
       "purchase_return_exceeds_inventory_value", "return_board_size_unavailable", "return_boards_must_be_positive",

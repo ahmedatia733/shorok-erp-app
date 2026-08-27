@@ -204,21 +204,43 @@ describe("legacy sales returns (مردودات بدون فواتير)", () => {
     expect(c.body.lines[0].lineCogs).toBe(current.mul("5.25").toFixed(2));
   });
 
-  it("5) confirmation is refused when the variant has no authoritative cost", async () => {
-    // A size nobody has ever bought has no weighted average, so there is no
-    // honest cost to post. Zero, the selling price and the purchase default are
-    // all refused substitutes.
+  it("5) a variant nobody has bought still takes the goods back, carrying no cost", async () => {
+    // The goods are physically real and the warehouse receives them, so the
+    // document confirms. What it cannot do is state a cost: nobody has ever
+    // bought this size, so there is no average to carry. The variant must come
+    // out of this exactly as unestablished as it went in — a written zero
+    // would read afterwards as "precisely costed at nothing".
     const d = await draft([
       { productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "2", unitPricePerMeter: "600" },
     ]);
     expect(d.status).toBe(201);
+    const variantId = d.body.lines[0].productVariantId as string;
+    const before = await h.prisma.productVariant.findUnique({ where: { id: variantId } });
+    expect(Number(before!.avgCostPerMeter)).toBe(0);
+    expect(before!.costUpdatedAt).toBeNull();
+
     const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
-    expect(c.status).toBe(409);
-    expect(c.body.details.reason).toBe("legacy_return_cost_unavailable");
-    // …and nothing was posted.
-    const reread = await get(`/legacy-returns/${d.body.id}`);
-    expect(reread.body.status).toBe("DRAFT");
-    expect(reread.body.journalEntryId).toBeNull();
+    expect(c.status).toBeLessThan(300);
+    expect(c.body.status).toBe("CONFIRMED");
+
+    // the cost basis is recorded as absent, not as zero
+    const line = await h.prisma.legacySalesReturnLine.findFirst({ where: { legacySalesReturnId: d.body.id } });
+    expect(line!.costPerMeterSnapshot).toBeNull();
+    expect(Number(line!.lineCogs)).toBe(0);
+
+    // the variant is untouched — including the timestamp, which is what would
+    // otherwise claim a cost had been established
+    const after = await h.prisma.productVariant.findUnique({ where: { id: variantId } });
+    expect(Number(after!.avgCostPerMeter)).toBe(0);
+    expect(after!.costUpdatedAt).toBeNull();
+
+    // no inventory-value journal was invented
+    expect(await h.prisma.legacySalesReturn.findUnique({ where: { id: d.body.id } })).toMatchObject({
+      cogsJournalEntryId: null,
+    });
+    // but the goods did arrive
+    const stk = await stock(variantId);
+    expect(stk.boards.toNumber()).toBeGreaterThan(0);
   });
 
   // ── document lifecycle ───────────────────────────────────────────────────
@@ -638,29 +660,37 @@ describe("legacy sales returns (مردودات بدون فواتير)", () => {
     await post(`/legacy-returns/${d.body.id}/cancel`, { reason: "اختبار" });
     expect(await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return_cancel", referenceId: d.body.id } })).toBe(1);
   });
-  // ── the LRN-5 production failure ─────────────────────────────────────────
-  // A return dated before the sales-returns account was configured resolves to
-  // an older posting profile that has no such account. The document is fine;
-  // the configuration in force on that date is not. This is what actually
-  // blocked LRN-5, and it reached the owner as «البيانات المدخلة غير صحيحة».
+  // ── the OWNER's policy: date and price belong to the user ────────────────
+  // A return without an invoice is an independent document. Its date comes
+  // from the paper it was written on, and its price is a commercial decision.
+  // Neither is the ERP's to overrule, and neither may reach product costing.
 
-  it("a return dated before the sales-returns account existed is refused, naming the reason", async () => {
-    // An older profile, effective earlier, deliberately without the account —
-    // exactly the shape production had for 2026-08-01.
-    await h.prisma.postingProfile.create({
+  it("a return dated before the sales-returns account was configured still confirms", async () => {
+    // Exactly the shape production had for LRN-5: the profile in force on the
+    // document's own date predates the account. That is a fact about when the
+    // bookkeeping was set up, not about the return.
+    const current = (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!;
+    const old = await h.prisma.postingProfile.create({
       data: {
         effectiveFrom: new Date("2020-01-01"),
-        arAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.arAccountId,
-        apAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.apAccountId,
-        revenueAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.revenueAccountId,
+        arAccountId: current.arAccountId,
+        apAccountId: current.apAccountId,
+        revenueAccountId: current.revenueAccountId,
         salesReturnsAccountId: null,
-        inventoryAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.inventoryAccountId,
-        cogsAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.cogsAccountId,
+        inventoryAccountId: current.inventoryAccountId,
+        cogsAccountId: current.cogsAccountId,
+        vatOutputAccountId: current.vatOutputAccountId,
+        vatInputAccountId: current.vatInputAccountId,
         createdBy: h.ownerId,
       },
     });
     await buy("5.25", "10", "500");
     const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    // The period must be open — that rule is canonical and deliberately kept.
+    await h.prisma.financialPeriod.createMany({
+      data: [{ year: 2020, month: 6, status: "OPEN" }],
+      skipDuplicates: true,
+    });
 
     const d = await draft(
       [{ productVariantId: variant.id, returnedBoards: "1", unitPricePerMeter: "600" }],
@@ -669,64 +699,224 @@ describe("legacy sales returns (مردودات بدون فواتير)", () => {
     expect(d.status).toBe(201);
 
     const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
-    expect(c.status).toBe(409);
-    expect(c.body.code).toBe("validation_failed");
-    expect(c.body.details.reason).toBe("sales_returns_account_required");
+    expect(c.status).toBeLessThan(300);
+    expect(c.body.status).toBe("CONFIRMED");
 
-    // Refused means refused: nothing posted, nothing moved, still a draft.
-    const reread = await get(`/legacy-returns/${d.body.id}`);
-    expect(reread.body.status).toBe("DRAFT");
-    expect(reread.body.journalEntryId).toBeNull();
-    expect(await h.prisma.inventoryMovement.count({ where: { referenceId: d.body.id } })).toBe(0);
-    expect(await h.prisma.journalEntry.count({ where: { sourceId: d.body.id } })).toBe(0);
+    // It posted to the account the business actually uses today…
+    const posted = await h.prisma.legacySalesReturn.findUnique({ where: { id: d.body.id } });
+    expect(posted!.salesReturnsAccountId).toBe(salesReturnsAccountId);
+    const commercial = await h.prisma.journalLine.findMany({
+      where: { journalEntry: { sourceId: d.body.id }, accountId: salesReturnsAccountId },
+    });
+    expect(commercial.length).toBeGreaterThan(0);
 
-    await h.prisma.postingProfile.deleteMany({ where: { effectiveFrom: new Date("2020-01-01") } });
+    // …and the historical profile was left exactly as it was. Configuration
+    // history is a record of what was true, not a thing to tidy up.
+    const reread = await h.prisma.postingProfile.findUnique({ where: { id: old.id } });
+    expect(reread!.salesReturnsAccountId).toBeNull();
+    expect(reread!.arAccountId).toBe(current.arAccountId);
+    expect(reread!.cogsAccountId).toBe(current.cogsAccountId);
+
+    await h.prisma.postingProfile.delete({ where: { id: old.id } });
   });
 
-  it("the missing-cost refusal carries what the UI needs to explain itself", async () => {
-    // The frontend renders details.messageAr verbatim, so the payload is part
-    // of the contract, not an implementation detail.
-    const d = await draft([
-      { productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "2", unitPricePerMeter: "600" },
-    ]);
-    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
-    expect(c.status).toBe(409);
-    expect(c.body.details.reason).toBe("legacy_return_cost_unavailable");
-    expect(c.body.details.productCode).toBeTruthy();
-    expect(typeof c.body.details.messageAr).toBe("string");
-    expect(c.body.details.messageAr).toContain("3.75");
-    // never raw internals
-    expect(c.body.details.messageAr).not.toContain("select ");
-    expect(c.body.details.messageAr).not.toContain("    at ");
-  });
-
-  it("the return price is never borrowed as an inventory cost", async () => {
-    // The trap: a 6,666/m return price on a variant with no cost would post a
-    // fictional 174,982.50 of inventory value if the price were substituted.
-    const d = await draft([
-      { productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "5", unitPricePerMeter: "6666" },
-    ]);
-    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
-    expect(c.status).toBe(409);
-    expect(c.body.details.reason).toBe("legacy_return_cost_unavailable");
-
-    const line = await h.prisma.legacySalesReturnLine.findFirst({ where: { legacySalesReturnId: d.body.id } });
-    expect(line!.costPerMeterSnapshot).toBeNull();
-    expect(Number(line!.lineCogs)).toBe(0);
-    // and no inventory value was created anywhere
-    expect(await h.prisma.inventoryMovement.count({ where: { referenceId: d.body.id } })).toBe(0);
-  });
-
-  it("a zero average cost is treated as no cost, not as free goods", async () => {
+  it("the return date is stored exactly as entered, even before the paper invoice date", async () => {
+    await buy("5.25", "10", "500");
     const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
-    const restore = variant.avgCostPerMeter;
-    await h.prisma.productVariant.update({ where: { id: variant.id }, data: { avgCostPerMeter: "0" } });
+    await h.prisma.financialPeriod.createMany({
+      data: [{ year: 2026, month: 3, status: "OPEN" }],
+      skipDuplicates: true,
+    });
+    // LRN-5's ordering: the return is dated before the paper it references.
+    const d = await draft(
+      [{ productVariantId: variant.id, returnedBoards: "1", unitPricePerMeter: "600" }],
+      { paperInvoiceDate: "2026-03-06", returnDate: "2026-03-01" },
+    );
+    expect(d.status).toBe(201);
+    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    expect(c.status).toBeLessThan(300);
+
+    const stored = await h.prisma.legacySalesReturn.findUnique({ where: { id: d.body.id } });
+    expect(stored!.returnDate.toISOString().slice(0, 10)).toBe("2026-03-01");
+    expect(stored!.paperInvoiceDate!.toISOString().slice(0, 10)).toBe("2026-03-06");
+    // the journal is dated by the document, not by today
+    const je = await h.prisma.journalEntry.findFirst({ where: { sourceId: d.body.id } });
+    expect(je!.entryDate.toISOString().slice(0, 10)).toBe("2026-03-01");
+  });
+
+  it("an established average survives a return priced far away from it", async () => {
+    // Scenario 1: a real cost exists. The goods come back at that cost, so the
+    // average cannot move — and the wild return price cannot reach it either.
+    await buy("4.00", "10", "500");
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId, sizeMetersPerBoard: "4" } }))[0]!;
+    const before = await wac(variant.id);
+    expect(before.toNumber()).toBeGreaterThan(0);
+
+    const d = await draft([{ productVariantId: variant.id, returnedBoards: "2", unitPricePerMeter: "6666" }]);
+    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    expect(c.status).toBeLessThan(300);
+
+    expect((await wac(variant.id)).toFixed(4)).toBe(before.toFixed(4));
+    // the snapshot froze the real cost, never the price
+    const line = await h.prisma.legacySalesReturnLine.findFirst({ where: { legacySalesReturnId: d.body.id } });
+    expect(Number(line!.costPerMeterSnapshot)).toBeCloseTo(before.toNumber(), 4);
+    expect(Number(line!.costPerMeterSnapshot)).not.toBe(6666);
+
+    // cancelling reverses on the frozen basis and still leaves the average alone
+    await post(`/legacy-returns/${d.body.id}/cancel`, { reason: "اختبار" });
+    expect((await wac(variant.id)).toFixed(4)).toBe(before.toFixed(4));
+  });
+
+  it("an uncosted return cancels back to exactly where it started", async () => {
+    // Scenario 2 reversed: quantity out, no value, average still unestablished.
+    const d = await draft([
+      { productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "3", unitPricePerMeter: "900" },
+    ]);
+    const variantId = d.body.lines[0].productVariantId as string;
+    const before = await stock(variantId);
+
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+    const mid = await stock(variantId);
+    expect(mid.boards.minus(before.boards).toNumber()).toBe(3);
+
+    const cancelled = await post(`/legacy-returns/${d.body.id}/cancel`, { reason: "اختبار" });
+    expect(cancelled.status).toBeLessThan(300);
+
+    const after = await stock(variantId);
+    expect(after.boards.toFixed(4)).toBe(before.boards.toFixed(4));
+    expect(after.meters.toFixed(4)).toBe(before.meters.toFixed(4));
+
+    const v = await h.prisma.productVariant.findUnique({ where: { id: variantId } });
+    expect(Number(v!.avgCostPerMeter)).toBe(0);
+    expect(v!.costUpdatedAt).toBeNull();
+
+    // and a second cancel changes nothing
+    await post(`/legacy-returns/${d.body.id}/cancel`, { reason: "اختبار" });
+    const after2 = await stock(variantId);
+    expect(after2.boards.toFixed(4)).toBe(before.boards.toFixed(4));
+  });
+
+  it("an uncosted confirmation is idempotent", async () => {
+    const d = await draft([
+      { productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "2", unitPricePerMeter: "700" },
+    ]);
+    const variantId = d.body.lines[0].productVariantId as string;
+    const before = await stock(variantId);
+
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+    const once = await stock(variantId);
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+    const twice = await stock(variantId);
+
+    expect(twice.boards.toFixed(4)).toBe(once.boards.toFixed(4));
+    expect(once.boards.minus(before.boards).toNumber()).toBe(2);
+    expect(await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return", referenceId: d.body.id } })).toBe(1);
+    expect(await h.prisma.customerTransaction.count({ where: { reference: `LRN-${d.body.returnNumber}` } })).toBe(1);
+  });
+
+  it("the goods land in the chosen branch and nowhere else", async () => {
+    const d = await draft(
+      [{ productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "4", unitPricePerMeter: "800" }],
+      { branchId: branchB },
+    );
+    expect(d.status).toBe(201);
+    const variantId = d.body.lines[0].productVariantId as string;
+    const otherBefore = await h.prisma.branchInventoryBalance.findFirst({
+      where: { productVariantId: variantId, branchId: h.branchId },
+    });
+
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+
+    const chosen = await h.prisma.branchInventoryBalance.findFirst({
+      where: { productVariantId: variantId, branchId: branchB },
+    });
+    expect(Number(chosen!.boardsOnHand)).toBe(4);
+    expect(Number(chosen!.metersOnHand)).toBe(15);
+
+    const otherAfter = await h.prisma.branchInventoryBalance.findFirst({
+      where: { productVariantId: variantId, branchId: h.branchId },
+    });
+    expect(Number(otherAfter?.boardsOnHand ?? 0)).toBe(Number(otherBefore?.boardsOnHand ?? 0));
+
+    const movements = await h.prisma.inventoryMovement.findMany({ where: { referenceId: d.body.id } });
+    expect(movements).toHaveLength(1);
+    expect(movements[0]!.branchId).toBe(branchB);
+  });
+
+  it("a legacy return is not a costing source for any sibling size", async () => {
+    // 5.25 must not reach 4.00 or 3.75, and none of them may pick up 6666.
+    const sizes = await h.prisma.productVariant.findMany({ where: { skuId } });
+    const snapshot = new Map(sizes.map((v) => [v.id, `${v.avgCostPerMeter}|${v.avgCost}|${String(v.costUpdatedAt)}`]));
+
+    const d = await draft([
+      { productSkuId: skuId, sizeMetersPerBoard: "8.25", returnedBoards: "1", unitPricePerMeter: "6666" },
+    ]);
+    const target = d.body.lines[0].productVariantId as string;
+    expect((await post(`/legacy-returns/${d.body.id}/confirm`, {})).status).toBeLessThan(300);
+
+    for (const v of await h.prisma.productVariant.findMany({ where: { skuId } })) {
+      if (v.id === target) continue;
+      expect(`${v.avgCostPerMeter}|${v.avgCost}|${String(v.costUpdatedAt)}`).toBe(snapshot.get(v.id));
+    }
+  });
+
+  it("the LRN-5 shape: 6666 per metre is credited to the customer and is not a cost", async () => {
+    // LRN-5's shape on a size nobody has ever bought: boards x metres at
+    // 6,666 becomes customer credit. If that price were ever mistaken for a
+    // cost it would put hundreds of thousands of invented value into
+    // inventory, and the margin on every later sale would be fiction.
+    const d = await draft([
+      { productSkuId: skuId, sizeMetersPerBoard: "9.75", returnedBoards: "5", unitPricePerMeter: "6666" },
+    ]);
+    expect(d.status).toBe(201);
+    const variantId = d.body.lines[0].productVariantId as string;
+    expect(Number(d.body.lines[0].returnedMeters)).toBe(48.75);
+    expect(Number(d.body.grandTotal)).toBe(324967.5);
+
+    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    expect(c.status).toBeLessThan(300);
+
+    // the customer is credited the full commercial value
+    const ctx = await h.prisma.customerTransaction.findFirst({ where: { reference: `LRN-${c.body.returnNumber}` } });
+    expect(Number(ctx!.amount)).toBe(324967.5);
+    expect(ctx!.direction).toBe("CR");
+
+    // and 6666 appears nowhere in the product's costing or pricing
+    const v = await h.prisma.productVariant.findUnique({ where: { id: variantId } });
+    expect(Number(v!.avgCostPerMeter)).toBe(0);
+    expect(Number(v!.avgCost)).toBe(0);
+    expect(v!.costUpdatedAt).toBeNull();
+    expect(Number(v!.defaultSalePricePerMeter)).not.toBe(6666);
+    expect(Number(v!.defaultPurchasePricePerMeter)).not.toBe(6666);
+
+    // no journal anywhere carries the commercial value as an inventory amount
+    const invLines = await h.prisma.journalLine.findMany({
+      where: { journalEntry: { sourceId: d.body.id }, account: { systemRole: "INVENTORY" } },
+    });
+    expect(invLines).toHaveLength(0);
+  });
+
+  it("a zero average is treated as no basis, not as free goods", async () => {
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    const restoreCost = variant.avgCostPerMeter;
+    const restoreStamp = variant.costUpdatedAt;
+    await h.prisma.productVariant.update({
+      where: { id: variant.id },
+      data: { avgCostPerMeter: "0", costUpdatedAt: null },
+    });
 
     const d = await draft([{ productVariantId: variant.id, returnedBoards: "1", unitPricePerMeter: "600" }]);
     const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
-    expect(c.status).toBe(409);
-    expect(c.body.details.reason).toBe("legacy_return_cost_unavailable");
+    expect(c.status).toBeLessThan(300);
 
-    await h.prisma.productVariant.update({ where: { id: variant.id }, data: { avgCostPerMeter: restore } });
+    const line = await h.prisma.legacySalesReturnLine.findFirst({ where: { legacySalesReturnId: d.body.id } });
+    expect(line!.costPerMeterSnapshot).toBeNull();
+    const after = await h.prisma.productVariant.findUnique({ where: { id: variant.id } });
+    expect(after!.costUpdatedAt).toBeNull();
+
+    await h.prisma.productVariant.update({
+      where: { id: variant.id },
+      data: { avgCostPerMeter: restoreCost, costUpdatedAt: restoreStamp },
+    });
   });
 });

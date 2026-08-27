@@ -170,4 +170,27 @@ describe("WAC edge cases + costing lock (§2)", () => {
     expect(lines.length).toBeGreaterThanOrEqual(2);
     for (const l of lines) expect(l.branchId).toBe(h.branchId);
   });
+  /**
+   * The legacy-return policy change must not reach here. An invoice-linked
+   * return values goods at the cost recorded when they left on the invoice —
+   * a different question from what the variant averages today, and one this
+   * flow answers from the invoice, never from the current average.
+   */
+  it("an invoice-linked return still values goods at the invoice's historical cost, not today's average", async () => {
+    const v = await newVariant("4.0000");
+    await buy(v, "10", "500");
+    const inv = await sell(v, "4", "900");
+
+    // Move the company average well away from the cost this sale left at.
+    await buy(v, "10", "1300");
+    const moved = D((await variant(v))!.avgCostPerMeter);
+    expect(moved.toNumber()).toBeGreaterThan(500);
+
+    const r = await sRet(inv, "4", "1");
+    expect((await confirmSRet(r)).status).toBeLessThan(300);
+
+    const line = await h.prisma.salesReturnLine.findFirst({ where: { salesReturnId: r } });
+    expect(Number(line!.originalCostPerMeterAtPosting)).toBeCloseTo(500, 2);
+    expect(Number(line!.originalCostPerMeterAtPosting)).not.toBeCloseTo(moved.toNumber(), 2);
+  });
 });
