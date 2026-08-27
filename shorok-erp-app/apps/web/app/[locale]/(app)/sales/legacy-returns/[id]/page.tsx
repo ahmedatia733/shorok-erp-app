@@ -16,6 +16,7 @@ import { Modal } from "../../../../../../components/ui/modal";
 import { Skeleton } from "../../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../../components/ui/table";
 import { ApiClientError } from "../../../../../../lib/api-client";
+import { returnErrorMessage } from "../../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../../lib/auth";
 import { formatCurrency, formatDate, formatDateTime } from "../../../../../../lib/format";
 import {
@@ -58,7 +59,7 @@ export default function LegacyReturnDetailPage() {
       setDoc(await getLegacyReturn(id));
       setError(null);
     } catch (e) {
-      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّر تحميل المستند.");
+      setError(e instanceof ApiClientError ? returnErrorMessage(e, locale) : "تعذّر تحميل المستند.");
     } finally {
       setLoading(false);
     }
@@ -75,7 +76,10 @@ export default function LegacyReturnDetailPage() {
       await fn();
       await load();
     } catch (e) {
-      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّر تنفيذ العملية.");
+      // Business rules arrive as validation_failed with the real cause in
+      // details.reason. The generic envelope message would flatten every one
+      // of them into «البيانات المدخلة غير صحيحة».
+      setError(e instanceof ApiClientError ? returnErrorMessage(e, locale) : "تعذّر تنفيذ العملية.");
     } finally {
       setBusy(false);
     }
@@ -130,7 +134,7 @@ export default function LegacyReturnDetailPage() {
               try {
                 await downloadLegacyReturnPdf(doc.id, doc.returnNumber, locale);
               } catch (e) {
-                setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّر إنشاء PDF.");
+                setError(e instanceof ApiClientError ? returnErrorMessage(e, locale) : "تعذّر إنشاء PDF.");
               } finally {
                 setPdfBusy(false);
               }

@@ -638,4 +638,95 @@ describe("legacy sales returns (مردودات بدون فواتير)", () => {
     await post(`/legacy-returns/${d.body.id}/cancel`, { reason: "اختبار" });
     expect(await h.prisma.inventoryMovement.count({ where: { referenceType: "legacy_sales_return_cancel", referenceId: d.body.id } })).toBe(1);
   });
+  // ── the LRN-5 production failure ─────────────────────────────────────────
+  // A return dated before the sales-returns account was configured resolves to
+  // an older posting profile that has no such account. The document is fine;
+  // the configuration in force on that date is not. This is what actually
+  // blocked LRN-5, and it reached the owner as «البيانات المدخلة غير صحيحة».
+
+  it("a return dated before the sales-returns account existed is refused, naming the reason", async () => {
+    // An older profile, effective earlier, deliberately without the account —
+    // exactly the shape production had for 2026-08-01.
+    await h.prisma.postingProfile.create({
+      data: {
+        effectiveFrom: new Date("2020-01-01"),
+        arAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.arAccountId,
+        apAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.apAccountId,
+        revenueAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.revenueAccountId,
+        salesReturnsAccountId: null,
+        inventoryAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.inventoryAccountId,
+        cogsAccountId: (await h.prisma.postingProfile.findFirst({ orderBy: { effectiveFrom: "desc" } }))!.cogsAccountId,
+        createdBy: h.ownerId,
+      },
+    });
+    await buy("5.25", "10", "500");
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+
+    const d = await draft(
+      [{ productVariantId: variant.id, returnedBoards: "1", unitPricePerMeter: "600" }],
+      { paperInvoiceDate: "2020-06-01", returnDate: "2020-06-15" },
+    );
+    expect(d.status).toBe(201);
+
+    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    expect(c.status).toBe(409);
+    expect(c.body.code).toBe("validation_failed");
+    expect(c.body.details.reason).toBe("sales_returns_account_required");
+
+    // Refused means refused: nothing posted, nothing moved, still a draft.
+    const reread = await get(`/legacy-returns/${d.body.id}`);
+    expect(reread.body.status).toBe("DRAFT");
+    expect(reread.body.journalEntryId).toBeNull();
+    expect(await h.prisma.inventoryMovement.count({ where: { referenceId: d.body.id } })).toBe(0);
+    expect(await h.prisma.journalEntry.count({ where: { sourceId: d.body.id } })).toBe(0);
+
+    await h.prisma.postingProfile.deleteMany({ where: { effectiveFrom: new Date("2020-01-01") } });
+  });
+
+  it("the missing-cost refusal carries what the UI needs to explain itself", async () => {
+    // The frontend renders details.messageAr verbatim, so the payload is part
+    // of the contract, not an implementation detail.
+    const d = await draft([
+      { productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "2", unitPricePerMeter: "600" },
+    ]);
+    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    expect(c.status).toBe(409);
+    expect(c.body.details.reason).toBe("legacy_return_cost_unavailable");
+    expect(c.body.details.productCode).toBeTruthy();
+    expect(typeof c.body.details.messageAr).toBe("string");
+    expect(c.body.details.messageAr).toContain("3.75");
+    // never raw internals
+    expect(c.body.details.messageAr).not.toContain("select ");
+    expect(c.body.details.messageAr).not.toContain("    at ");
+  });
+
+  it("the return price is never borrowed as an inventory cost", async () => {
+    // The trap: a 6,666/m return price on a variant with no cost would post a
+    // fictional 174,982.50 of inventory value if the price were substituted.
+    const d = await draft([
+      { productSkuId: skuId, sizeMetersPerBoard: "3.75", returnedBoards: "5", unitPricePerMeter: "6666" },
+    ]);
+    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    expect(c.status).toBe(409);
+    expect(c.body.details.reason).toBe("legacy_return_cost_unavailable");
+
+    const line = await h.prisma.legacySalesReturnLine.findFirst({ where: { legacySalesReturnId: d.body.id } });
+    expect(line!.costPerMeterSnapshot).toBeNull();
+    expect(Number(line!.lineCogs)).toBe(0);
+    // and no inventory value was created anywhere
+    expect(await h.prisma.inventoryMovement.count({ where: { referenceId: d.body.id } })).toBe(0);
+  });
+
+  it("a zero average cost is treated as no cost, not as free goods", async () => {
+    const variant = (await h.prisma.productVariant.findMany({ where: { skuId } }))[0]!;
+    const restore = variant.avgCostPerMeter;
+    await h.prisma.productVariant.update({ where: { id: variant.id }, data: { avgCostPerMeter: "0" } });
+
+    const d = await draft([{ productVariantId: variant.id, returnedBoards: "1", unitPricePerMeter: "600" }]);
+    const c = await post(`/legacy-returns/${d.body.id}/confirm`, {});
+    expect(c.status).toBe(409);
+    expect(c.body.details.reason).toBe("legacy_return_cost_unavailable");
+
+    await h.prisma.productVariant.update({ where: { id: variant.id }, data: { avgCostPerMeter: restore } });
+  });
 });

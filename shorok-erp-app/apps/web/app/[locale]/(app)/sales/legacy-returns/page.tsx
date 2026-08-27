@@ -15,6 +15,7 @@ import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { LegacyReturnFormModal } from "../../../../../components/features/legacy-returns/legacy-return-form-modal";
 import { ApiClientError, apiCall } from "../../../../../lib/api-client";
+import { returnErrorMessage } from "../../../../../lib/returns-error";
 import { useHasRole } from "../../../../../lib/auth";
 import { formatCurrency, formatDate } from "../../../../../lib/format";
 import { listCustomers, type CustomerRow } from "../../../../../lib/customers-client";
@@ -73,7 +74,7 @@ export default function LegacyReturnsPage() {
       setRows(res.rows);
       setMeta({ totalCount: res.totalCount, totalAmount: res.totalAmount });
     } catch (e) {
-      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّر تحميل المردودات.");
+      setError(e instanceof ApiClientError ? returnErrorMessage(e, locale) : "تعذّر تحميل المردودات.");
     } finally {
       setLoading(false);
     }
@@ -92,7 +93,7 @@ export default function LegacyReturnsPage() {
     try {
       await downloadLegacyReturnsListPdf(filters, locale);
     } catch (e) {
-      setError(e instanceof ApiClientError ? e.localizedMessage(locale) : "تعذّر إنشاء ملف PDF.");
+      setError(e instanceof ApiClientError ? returnErrorMessage(e, locale) : "تعذّر إنشاء ملف PDF.");
     } finally {
       setPdfBusy(false);
     }

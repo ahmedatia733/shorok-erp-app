@@ -117,6 +117,42 @@ const MESSAGES: Record<string, { ar: (d: Details) => string; en: (d: Details) =>
     ar: () => "طريقة التسوية المحددة غير مدعومة (الرد النقدي غير متاح حالياً).",
     en: () => "The selected settlement mode is not supported (cash refund is not available yet).",
   },
+  // ── returns without an invoice ───────────────────────────────────────────
+  // The backend sends its own messageAr/messageEn here naming the product and
+  // size; this is the fallback for when it doesn't.
+  legacy_return_cost_unavailable: {
+    ar: (d) => `لا يمكن تأكيد المرتجع لأن الصنف ${val(d, "productCode")} لا توجد له تكلفة مخزون معتمدة بعد. سجّل فاتورة شراء لهذا الصنف بنفس المقاس أولاً، ثم أعد المحاولة.`,
+    en: (d) => `The return cannot be confirmed because product ${val(d, "productCode")} has no established inventory cost yet. Record a purchase invoice for this exact size first, then try again.`,
+  },
+  legacy_return_not_draft: {
+    ar: (d) => `لا يمكن تأكيد هذا المرتجع لأن حالته «${val(d, "status") === "CANCELLED" ? "ملغي" : val(d, "status") === "CONFIRMED" ? "مؤكد" : val(d, "status")}» وليست مسودة.`,
+    en: (d) => `This return cannot be confirmed because its status is "${val(d, "status")}", not a draft.`,
+  },
+  legacy_return_not_confirmed: {
+    ar: () => "لا يمكن الإلغاء إلا لمردود مؤكد.",
+    en: () => "Only a confirmed return can be cancelled.",
+  },
+  branch_not_allowed: {
+    ar: () => "لا تملك صلاحية على الفرع الخاص بهذا المستند.",
+    en: () => "You do not have access to this document's branch.",
+  },
+  // ── inventory movement guards ────────────────────────────────────────────
+  boards_must_be_positive: {
+    ar: () => "يجب أن يكون عدد الألواح أكبر من صفر.",
+    en: () => "The number of boards must be greater than zero.",
+  },
+  meters_sign_mismatch: {
+    ar: () => "اتجاه الأمتار لا يطابق اتجاه الألواح في حركة المخزون.",
+    en: () => "The metres direction does not match the boards direction on the stock movement.",
+  },
+  delta_must_be_nonzero: {
+    ar: () => "لا يمكن تنفيذ حركة مخزون بمقدار صفر.",
+    en: () => "A stock movement of zero cannot be recorded.",
+  },
+  zero_delta: {
+    ar: () => "لا يمكن تنفيذ حركة مخزون بمقدار صفر.",
+    en: () => "A stock movement of zero cannot be recorded.",
+  },
   // ── financial period ─────────────────────────────────────────────────────
   period_closed: {
     ar: () => "لا يمكن الترحيل لأن الفترة المالية مغلقة.",
@@ -132,6 +168,14 @@ const MESSAGES: Record<string, { ar: (d: Details) => string; en: (d: Details) =>
 export function returnErrorMessage(err: unknown, locale: AppLocale): string {
   if (err instanceof ApiClientError) {
     const details = err.payload.details as Details;
+
+    // Some rules author their own message because they know things this table
+    // cannot — the product name and the exact board size, for instance. When
+    // the backend supplies one, it is the better message. These are curated
+    // fields, never raw exception text, so nothing internal leaks.
+    const authored = locale === "ar" ? val(details, "messageAr") : val(details, "messageEn");
+    if (authored) return authored;
+
     const reason = details && typeof details.reason === "string" ? details.reason : undefined;
     const m = reason ? MESSAGES[reason] : undefined;
     if (m) return locale === "ar" ? m.ar(details) : m.en(details);
