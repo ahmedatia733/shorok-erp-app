@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  BoardSize,
   BranchStockProduct,
   BranchStockProductsResponse,
   BranchStockSize,
@@ -67,6 +68,8 @@ export interface MovementRow {
     sizeMetersPerBoard: string;
     sku: { code: string; colorNameAr: string; colorNameEn: string };
   };
+  /** Derived by the API from the variant that moved; never stored. */
+  boardSize: BoardSize;
 }
 
 export interface Page<T> {
@@ -98,6 +101,10 @@ export const listMovements = (filters: {
   productVariantId?: string;
   referenceId?: string;
   referenceType?: string;
+  /** Free text + board-size vocabulary. Filtered on the server, because the
+   *  list is cursor-paginated and a browser filter would only ever see the
+   *  page already downloaded. */
+  search?: string;
   cursor?: string | null;
   limit?: number;
 }) => {
@@ -107,6 +114,7 @@ export const listMovements = (filters: {
   if (filters.productVariantId) params.set("productVariantId", filters.productVariantId);
   if (filters.referenceId) params.set("referenceId", filters.referenceId);
   if (filters.referenceType) params.set("referenceType", filters.referenceType);
+  if (filters.search?.trim()) params.set("search", filters.search.trim());
   if (filters.cursor) params.set("cursor", filters.cursor);
   return apiCall<Page<MovementRow>>(`/inventory/movements?${params.toString()}`);
 };

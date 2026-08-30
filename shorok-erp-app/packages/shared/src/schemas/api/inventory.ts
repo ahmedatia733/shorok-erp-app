@@ -52,6 +52,12 @@ export const InventoryMovementsQuerySchema = z.object({
   referenceType: z.string().max(50).optional(),
   from: IsoDateTimeSchema.optional(),
   to: IsoDateTimeSchema.optional(),
+  /**
+   * Free text over product code, product name and the movement note, plus the
+   * board-size vocabulary (ك / ص / م ق and measurements). Parsed server-side so
+   * it filters the whole history rather than the page already downloaded.
+   */
+  search: z.string().max(120).optional(),
   cursor: z.string().nullish(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });

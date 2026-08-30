@@ -44,6 +44,13 @@ const typeBadge: Record<MovementType, "info" | "success" | "warning" | "neutral"
   TRANSFER_OUT: "neutral",
 };
 
+/** ك / ص / م ق — three visually distinct classes, same palette as the type badge. */
+const sizeBadge: Record<"BIG" | "SMALL" | "CUSTOM", "info" | "success" | "warning" | "neutral"> = {
+  BIG: "info",
+  SMALL: "success",
+  CUSTOM: "warning",
+};
+
 const typeLabel: Record<MovementType, string> = {
   RECEIPT: "إيراد مخزون",
   SALE: "بيع",
@@ -67,6 +74,10 @@ export default function MovementsPage() {
   const [type, setType] = useState<MovementType | "ALL">("ALL");
   const [rows, setRows] = useState<MovementRow[]>([]);
   const [listSearch, setListSearch] = useState("");
+  // What the server is actually filtering on. The box updates on every
+  // keystroke; the query follows a moment later so typing does not fire a
+  // request per character.
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -98,6 +109,7 @@ export default function MovementsPage() {
       referenceId:   referenceId  ?? undefined,
       referenceType: referenceType ?? undefined,
       movementType:  type === "ALL" ? undefined : type,
+      search:        appliedSearch || undefined,
     })
       .then((page) => {
         if (!alive) return;
@@ -109,7 +121,7 @@ export default function MovementsPage() {
       })
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [branchId, referenceId, referenceType, type, locale, canLoad]);
+  }, [branchId, referenceId, referenceType, type, locale, canLoad, appliedSearch]);
 
   async function loadMore() {
     if (!canLoad || !cursor) return;
@@ -120,6 +132,7 @@ export default function MovementsPage() {
         referenceId:   referenceId  ?? undefined,
         referenceType: referenceType ?? undefined,
         movementType:  type === "ALL" ? undefined : type,
+        search:        appliedSearch || undefined,
         cursor,
       });
       setRows((prev) => [...prev, ...page.data]);
@@ -139,13 +152,11 @@ export default function MovementsPage() {
     window.history.replaceState(null, "", url.toString());
   }
 
-  const displayedRows = listSearch
-    ? rows.filter((m) =>
-        (m.productVariant.sku.colorNameAr + " " + m.productVariant.sku.code + " " + (m.humanReadableNote ?? ""))
-          .toLowerCase()
-          .includes(listSearch.toLowerCase())
-      )
-    : rows;
+  // The list is cursor-paginated, so filtering here would only ever search the
+  // page already downloaded and would silently miss the rest of the history.
+  // The server does it instead, which is also what makes «ك» mean the size
+  // rather than the letter.
+  const displayedRows = rows;
 
   const isFiltered = !!referenceId;
   const refLabel = referenceType === "purchase_invoice"
@@ -172,7 +183,7 @@ export default function MovementsPage() {
               </option>
             ))}
           </select>
-          <Input placeholder="بحث هنا..." value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs border-2 border-primary/40 bg-background" />
+          <Input placeholder="بحث: كود، اسم، ك / ص / م ق، أو مقاس مثل 3.75" value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs border-2 border-primary/40 bg-background" />
           {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
         </div>
       </div>
@@ -248,7 +259,16 @@ export default function MovementsPage() {
                           : m.productVariant.sku.colorNameEn}
                       </TD>
                       <TD dir="ltr">{m.productVariant.sku.code}</TD>
-                      <TD dir="ltr">{m.productVariant.sizeMetersPerBoard} م²</TD>
+                      <TD dir="ltr">
+                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+                          <Badge variant={sizeBadge[m.boardSize.kind]}>
+                            {locale === "ar" ? m.boardSize.shortAr : m.boardSize.shortEn}
+                          </Badge>
+                          {/* The measurement always stays visible: «م ق» alone
+                              would not say which board actually moved. */}
+                          <span>{m.boardSize.meters} {locale === "ar" ? "م" : "m"}</span>
+                        </span>
+                      </TD>
                       <TD dir="ltr" className="text-end font-medium">
                         {formatNumber(m.boardsQuantity, locale)}
                       </TD>

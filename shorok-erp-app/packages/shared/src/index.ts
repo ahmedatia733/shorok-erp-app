@@ -1,3 +1,4 @@
+export * from "./board-size";
 export * from "./account-categories";
 export * from "./enums";
 export * from "./errors";
