@@ -22,6 +22,7 @@ import {
 } from "../../../../lib/inventory-client";
 import { formatDate, formatDateTime, formatNumber } from "../../../../lib/format";
 import { useCurrentUser } from "../../../../lib/auth";
+import { BoardSizeCell } from "../../../../components/features/inventory/board-size-cell";
 
 export default function InventoryPage() {
   const t = useTranslations("inventory");
@@ -138,7 +139,7 @@ export default function InventoryPage() {
                   <TR key={row.productVariantId}>
                     <TD>{locale === "ar" ? row.sku.colorNameAr : row.sku.colorNameEn}</TD>
                     <TD dir="ltr">{row.sku.code}</TD>
-                    <TD dir="ltr">{row.sizeMetersPerBoard} m</TD>
+                    <TD dir="ltr" data-testid="stock-size"><BoardSizeCell sizeMetersPerBoard={row.sizeMetersPerBoard} locale={locale} /></TD>
                     <TD dir="ltr" className="text-end font-medium">
                       {formatNumber(row.boardsOnHand, locale)}
                     </TD>
@@ -175,6 +176,7 @@ export default function InventoryPage() {
                   <TH>{t("movementsPage.columns.type")}</TH>
                   <TH>{t("color")}</TH>
                   <TH dir="ltr">{t("code")}</TH>
+                  <TH dir="ltr">{t("size")}</TH>
                   <TH dir="ltr" className="text-end">
                     {t("movementsPage.columns.boards")}
                   </TH>
@@ -194,6 +196,9 @@ export default function InventoryPage() {
                         : m.productVariant.sku.colorNameEn}
                     </TD>
                     <TD dir="ltr">{m.productVariant.sku.code}</TD>
+                    <TD dir="ltr" data-testid="recent-size">
+                      <BoardSizeCell boardSize={m.boardSize} locale={locale} />
+                    </TD>
                     <TD dir="ltr" className="text-end font-medium">
                       {formatNumber(m.boardsQuantity, locale)}
                     </TD>

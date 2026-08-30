@@ -14,6 +14,7 @@ import { BranchPicker } from "../../../../../components/features/inventory/branc
 import { ApiClientError } from "../../../../../lib/api-client";
 import { listMovements, type MovementRow } from "../../../../../lib/inventory-client";
 import { formatDateTime, formatNumber } from "../../../../../lib/format";
+import { BoardSizeCell } from "../../../../../components/features/inventory/board-size-cell";
 
 export default function AdjustmentsListPage() {
   const locale = useLocale() as AppLocale;
@@ -112,7 +113,7 @@ export default function AdjustmentsListPage() {
                           ? m.productVariant.sku.colorNameAr
                           : m.productVariant.sku.colorNameEn}
                         <span className="text-xs text-textSecondary ms-1 font-mono">
-                          {m.productVariant.sku.code} · {m.productVariant.sizeMetersPerBoard}م
+                          {m.productVariant.sku.code} · <BoardSizeCell boardSize={m.boardSize} locale={locale} />
                         </span>
                       </TD>
                       <TD className={`text-end tabular-nums font-medium ${boards > 0 ? "text-green-700" : boards < 0 ? "text-red-700" : "text-textSecondary"}`}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import type { MovementType } from "@shorok/shared";
@@ -14,6 +14,7 @@ import { Input } from "../../../../../components/ui/input";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/table";
 import { BranchPicker } from "../../../../../components/features/inventory/branch-picker";
+import { BoardSizeCell } from "../../../../../components/features/inventory/board-size-cell";
 import { ApiClientError } from "../../../../../lib/api-client";
 import { listMovements, type MovementRow } from "../../../../../lib/inventory-client";
 import { movementDocument } from "../../../../../lib/movement-document";
@@ -44,13 +45,6 @@ const typeBadge: Record<MovementType, "info" | "success" | "warning" | "neutral"
   TRANSFER_OUT: "neutral",
 };
 
-/** ك / ص / م ق — three visually distinct classes, same palette as the type badge. */
-const sizeBadge: Record<"BIG" | "SMALL" | "CUSTOM", "info" | "success" | "warning" | "neutral"> = {
-  BIG: "info",
-  SMALL: "success",
-  CUSTOM: "warning",
-};
-
 const typeLabel: Record<MovementType, string> = {
   RECEIPT: "إيراد مخزون",
   SALE: "بيع",
@@ -78,6 +72,17 @@ export default function MovementsPage() {
   // keystroke; the query follows a moment later so typing does not fire a
   // request per character.
   const [appliedSearch, setAppliedSearch] = useState("");
+  // Only the newest request may write the list. Without this a slow unfiltered
+  // response can land after a fast filtered one and put the filtered rows back.
+  const requestId = useRef(0);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Apply the box now, cancelling any pending debounce. */
+  const applyNow = useCallback((value: string) => {
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = null;
+    setAppliedSearch(value.trim());
+  }, []);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -101,9 +106,12 @@ export default function MovementsPage() {
       setRows([]);
       return;
     }
-    let alive = true;
+    const mine = ++requestId.current;
+    const current = () => mine === requestId.current;
     setLoading(true);
     setError(null);
+    // A new query replaces the list outright — it never appends to the previous
+    // one, and the cursor it returns belongs to this filtered set alone.
     void listMovements({
       branchId:      branchId    ?? undefined,
       referenceId:   referenceId  ?? undefined,
@@ -112,19 +120,27 @@ export default function MovementsPage() {
       search:        appliedSearch || undefined,
     })
       .then((page) => {
-        if (!alive) return;
+        if (!current()) return;
         setRows(page.data);
         setCursor(page.nextCursor);
       })
       .catch((err) => {
-        if (alive && err instanceof ApiClientError) setError(err.localizedMessage(locale));
+        if (current() && err instanceof ApiClientError) setError(err.localizedMessage(locale));
       })
-      .finally(() => alive && setLoading(false));
-    return () => { alive = false; };
+      .finally(() => { if (current()) setLoading(false); });
   }, [branchId, referenceId, referenceType, type, locale, canLoad, appliedSearch]);
+
+  // Typing applies on its own shortly after the user stops; Enter does not wait.
+  useEffect(() => {
+    debounce.current = setTimeout(() => setAppliedSearch(listSearch.trim()), 300);
+    return () => {
+      if (debounce.current) clearTimeout(debounce.current);
+    };
+  }, [listSearch]);
 
   async function loadMore() {
     if (!canLoad || !cursor) return;
+    const mine = requestId.current;
     setLoadingMore(true);
     try {
       const page = await listMovements({
@@ -135,6 +151,9 @@ export default function MovementsPage() {
         search:        appliedSearch || undefined,
         cursor,
       });
+      // If the query moved on while this page was in flight, appending it would
+      // mix rows from two different searches.
+      if (mine !== requestId.current) return;
       setRows((prev) => [...prev, ...page.data]);
       setCursor(page.nextCursor);
     } finally {
@@ -183,8 +202,22 @@ export default function MovementsPage() {
               </option>
             ))}
           </select>
-          <Input placeholder="بحث: كود، اسم، ك / ص / م ق، أو مقاس مثل 3.75" value={listSearch} onChange={(e) => setListSearch(e.target.value)} className="max-w-xs border-2 border-primary/40 bg-background" />
-          {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => setListSearch("")}>مسح ✕</button>}
+          <Input
+            placeholder="بحث: كود، اسم، ك / ص / م ق، أو مقاس مثل 3.75"
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              // The box may sit inside a form one day; do not let Enter submit
+              // it or reload the page out from under the results.
+              e.preventDefault();
+              applyNow(listSearch);
+            }}
+            aria-label="بحث في حركات المخزون"
+            data-testid="mv-search"
+            className="max-w-xs border-2 border-primary/40 bg-background"
+          />
+          {listSearch && <button type="button" className="text-xs text-textSecondary hover:text-text" onClick={() => { setListSearch(""); applyNow(""); }} data-testid="mv-search-clear">مسح ✕</button>}
         </div>
       </div>
 
@@ -259,15 +292,8 @@ export default function MovementsPage() {
                           : m.productVariant.sku.colorNameEn}
                       </TD>
                       <TD dir="ltr">{m.productVariant.sku.code}</TD>
-                      <TD dir="ltr">
-                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                          <Badge variant={sizeBadge[m.boardSize.kind]}>
-                            {locale === "ar" ? m.boardSize.shortAr : m.boardSize.shortEn}
-                          </Badge>
-                          {/* The measurement always stays visible: «م ق» alone
-                              would not say which board actually moved. */}
-                          <span>{m.boardSize.meters} {locale === "ar" ? "م" : "m"}</span>
-                        </span>
+                      <TD dir="ltr" data-testid="mv-size">
+                        <BoardSizeCell boardSize={m.boardSize} locale={locale} />
                       </TD>
                       <TD dir="ltr" className="text-end font-medium">
                         {formatNumber(m.boardsQuantity, locale)}

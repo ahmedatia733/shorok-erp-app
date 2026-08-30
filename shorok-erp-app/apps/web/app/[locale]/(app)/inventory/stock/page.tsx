@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLocale } from "next-intl";
 import { Skeleton } from "../../../../../components/ui/skeleton";
 import { Alert } from "../../../../../components/ui/alert";
 import { Input } from "../../../../../components/ui/input";
@@ -8,6 +9,8 @@ import { Table, TBody, TD, TH, THead, TR } from "../../../../../components/ui/ta
 import { getInventoryBalance, type InventoryItem } from "../../../../../lib/payments-client";
 import { listBranches, type BranchSummary } from "../../../../../lib/inventory-client";
 import { money } from "../../../../../lib/line-calc";
+import type { AppLocale } from "../../../../../i18n";
+import { BoardSizeCell } from "../../../../../components/features/inventory/board-size-cell";
 
 function fmt(v: string | number, dec = 2) {
   return Number(v).toLocaleString("ar-EG", { minimumFractionDigits: dec, maximumFractionDigits: dec });
@@ -23,6 +26,7 @@ function calcCostValue(r: InventoryItem) {
 }
 
 export default function StockPage() {
+  const locale = useLocale() as AppLocale;
   const [branches, setBranches] = useState<BranchSummary[]>([]);
   const [branchId, setBranchId] = useState("");
   const [rows, setRows] = useState<InventoryItem[] | null>(null);
@@ -171,7 +175,7 @@ export default function StockPage() {
                           <TR key={r.productVariantId}>
                             <TD className="font-mono text-xs">{r.skuCode}</TD>
                             <TD>{r.skuNameAr}</TD>
-                            <TD>{fmt(r.sizeMetersPerBoard)}</TD>
+                            <TD data-testid="stockrep-size"><BoardSizeCell sizeMetersPerBoard={r.sizeMetersPerBoard} locale={locale} /></TD>
                             <TD className="font-medium">{fmt(r.boardsOnHand, 0)}</TD>
                             <TD className="font-medium">{fmt(r.metersOnHand)}</TD>
                             <TD className="text-blue-700" dir="ltr">{fmt(r.defaultSalePricePerMeter)}</TD>
