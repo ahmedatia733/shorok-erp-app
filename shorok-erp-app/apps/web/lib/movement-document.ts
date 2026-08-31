@@ -18,9 +18,35 @@ export interface MovementDocument {
   labelAr: string;
   /** Route to the source document, or null when it has no page of its own. */
   href: string | null;
+  /**
+   * A second line under the label, when the label alone would lose something
+   * worth keeping — the invoice number, once the customer's name takes the
+   * headline.
+   */
+  subLabel?: string | null;
+}
+
+/** What the API resolved about the sale behind a movement, when there is one. */
+export interface MovementSalesDocument {
+  invoiceNumber: string;
+  customerId: string;
+  customerCode: string;
+  customerName: string;
 }
 
 type Entry = { labelAr: string; route?: (id: string, locale: string) => string };
+
+/**
+ * The reference types that stand for a sale. Only these ever take a customer
+ * name for a headline — a purchase or a transfer keeps its own label whatever
+ * else is attached to the row.
+ */
+const SALES_INVOICE_REFS = new Set([
+  "sales_invoice",
+  "sales_invoice_cancel",
+  "sales_invoice_revision",
+  "sales_invoice_revision_reversal",
+]);
 
 const DOCUMENTS: Record<string, Entry> = {
   sales_invoice: { labelAr: "فاتورة مبيعات", route: (id, l) => `/${l}/sales/invoices/${id}` },
@@ -48,9 +74,23 @@ const DOCUMENTS: Record<string, Entry> = {
   CUTOVER_OPENING: { labelAr: "رصيد افتتاحي" },
 };
 
-/** The document behind a movement, or null when it carries no reference. */
+/**
+ * The document behind a movement, or null when it carries no reference.
+ *
+ * For a sale the headline is the customer, not the document kind: every sale row
+ * said «فاتورة مبيعات», which is true of all of them and therefore tells the
+ * reader nothing. The invoice number moves to a second line so the row stays
+ * auditable, and the link is untouched — the same href to the same invoice.
+ *
+ * The customer is only ever the one the API resolved from the invoice itself.
+ * When it could not resolve one, the generic label stands rather than a guess.
+ */
 export function movementDocument(
-  row: { referenceType?: string | null; referenceId?: string | null },
+  row: {
+    referenceType?: string | null;
+    referenceId?: string | null;
+    salesDocument?: MovementSalesDocument | null;
+  },
   locale: string,
 ): MovementDocument | null {
   if (!row.referenceType) return null;
@@ -58,8 +98,20 @@ export function movementDocument(
   // An unmapped type still names itself rather than disappearing — a movement
   // must never look sourceless just because a new document kind was added.
   if (!entry) return { labelAr: row.referenceType, href: null };
-  return {
-    labelAr: entry.labelAr,
-    href: entry.route && row.referenceId ? entry.route(row.referenceId, locale) : null,
-  };
+  const href = entry.route && row.referenceId ? entry.route(row.referenceId, locale) : null;
+
+  const sale = SALES_INVOICE_REFS.has(row.referenceType) ? row.salesDocument : null;
+  if (sale && sale.customerName.trim()) {
+    const invoiceWord = locale === "ar" ? "فاتورة" : "Invoice";
+    // A cancellation or a revision keeps saying so, otherwise the row would
+    // read as an ordinary sale to that customer.
+    const qualifier = row.referenceType === "sales_invoice" ? "" : ` — ${entry.labelAr}`;
+    return {
+      labelAr: sale.customerName,
+      href,
+      subLabel: `${invoiceWord} ${sale.invoiceNumber}${qualifier}`,
+    };
+  }
+
+  return { labelAr: entry.labelAr, href };
 }

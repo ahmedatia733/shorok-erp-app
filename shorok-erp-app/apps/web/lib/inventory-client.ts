@@ -9,6 +9,7 @@ import type {
   MovementType,
 } from "@shorok/shared";
 import { apiCall } from "./api-client";
+import type { MovementSalesDocument } from "./movement-document";
 
 export type { BranchStockProduct, BranchStockSize };
 
@@ -70,6 +71,12 @@ export interface MovementRow {
   };
   /** Derived by the API from the variant that moved; never stored. */
   boardSize: BoardSize;
+  /**
+   * The sale behind the movement, resolved by the API from the invoice itself.
+   * Null for anything that is not a sale, or when the invoice no longer
+   * resolves — the display falls back to the generic label rather than guessing.
+   */
+  salesDocument: MovementSalesDocument | null;
 }
 
 export interface Page<T> {

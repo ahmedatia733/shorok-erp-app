@@ -311,12 +311,21 @@ export default function MovementsPage() {
                           // and bounces the user to the login screen.
                           const doc = movementDocument(m, locale);
                           if (!doc) return "—";
-                          return doc.href ? (
+                          const label = doc.href ? (
                             <Link href={doc.href} className="text-blue-700 hover:underline">
                               {doc.labelAr}
                             </Link>
                           ) : (
                             doc.labelAr
+                          );
+                          if (!doc.subLabel) return label;
+                          // The customer takes the headline; the invoice number
+                          // stays underneath so the row is still auditable.
+                          return (
+                            <span className="flex flex-col leading-tight">
+                              <span data-testid="mv-doc-label">{label}</span>
+                              <span className="text-xs text-textSecondary" data-testid="mv-doc-sub">{doc.subLabel}</span>
+                            </span>
                           );
                         })()}
                       </TD>

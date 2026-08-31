@@ -85,4 +85,97 @@ describe("movementDocument", () => {
       expect(movementDocument({ referenceType: type, referenceId: "x" }, L)!.href).toBeNull();
     }
   });
+  /**
+   * A sale row used to read «فاتورة مبيعات», which is true of every sale and so
+   * identifies none of them. The customer takes the headline; the invoice
+   * number stays underneath; the link is untouched.
+   */
+  describe("a sale shows who it was to", () => {
+    const sale = {
+      invoiceNumber: "97",
+      customerId: "cust-1",
+      customerCode: "C-TEST",
+      customerName: "عميل تجريبي",
+    };
+
+    it("headlines the customer instead of the generic label", () => {
+      const d = movementDocument({ referenceType: "sales_invoice", referenceId: "inv-1", salesDocument: sale }, L);
+      expect(d!.labelAr).toBe("عميل تجريبي");
+      expect(d!.labelAr).not.toBe("فاتورة مبيعات");
+    });
+
+    it("keeps the invoice number available underneath", () => {
+      const d = movementDocument({ referenceType: "sales_invoice", referenceId: "inv-1", salesDocument: sale }, L);
+      expect(d!.subLabel).toBe("فاتورة 97");
+    });
+
+    it("keeps the very same link to the very same invoice", () => {
+      const plain = movementDocument({ referenceType: "sales_invoice", referenceId: "inv-1" }, L);
+      const named = movementDocument({ referenceType: "sales_invoice", referenceId: "inv-1", salesDocument: sale }, L);
+      expect(named!.href).toBe(plain!.href);
+      expect(named!.href).toBe("/ar/sales/invoices/inv-1");
+    });
+
+    it("says so when the movement is a cancellation or a revision", () => {
+      // Otherwise the row would read as an ordinary sale to that customer.
+      for (const [type, word] of [
+        ["sales_invoice_cancel", "إلغاء فاتورة مبيعات"],
+        ["sales_invoice_revision", "تعديل فاتورة مبيعات"],
+        ["sales_invoice_revision_reversal", "عكس تعديل فاتورة مبيعات"],
+      ] as const) {
+        const d = movementDocument({ referenceType: type, referenceId: "inv-1", salesDocument: sale }, L);
+        expect(d!.labelAr).toBe("عميل تجريبي");
+        expect(d!.subLabel).toBe(`فاتورة 97 — ${word}`);
+      }
+    });
+
+    it("uses English wording under the English locale", () => {
+      const d = movementDocument({ referenceType: "sales_invoice", referenceId: "inv-1", salesDocument: sale }, "en");
+      expect(d!.subLabel).toBe("Invoice 97");
+      expect(d!.labelAr).toBe("عميل تجريبي"); // the stored name, unchanged
+    });
+
+    it("does not carry one row's customer into the next", () => {
+      const a = movementDocument({ referenceType: "sales_invoice", referenceId: "inv-1", salesDocument: sale }, L);
+      const b = movementDocument(
+        { referenceType: "sales_invoice", referenceId: "inv-2", salesDocument: { ...sale, invoiceNumber: "98", customerName: "عميل آخر" } },
+        L,
+      );
+      expect(a!.labelAr).toBe("عميل تجريبي");
+      expect(b!.labelAr).toBe("عميل آخر");
+    });
+
+    it("falls back to the generic label when no customer resolved", () => {
+      for (const missing of [null, undefined]) {
+        const d = movementDocument({ referenceType: "sales_invoice", referenceId: "inv-1", salesDocument: missing }, L);
+        expect(d!.labelAr).toBe("فاتورة مبيعات");
+        expect(d!.subLabel).toBeUndefined();
+        expect(d!.href).toBe("/ar/sales/invoices/inv-1");
+      }
+    });
+
+    it("never renders an empty name as a heading", () => {
+      const d = movementDocument(
+        { referenceType: "sales_invoice", referenceId: "inv-1", salesDocument: { ...sale, customerName: "   " } },
+        L,
+      );
+      expect(d!.labelAr).toBe("فاتورة مبيعات");
+    });
+
+    it("leaves every other document type exactly as it was", () => {
+      for (const [type, label] of [
+        ["purchase_invoice", "فاتورة مشتريات"],
+        ["inventory_transfer", "تحويل مخزون"],
+        ["legacy_sales_return", "مردود بدون فاتورة"],
+        ["sales_return", "مردود فاتورة مبيعات"],
+        ["purchase_return", "مردود مشتريات"],
+        ["CUTOVER_OPENING", "رصيد افتتاحي"],
+      ] as const) {
+        // even if a stray salesDocument were attached, a non-sale keeps its label
+        const d = movementDocument({ referenceType: type, referenceId: "x", salesDocument: sale }, L);
+        expect(d!.labelAr).toBe(label);
+        expect(d!.subLabel).toBeUndefined();
+      }
+    });
+  });
 });
